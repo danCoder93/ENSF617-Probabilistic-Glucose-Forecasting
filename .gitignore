@@ -1,2 +1,3 @@
 # Ignore Data Folder
 data/
+.DS_Store
