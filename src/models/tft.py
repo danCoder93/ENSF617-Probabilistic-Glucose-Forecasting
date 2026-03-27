@@ -156,6 +156,7 @@ class TFTEmbedding(LightningModule):
             torch.nn.init.xavier_normal_(self.t_cont_k_embedding_vectors)
             torch.nn.init.zeros_(self.t_cont_k_embedding_bias)
         if self.t_cont_o_embedding_vectors is not None:
+            assert self.t_cont_o_embedding_bias is not None
             torch.nn.init.xavier_normal_(self.t_cont_o_embedding_vectors)
             torch.nn.init.zeros_(self.t_cont_o_embedding_bias)
         if self.t_tgt_embedding_vectors is not None:
@@ -163,23 +164,26 @@ class TFTEmbedding(LightningModule):
             torch.nn.init.zeros_(self.t_tgt_embedding_bias)
         if self.s_cat_embed is not None:
             for module in self.s_cat_embed:
-                module.reset_parameters()
+                if isinstance(module, nn.Embedding):
+                    module.reset_parameters()
         if self.t_cat_k_embed is not None:
             for module in self.t_cat_k_embed:
-                module.reset_parameters()
+                if isinstance(module, nn.Embedding):
+                    module.reset_parameters()
         if self.t_cat_o_embed is not None:
             for module in self.t_cat_o_embed:
-                module.reset_parameters()
+                if isinstance(module, nn.Embedding):
+                    module.reset_parameters()
 
 
     def _apply_embedding(self,
             cat: Optional[Tensor],
             cont: Optional[Tensor],
             cat_emb: Optional[nn.ModuleList], 
-            cont_emb: Tensor,
-            cont_bias: Tensor,
-            ) -> Tuple[Optional[Tensor], Optional[Tensor]]:
-        e_cat = torch.stack([embed(cat[...,i]) for i, embed in enumerate(cat_emb)], dim=-2) if cat is not None else None
+            cont_emb: Optional[Tensor],
+            cont_bias: Optional[Tensor],
+            ) -> Optional[Tensor]:
+        e_cat = torch.stack([embed(cat[...,i]) for i, embed in enumerate(cat_emb)], dim=-2) if cat is not None and cat_emb is not None else None
         if cont is not None:
             #the line below is equivalent to following einsums
             #e_cont = torch.einsum('btf,fh->bthf', cont, cont_emb)
@@ -359,7 +363,7 @@ class InterpretableMultiHeadAttention(LightningModule):
         attn_score = torch.matmul(q.permute((0, 2, 1, 3)), k.permute((0, 2, 3, 1)))
         attn_score.mul_(self.scale)
 
-        attn_score = attn_score + self._mask
+        attn_score = attn_score + cast(Tensor, self._mask)
 
         attn_prob = F.softmax(attn_score, dim=3)
         attn_prob = self.attn_dropout(attn_prob)
