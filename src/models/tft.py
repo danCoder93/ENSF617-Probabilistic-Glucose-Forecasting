@@ -448,13 +448,6 @@ class TFTBack(LightningModule):
 
         return out
 
-
-@dataclass
-class TFTConfig:
-    model : str
-    encoder_length: int
-
-
 class TemporalFusionTransformer(LightningModule):
     """ 
     Implementation of https://arxiv.org/abs/1912.09363 
