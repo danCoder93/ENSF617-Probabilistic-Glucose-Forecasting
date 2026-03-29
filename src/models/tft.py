@@ -23,6 +23,8 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.functional import glu, elu
+# LazyModules are initialized without any input tensor shape and is dynamically calculated by a dry run before any actual training. 
 from torch.nn.modules.lazy import LazyModuleMixin
 
 from torch import Tensor
@@ -53,7 +55,7 @@ class GLU(LightningModule):
 
     def forward(self, x: Tensor) -> Tensor:
         x = self.lin(x)
-        x = F.glu(x)
+        x = glu(x)
         return x
 
 class GRN(LightningModule):
@@ -79,7 +81,7 @@ class GRN(LightningModule):
         x = self.lin_a(a)
         if c is not None:
             x = x + self.lin_c(c).unsqueeze(1)
-        x = F.elu(x)
+        x = elu(x)
         x = self.lin_i(x)
         x = self.dropout(x)
         x = self.glu(x)
@@ -90,6 +92,9 @@ class GRN(LightningModule):
 
 # @torch.jit.script #Currently broken with autocast
 def fused_pointwise_linear_v1(x, a, b):
+    # squeeze adds one additional shape of 1 at the end '-1'
+    # This is so that it is easier for broadcasting and matrix compatible
+    # i.e. [b, t, f, 1] is the shape of x * [f, h] is the shape of a
     out = torch.mul(x.unsqueeze(-1), a)
     out = out + b
     return out
@@ -102,6 +107,9 @@ def fused_pointwise_linear_v2(x, a, b):
 
 
 class TFTEmbedding(LightningModule):
+    '''
+    # Internal vector embeddings for the tft models from inputs
+    '''
     def __init__(self, config, initialize_cont_params=True):
         # initialize_cont_params=False prevents form initializing parameters inside this class
         # so they can be lazily initialized in LazyEmbedding module
@@ -118,13 +126,21 @@ class TFTEmbedding(LightningModule):
 
         # There are 7 types of input:
         # 1. Static categorical
-        # 2. Static continuous
+        # 2. Static continuous - numbers
         # 3. Temporal known a priori categorical
         # 4. Temporal known a priori continuous
         # 5. Temporal observed categorical
         # 6. Temporal observed continuous
-        # 7. Temporal observed targets (time series obseved so far)
+        # 7. Temporal observed targets (time series obseved so far - Output)
 
+        # given the static categorical input lengths -> create vector embeddings in submodules
+        # Maintained via moduleList (pytorch compatible python list, where submodules can be executed not
+        # sequentially ) 
+        # example, there are 4 categorical features, with unique values, 3 in feature # 1, 4 in feature # 2 etc.
+        # then s_cat_inp_lens = [3, 4, 5, 17]
+        # s_cat_embed = module list[[embeddings for feature 1 - 3 rows and length (column) of hidden size], 
+        # [embeddings for feature 2 - 4 rows and length of hidden size]]
+        # we need to ensure that our hidden size is enough to hold our embeddings
         self.s_cat_embed = nn.ModuleList([
             nn.Embedding(n, self.hidden_size) for n in self.s_cat_inp_lens]) if self.s_cat_inp_lens else None
         self.t_cat_k_embed = nn.ModuleList([
@@ -149,6 +165,7 @@ class TFTEmbedding(LightningModule):
     def reset_parameters(self):
         if self.s_cont_embedding_vectors is not None:
             assert self.s_cont_embedding_bias is not None
+            # instead of just initializing weights by all 0 or infinity which will lead to gradient explosion/vanishing, initialize randomly using a xavier normal distribution
             torch.nn.init.xavier_normal_(self.s_cont_embedding_vectors)
             torch.nn.init.zeros_(self.s_cont_embedding_bias)
         if self.t_cont_k_embedding_vectors is not None:
@@ -176,18 +193,27 @@ class TFTEmbedding(LightningModule):
                     module.reset_parameters()
 
 
+    # One function that can take static, past observed, future known inputs and converts them into fixed size
+    # (hidden size) embeddings
     def _apply_embedding(self,
-            cat: Optional[Tensor],
-            cont: Optional[Tensor],
-            cat_emb: Optional[nn.ModuleList], 
-            cont_emb: Optional[Tensor],
-            cont_bias: Optional[Tensor],
+            cat: Optional[Tensor], # categorical values
+            cont: Optional[Tensor], # continuous values
+            cat_emb: Optional[nn.ModuleList], # categorical embeddings
+            cont_emb: Optional[Tensor], # continuous weights embeddings
+            cont_bias: Optional[Tensor], # continuous bias embeddings
             ) -> Optional[Tensor]:
+        # For each categorical variable:
+        #   - take its integer IDs from `cat[..., i]` across the batch (and time)
+        #   - pass them through its corresponding embedding layer to get vectors of size hidden_size
+        # Stack all variable embeddings along a new dimension (variables),
+        # resulting in a tensor of shape:
+        #   [batch, time, num_categorical_variables, hidden_size] (or without time for static inputs) 
         e_cat = torch.stack([embed(cat[...,i]) for i, embed in enumerate(cat_emb)], dim=-2) if cat is not None and cat_emb is not None else None
         if cont is not None:
             #the line below is equivalent to following einsums
             #e_cont = torch.einsum('btf,fh->bthf', cont, cont_emb)
             #e_cont = torch.einsum('bf,fh->bhf', cont, cont_emb)
+            # take scalars of continuous input value in a [batch, time, feature index] to a vector [batch, time, feature index, hidden size]
             e_cont = fused_pointwise_linear_v1(cont, cont_emb, cont_bias)
         else:
             e_cont = None
@@ -216,6 +242,8 @@ class TFTEmbedding(LightningModule):
         s_cat_inp = s_cat_inp[:,0,:] if s_cat_inp is not None else None
         s_cont_inp = s_cont_inp[:,0,:] if s_cont_inp is not None else None
 
+        # convert all three inputs into vector embeddings
+        #   static (s), temporal known inputs (t_known), temporal observed inputs (t_observed)
         s_inp = self._apply_embedding(s_cat_inp,
                                       s_cont_inp,
                                       self.s_cat_embed,
@@ -239,11 +267,18 @@ class TFTEmbedding(LightningModule):
         return s_inp, t_known_inp, t_observed_inp, t_observed_tgt
 
 class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
+    '''
+    Converts Continuous inputs to embeddings lazily i.e. allocate parameters to when see the real input
+    Create dynamically allocated parameters on input data in real time
+    '''
+
     cls_to_become = TFTEmbedding
 
     def __init__(self, config):
+        # Super constructor but 'initialize_cont_params=False' enforces to not initialize continuous params
         cast(Any, super()).__init__(config, initialize_cont_params=False)
 
+        # if data contains static continuous inputs
         if config.static_continuous_inp_size:
             self.s_cont_embedding_vectors = UninitializedParameter()
             self.s_cont_embedding_bias = UninitializedParameter()
@@ -251,6 +286,7 @@ class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
             self.s_cont_embedding_vectors = None
             self.s_cont_embedding_bias = None
 
+        # if data contains future known continuous values
         if config.temporal_known_continuous_inp_size:
             self.t_cont_k_embedding_vectors = UninitializedParameter()
             self.t_cont_k_embedding_bias = UninitializedParameter()
@@ -258,6 +294,7 @@ class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
             self.t_cont_k_embedding_vectors = None
             self.t_cont_k_embedding_bias = None
 
+        # if data contains past observed values
         if config.temporal_observed_continuous_inp_size:
             self.t_cont_o_embedding_vectors = UninitializedParameter()
             self.t_cont_o_embedding_bias = UninitializedParameter()
@@ -265,10 +302,14 @@ class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
             self.t_cont_o_embedding_vectors = None
             self.t_cont_o_embedding_bias = None
 
+        # target value embeddings
         self.t_tgt_embedding_vectors = UninitializedParameter()
         self.t_tgt_embedding_bias = UninitializedParameter()
 
+    # runs when see actual inputs
     def initialize_parameters(self, x):
+        # if any uninitized parameter in this class (and not None)
+        # get([field name], [default value if not found])
         if cast(Any, self).has_uninitialized_params():
             s_cont_inp = x.get('s_cont', None)
             t_cont_k_inp = x.get('k_cont', None)
@@ -278,6 +319,7 @@ class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
             if s_cont_inp is not None:
                 assert self.s_cont_embedding_vectors is not None
                 assert self.s_cont_embedding_bias is not None
+                # materialize i.e. populate/initialize parameters with shape ([each static continuous feature], [hidden size from config coming from TFT Embeddings])
                 self.s_cont_embedding_vectors.materialize((s_cont_inp.shape[-1], self.hidden_size))
                 self.s_cont_embedding_bias.materialize((s_cont_inp.shape[-1], self.hidden_size))
 
@@ -329,10 +371,10 @@ class StaticCovariateEncoder(LightningModule):
         variable_ctx, sparse_weights = self.vsn(x)
 
         # Context vectors:
-        # variable selection context
-        # enrichment context
-        # state_c context
-        # state_h context
+        # variable selection context - cs
+        # enrichment context - ce
+        # state_c context - cc - cell state
+        # state_h context - ch - hiddne state
         cs, ce, ch, cc = [m(variable_ctx) for m in self.context_grns]
 
         return cs, ce, ch, cc
@@ -427,7 +469,7 @@ class TFTBack(LightningModule):
         # Temporal self attention
         x, _ = self.attention(enriched)
 
-        # Don't compute hictorical quantiles
+        # Don't compute hictorical quantiles i.e. leave everything before the encoderLength index - 0 based
         x = x[:, self.encoder_length:, :]
         temporal_features = temporal_features[:, self.encoder_length:, :]
         enriched = enriched[:, self.encoder_length:, :]
@@ -460,7 +502,9 @@ class TemporalFusionTransformer(LightningModule):
 
         self.encoder_length = config.encoder_length #this determines from how distant past we want to use data from
 
+        # lazily, i.e. dynamic shape input tensor for converting inputs to tensors embeddings
         self.embedding = LazyEmbedding(config)
+
         self.static_encoder = StaticCovariateEncoder(config)
         self.TFTpart2 = torch.jit.script(TFTBack(config))
 
