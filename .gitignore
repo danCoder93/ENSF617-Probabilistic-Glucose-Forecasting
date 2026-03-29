@@ -1,6 +1,7 @@
 # Ignore Data Folder
 data/
+!/src/data
+Datasets/
+
 .DS_Store
 __pycache__
-
-Datasets/

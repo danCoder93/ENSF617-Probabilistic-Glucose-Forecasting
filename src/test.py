@@ -2,8 +2,8 @@ import argparse
 import csv
 from pathlib import Path
 
-from dataset_combiner import DatasetCombiner
-from dataset_downloader import DatasetDownloader
+from data.combiner import DatasetCombiner
+from data.downloader import DatasetDownloader
 
 
 AZT1D_URL = (
