@@ -36,6 +36,8 @@ from torch.nn import LayerNorm
 
 from grn import GLU, GRN
 
+from utils.config import TFTConfig
+
 # @torch.jit.script #Currently broken with autocast
 def fused_pointwise_linear_v1(x, a, b):
     # squeeze adds one additional shape of 1 at the end '-1'
@@ -440,11 +442,8 @@ class TemporalFusionTransformer(Module):
     """ 
     Implementation of https://arxiv.org/abs/1912.09363 
     """
-    def __init__(self, config):
+    def __init__(self, config: TFTConfig):
         super().__init__()
-
-        if hasattr(config, 'model'):
-            config = config.model
 
         self.encoder_length = config.encoder_length #this determines from how distant past we want to use data from
 
