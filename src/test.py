@@ -2,6 +2,7 @@ import argparse
 import csv
 from pathlib import Path
 
+from azt1d_dataset import WindowConfig, create_dataloaders
 from dataset_combiner import DatasetCombiner
 from dataset_downloader import DatasetDownloader
 
@@ -18,6 +19,13 @@ def summarize_csv(file_path: Path) -> tuple[int, list[str]]:
         headers = next(reader, [])
         row_count = sum(1 for _ in reader)
     return row_count, headers
+
+
+def describe_batch(batch: dict[str, object]) -> None:
+    print(f"Static covariates shape: {tuple(batch['static_covariates'].shape)}")
+    print(f"Past observed inputs shape: {tuple(batch['past_observed_inputs'].shape)}")
+    print(f"Future known inputs shape: {tuple(batch['future_known_inputs'].shape)}")
+    print(f"Target shape: {tuple(batch['target'].shape)}")
 
 
 if __name__ == "__main__":
@@ -70,6 +78,10 @@ if __name__ == "__main__":
 
     combiner = DatasetCombiner(dataset_dir=result.extracted_path, output_file=args.output)
     output_file = combiner.combine()
+    train_loader, val_loader, test_loader = create_dataloaders(
+        output_file,
+        config=WindowConfig(),
+    )
 
     row_count, headers = summarize_csv(output_file)
 
@@ -82,3 +94,10 @@ if __name__ == "__main__":
     print(f"Output file: {output_file}")
     print(f"Row count: {row_count}")
     print(f"Columns: {', '.join(headers)}")
+    print(f"Train windows: {len(train_loader.dataset)}")
+    print(f"Validation windows: {len(val_loader.dataset)}")
+    print(f"Test windows: {len(test_loader.dataset)}")
+
+    first_batch = next(iter(train_loader), None)
+    if first_batch is not None:
+        describe_batch(first_batch)
