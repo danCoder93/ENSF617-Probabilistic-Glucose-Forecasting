@@ -513,8 +513,18 @@ class FusedModelTrainer:
                 test_predictions=None,
             )
 
-        test_metrics = self.test(datamodule, ckpt_path=eval_ckpt_path)
-        test_predictions = self.predict_test(datamodule, ckpt_path=eval_ckpt_path)
+        # If the caller asked for `"best"` but the fit run did not produce a
+        # validation-ranked checkpoint, fall back to the current in-memory
+        # weights so the common "train, then test" workflow still completes.
+        resolved_eval_ckpt_path: CheckpointSelection = eval_ckpt_path
+        if eval_ckpt_path == "best" and not fit_artifacts.best_checkpoint_path:
+            resolved_eval_ckpt_path = None
+
+        test_metrics = self.test(datamodule, ckpt_path=resolved_eval_ckpt_path)
+        test_predictions = self.predict_test(
+            datamodule,
+            ckpt_path=resolved_eval_ckpt_path,
+        )
         return TrainingRunArtifacts(
             fit=fit_artifacts,
             test_metrics=test_metrics,

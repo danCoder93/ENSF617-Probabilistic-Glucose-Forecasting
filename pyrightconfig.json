@@ -1,4 +1,4 @@
 {
-  "include": ["src", "tests"],
-  "extraPaths": ["src"]
+  "include": ["src", "tests", "main.py", "defaults.py"],
+  "extraPaths": [".", "src"]
 }

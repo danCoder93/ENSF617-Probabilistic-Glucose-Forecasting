@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 pytest.importorskip("pytorch_lightning")
+from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 
 from data.datamodule import AZT1DDataModule
-from train import FusedModelTrainer
+from train import FitArtifacts, FusedModelTrainer
 from utils.config import Config, DataConfig, SnapshotConfig, TCNConfig, TFTConfig, TrainConfig
 
 
@@ -108,3 +110,59 @@ def test_checkpoint_alias_requires_fit_before_evaluation(
 
     with pytest.raises(RuntimeError, match="only available after fit"):
         trainer.test(datamodule, ckpt_path="best")
+
+
+def test_fit_test_predict_falls_back_to_in_memory_weights_without_best_checkpoint(
+    write_processed_csv,
+    build_data_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    csv_path = write_processed_csv()
+    data_config = build_data_config(csv_path)
+    datamodule = AZT1DDataModule(data_config)
+    trainer = FusedModelTrainer(_build_base_config(data_config))
+
+    fit_artifacts = FitArtifacts(
+        model=cast(object, object()),
+        runtime_config=_build_base_config(data_config),
+        trainer=cast(Trainer, object()),
+        has_validation_data=False,
+        has_test_data=True,
+        best_checkpoint_path="",
+    )
+    observed_ckpt_paths: list[object] = []
+
+    def fake_fit(
+        observed_datamodule: AZT1DDataModule,
+        *,
+        ckpt_path: str | Path | None = None,
+    ) -> FitArtifacts:
+        del observed_datamodule, ckpt_path
+        return fit_artifacts
+
+    def fake_test(
+        observed_datamodule: AZT1DDataModule,
+        *,
+        ckpt_path: object = "best",
+    ) -> list[dict[str, float]]:
+        del observed_datamodule
+        observed_ckpt_paths.append(ckpt_path)
+        return [{"test_loss": 0.5}]
+
+    def fake_predict_test(
+        observed_datamodule: AZT1DDataModule,
+        *,
+        ckpt_path: object = "best",
+    ) -> list[object]:
+        del observed_datamodule
+        observed_ckpt_paths.append(ckpt_path)
+        return []
+
+    monkeypatch.setattr(trainer, "fit", fake_fit)
+    monkeypatch.setattr(trainer, "test", fake_test)
+    monkeypatch.setattr(trainer, "predict_test", fake_predict_test)
+
+    artifacts = trainer.fit_test_predict(datamodule)
+
+    assert observed_ckpt_paths == [None, None]
+    assert artifacts.test_metrics == [{"test_loss": 0.5}]

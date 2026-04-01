@@ -16,6 +16,10 @@ The LightningModule integration work in `FusedModel` is summarized in
 The reusable Lightning training-wrapper layer in `src/train.py` is summarized in
 [docs/train_wrapper_summary.md](docs/train_wrapper_summary.md).
 
+The new top-level script/notebook entrypoint and shared defaults layer are
+summarized in
+[docs/entrypoint_defaults_summary.md](docs/entrypoint_defaults_summary.md).
+
 ## Testing
 
 ### Install dependencies
@@ -59,6 +63,34 @@ python tests/manual_data_smoke.py
 
 This is intentionally separate from the pytest suite because it may touch the
 network and real filesystem state.
+
+## Running The Full Pipeline
+
+You can now launch the full train/test workflow from either the script or the
+notebook at the repository root.
+
+Run the script:
+
+```bash
+python main.py --max-epochs 5 --batch-size 32
+```
+
+This entrypoint will:
+
+- add `src/` to the import path
+- download and preprocess AZT1D automatically if the processed CSV is missing
+- train the fused model
+- run held-out test evaluation when test windows exist
+- save a small run summary and optional test predictions under `artifacts/main_run/`
+
+Open the notebook:
+
+```bash
+jupyter notebook main.ipynb
+```
+
+The notebook uses the same shared workflow helpers from `main.py`, so script
+and notebook runs stay aligned.
 
 ### Google Colab
 
