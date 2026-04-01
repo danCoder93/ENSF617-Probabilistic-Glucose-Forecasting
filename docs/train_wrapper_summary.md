@@ -235,3 +235,17 @@ The behavioral intent stayed the same, but the architectural story improved:
 - config is no longer treated as a generic utility
 - runtime policy now lives in a purpose-specific config module
 - imports better reflect the true structure of the repository
+
+## Later Observability Package Update
+
+The training wrapper still imports observability through the same public module
+name:
+
+- `from observability import ...`
+
+Internally, though, observability now lives in a package under
+`src/observability/` rather than one oversized `src/observability.py` file.
+
+That follow-up refactor did not change the training wrapper's architectural
+role. It simply made the observability internals easier to navigate while
+preserving the wrapper's existing integration points.

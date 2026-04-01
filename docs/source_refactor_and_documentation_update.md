@@ -109,9 +109,9 @@ runtime boundaries rather than pretending the constructor always receives a
 
 ### Observability path normalization
 
-`src/observability.py` also received a cleanup pass so helper and callback code
-no longer treats path-like config values as guaranteed `Path` objects before
-they are normalized.
+The observability runtime and callback code also received a cleanup pass so
+path-like config values are no longer treated as guaranteed `Path` objects
+before they are normalized.
 
 This removed a class of Pylance/type-checker errors around:
 
@@ -168,7 +168,7 @@ implementation paths:
 - `src/models/fused_model.py`
 - `src/models/tft.py`
 - `src/train.py`
-- `src/observability.py`
+- `src/observability/`
 
 Those files now carry more detailed explanations around:
 
@@ -219,7 +219,7 @@ The most affected implementation files were:
 - `src/models/grn.py`
 - `src/models/nn_head.py`
 - `src/train.py`
-- `src/observability.py`
+- `src/observability/`
 - `src/data/datamodule.py`
 - `src/data/dataset.py`
 - `src/data/downloader.py`
@@ -256,6 +256,32 @@ The repository now has:
 - more explicit architecture boundaries
 - stronger in-code explanation in the complex files
 - and a source tree that is much easier to navigate and maintain than before
+
+## Later Observability Package Split
+
+After this cleanup wave, the observability implementation was also split from a
+single large module into a dedicated `src/observability/` package.
+
+That follow-up refactor preserved the public import surface but made the
+internal ownership boundaries clearer:
+
+- `runtime.py`
+  logger/profiler/artifact assembly
+- `logging_utils.py`
+  logger-aware helpers
+- `tensors.py`
+  tensor and nested-batch normalization
+- `callbacks.py`
+  observability callbacks and callback assembly
+- `reporting.py`
+  post-run CSV/HTML artifact generation
+
+This is consistent with the broader maintainability direction documented in
+this file:
+
+- explicit ownership boundaries
+- easier navigation through smaller modules
+- stronger in-source explanation in complex paths
 
 This refactor wave did not change the core modeling goals of the project, but
 it substantially improved the maintainability of the implementation that

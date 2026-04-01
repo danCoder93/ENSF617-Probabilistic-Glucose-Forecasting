@@ -23,7 +23,7 @@ ensuring that:
 
 - `src/config/`
 - `defaults.py`
-- `src/observability.py`
+- `src/observability/`
 - `src/train.py`
 - `src/models/fused_model.py`
 - `src/models/tft.py`
@@ -68,7 +68,7 @@ API documentation.
 Examples include:
 
 - repository-level design notes in `defaults.py`
-- observability-scope notes in `src/observability.py`
+- observability-scope notes in `src/observability/`
 - entrypoint disclaimers in `main.py`
 
 ## Class And Function Docstrings
@@ -196,7 +196,7 @@ That is why files like:
 - `src/models/tft.py`
 - `src/models/fused_model.py`
 - `src/train.py`
-- `src/observability.py`
+- `src/observability/`
 
 remain more heavily annotated than the simpler modules.
 

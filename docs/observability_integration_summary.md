@@ -56,7 +56,7 @@ than by collapsing responsibilities into one file.
 
 Files added:
 
-- `src/observability.py`
+- `src/observability/`
 - `docs/observability_integration_summary.md`
 
 Files updated:
@@ -121,17 +121,37 @@ Examples:
 - if `pynvml` is unavailable, GPU utilization percentage is omitted while
   memory telemetry still works
 
-## Main Architectural Addition: `src/observability.py`
+## Main Architectural Addition: `src/observability/`
 
-The new `src/observability.py` file centralizes the project-level
-observability logic so that:
+The current observability implementation now lives in a dedicated
+`src/observability/` package.
+
+This package centralizes the project-level observability logic so that:
 
 - observability configuration stays explicit
 - the training wrapper stays readable
 - model code does not have to own every logging concern
 - top-level workflow code can reuse the same artifact helpers
 
-This module is the main place where the repository now defines:
+The main package is intentionally split into focused modules:
+
+- `src/observability/__init__.py`
+  package-level facade that preserves convenient imports like
+  `from observability import setup_observability`
+- `src/observability/runtime.py`
+  runtime logger/profiler/artifact assembly
+- `src/observability/logging_utils.py`
+  shared logger-aware helper functions
+- `src/observability/tensors.py`
+  recursive tensor/batch/metadata normalization helpers
+- `src/observability/callbacks.py`
+  Lightning callbacks and callback assembly
+- `src/observability/reporting.py`
+  post-run prediction export and Plotly report generation
+- `src/observability/utils.py`
+  tiny shared filesystem/dependency helpers
+
+Taken together, the package is now the main place where the repository defines:
 
 - logger construction
 - profiler construction
@@ -139,6 +159,24 @@ This module is the main place where the repository now defines:
 - Lightning callbacks for runtime diagnostics
 - prediction-table export
 - Plotly report generation
+
+### Why the package split happened
+
+The original observability work was introduced as a single large module.
+
+That was useful during initial integration because it made it easy to land the
+feature set in one place. Later, once the code had grown to cover runtime
+setup, shared helpers, many callbacks, and post-run reporting, the single-file
+layout became harder to navigate safely.
+
+The package split was done to improve maintainability without changing the
+external calling pattern used by `src/train.py`, `main.py`, tests, or
+notebooks.
+
+In other words:
+
+- the implementation is now split internally
+- the public import story stays intentionally convenient
 
 ## Logger Strategy
 
@@ -285,10 +323,16 @@ The canonical import path is now:
 
 - `from config import ObservabilityConfig`
 
+The canonical observability package import path is still intentionally simple:
+
+- `from observability import setup_observability`
+- `from observability import build_observability_callbacks`
+- `from observability import export_prediction_table`
+
 ## Callback Stack
 
 The main observability callback assembly now lives in
-`build_observability_callbacks(...)` inside `src/observability.py`.
+`build_observability_callbacks(...)` inside `src/observability/callbacks.py`.
 
 ## TensorBoard And Model Visualization Coverage
 
