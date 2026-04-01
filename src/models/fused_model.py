@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 from dataclasses import replace
 
 from pytorch_lightning import LightningModule
 
 import torch
 from torch import Tensor
-from torch.nn import ModuleList
 
 from tcn import TCN
 from tft import TemporalFusionTransformer
@@ -13,59 +14,133 @@ from nn_head import NNHead
 
 from utils.config import Config
 
+
 class FusedModel(LightningModule):
-  '''
-  Fused model is a TCN-TFT hybrid that combines Temporal Convolution Network (TCN) for short term temporal patterns and Temporal Fusion Transformer (TFT) for observing long term temporal patterns
-  '''
-  def __init__(self, config: Config):
-    super(FusedModel).__init__()
+    """
+    Hybrid glucose forecaster with:
+    - three multi-kernel TCN branches for short/mid-range forecasts
+    - a TFT branch that refines those forecasts with known future inputs
+    """
 
-    self.config = config
+    def __init__(self, config: Config):
+        super().__init__()
 
-    # backbones
-    # TCN kernal - 3
-    self.tcn3 = TCN(config.tcn)
+        self.config = config
 
-    # TCN kernal - 5
-    config_tcn_5 = replace(config.tcn, kernel_size=5)
-    self.tcn5 = TCN(config_tcn_5)
+        tft_config = replace(
+            config.tft,
+            encoder_length=config.data.encoder_length,
+            example_length=config.data.encoder_length + config.data.prediction_length,
+            num_aux_future_features=3,
+        )
+        self.tft_config = tft_config
 
-    # TCN kernal - 7
-    config_tcn_7 = replace(config.tcn, kernal_size=7)
-    self.tcn7 = TCN(config_tcn_7)
+        self.num_known_cont = tft_config.temporal_known_continuous_inp_size
+        self.num_observed_cont = tft_config.temporal_observed_continuous_inp_size
+        self.num_target = max(1, tft_config.temporal_target_size)
+        self.num_known_cat = len(tft_config.temporal_known_categorical_inp_lens)
+        self.num_observed_cat = len(tft_config.temporal_observed_categorical_inp_lens)
 
-    # TFT
-    self.tft = TemporalFusionTransformer(config.tft)
+        tcn_input_size = self.num_observed_cont + self.num_target
+        tcn_config = replace(
+            config.tcn,
+            num_inputs=tcn_input_size,
+            prediction_length=config.data.prediction_length,
+            output_size=1,
+        )
 
-    # GRN
-    # Fused outputs from TCNs + TFT
-    self.grn = GRN(config.tft.hidden_size * 4, config.tft.hidden_size, dropout=config.tft.dropout)
+        self.tcn3 = TCN(tcn_config)
+        self.tcn5 = TCN(replace(tcn_config, kernel_size=5))
+        self.tcn7 = TCN(replace(tcn_config, kernel_size=7))
 
-    # NN head
-    self.fcn = NNHead(config)
+        self.tft = TemporalFusionTransformer(tft_config)
 
-  def forward(self, x: Tensor):
-    # TODO: figure out the static cat, static cont, obs cat, obs cont, future cat, future cont
+        fused_feature_size = len(tft_config.quantiles) + tft_config.num_aux_future_features
+        self.grn = GRN(
+            input_size=fused_feature_size,
+            hidden_size=tft_config.hidden_size,
+            output_size=tft_config.hidden_size,
+            dropout=tft_config.dropout,
+        )
+        self.fcn = NNHead(tft_config.hidden_size, len(tft_config.quantiles))
 
-    # TODO: pass only observed past cat, cont to the TCN
-    x_tcn_3 = self.tcn3(x)
-    x_tcn_5 = self.tcn5(x)
-    x_tcn_7 = self.tcn7(x)
+    def _split_encoder_continuous(self, encoder_continuous: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+        known_history = encoder_continuous[:, :, : self.num_known_cont]
+        observed_end = self.num_known_cont + self.num_observed_cont
+        observed_history = encoder_continuous[:, :, self.num_known_cont:observed_end]
+        target_history = encoder_continuous[:, :, observed_end:]
 
-    # pass x to the TFT
-    x_tft = self.tft(x)
+        if target_history.shape[-1] == 0:
+            observed_history = encoder_continuous[:, :, self.num_known_cont:-1]
+            target_history = encoder_continuous[:, :, -1:]
 
-    # combine the output of tft + tcns
-    x_final = torch.cat([x_tft, x_tcn_3, x_tcn_5, x_tcn_7])
+        return known_history, observed_history, target_history
 
-    # pass it to grn
-    x = self.grn(x_final)
+    def _split_encoder_categorical(self, encoder_categorical: Tensor) -> tuple[Tensor, Tensor]:
+        known_history = encoder_categorical[:, :, : self.num_known_cat]
+        observed_history = encoder_categorical[:, :, self.num_known_cat :]
+        return known_history, observed_history
 
-    # pass it to the fcn
-    x = self.fcn(x)
+    def _optional_group(self, tensor: Tensor) -> Tensor | None:
+        return None if tensor.shape[-1] == 0 else tensor
 
-    return x
+    def _build_tft_inputs(
+        self, batch: dict[str, Tensor], aux_future: Tensor
+    ) -> dict[str, Tensor | None]:
+        encoder_continuous = batch["encoder_continuous"]
+        encoder_categorical = batch["encoder_categorical"]
 
+        known_history_cont, observed_history_cont, target_history = self._split_encoder_continuous(
+            encoder_continuous
+        )
+        known_history_cat, observed_history_cat = self._split_encoder_categorical(
+            encoder_categorical
+        )
 
+        aux_history = torch.zeros(
+            aux_future.shape[0],
+            self.config.data.encoder_length,
+            aux_future.shape[-1],
+            device=aux_future.device,
+            dtype=aux_future.dtype,
+        )
 
+        known_continuous = torch.cat(
+            [
+                torch.cat([known_history_cont, aux_history], dim=-1),
+                torch.cat([batch["decoder_known_continuous"], aux_future], dim=-1),
+            ],
+            dim=1,
+        )
+        known_categorical = torch.cat(
+            [known_history_cat, batch["decoder_known_categorical"]],
+            dim=1,
+        )
 
+        return {
+            "s_cat": self._optional_group(batch["static_categorical"].unsqueeze(1)),
+            "s_cont": self._optional_group(batch["static_continuous"].unsqueeze(1)),
+            "k_cat": self._optional_group(known_categorical),
+            "k_cont": known_continuous,
+            "o_cat": self._optional_group(observed_history_cat),
+            "o_cont": self._optional_group(observed_history_cont),
+            "target": target_history,
+        }
+
+    def forward(self, batch: dict[str, Tensor]) -> Tensor:
+        _, observed_history_cont, target_history = self._split_encoder_continuous(
+            batch["encoder_continuous"]
+        )
+        tcn_inputs = torch.cat([observed_history_cont, target_history], dim=-1)
+
+        tcn3_forecast = self.tcn3(tcn_inputs)
+        tcn5_forecast = self.tcn5(tcn_inputs)
+        tcn7_forecast = self.tcn7(tcn_inputs)
+
+        aux_future = torch.cat([tcn3_forecast, tcn5_forecast, tcn7_forecast], dim=-1)
+        tft_inputs = self._build_tft_inputs(batch, aux_future)
+        tft_output = self.tft(tft_inputs)
+
+        fused_features = torch.cat([tft_output, aux_future], dim=-1)
+        fused_features = self.grn(fused_features)
+        return self.fcn(fused_features)

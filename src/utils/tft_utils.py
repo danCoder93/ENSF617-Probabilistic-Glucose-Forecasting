@@ -38,6 +38,9 @@ from collections import namedtuple, OrderedDict
 
 import numpy as np
 
+NP_FLOAT32 = getattr(np, "float32", float)
+NP_INT64 = getattr(np, "int64", int)
+
 class DataTypes(enum.IntEnum):
     """Defines numerical types of each column."""
     CONTINUOUS = 0
@@ -56,8 +59,8 @@ class InputTypes(enum.IntEnum):
 
 FeatureSpec = namedtuple('FeatureSpec', ['name', 'feature_type', 'feature_embed_type'])
 DTYPE_MAP = {
-        DataTypes.CONTINUOUS : np.float32,
-        DataTypes.CATEGORICAL : np.int64,
+        DataTypes.CONTINUOUS : NP_FLOAT32,
+        DataTypes.CATEGORICAL : NP_INT64,
         DataTypes.DATE:'datetime64[ns]',
         DataTypes.STR: str
         }

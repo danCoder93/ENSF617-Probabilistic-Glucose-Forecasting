@@ -1,24 +1,18 @@
 import torch.nn as nn
-from torch.nn import Module
-from torch.nn.functional import relu
-
 from torch import Tensor
 
-class NNHead(Module):
-  '''
-  Fully connected Neural Network (FCN) head
-  '''
 
-  def __init__(self, config):
-    super(NNHead).__init__()
+class NNHead(nn.Module):
+    """Lightweight readout head for horizon-wise fused features."""
 
-    # Layer 1
-    self.ln_1 = nn.LazyLinear(64)
-    # Layer 2
-    self.ln_2 = nn.Linear(64, 1)
-  
-  def forward(self, x: Tensor):
-    x = relu(self.ln_1(x))
-    x = relu(self.ln_2(x))
-    return x
+    def __init__(self, input_size: int, output_size: int):
+        super().__init__()
+        hidden_size = max(input_size // 2, output_size)
+        self.network = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, output_size),
+        )
 
+    def forward(self, x: Tensor) -> Tensor:
+        return self.network(x)

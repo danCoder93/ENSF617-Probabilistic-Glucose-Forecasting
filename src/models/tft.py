@@ -402,7 +402,8 @@ class TFTBack(Module):
         history, state = self.history_encoder(historical_features, (ch, cc))
         future_features, _ = self.future_vsn(future_inputs, cs)
         future, _ = self.future_encoder(future_features, state)
-        torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         # skip connection
         input_embedding = torch.cat([historical_features, future_features], dim=1)
