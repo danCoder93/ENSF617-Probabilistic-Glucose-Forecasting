@@ -14,18 +14,20 @@ from __future__ import annotations
 # than a late reconciliation layer over already-decoded TFT quantiles.
 
 from dataclasses import replace
+from typing import Any, Mapping
 
 from pytorch_lightning import LightningModule
 
 import torch
 from torch import Tensor
+from torch.optim import Adam, AdamW, Optimizer
 
-from tcn import TCN
-from tft import TemporalFusionTransformer
-from grn import GRN
-from nn_head import NNHead
+from models.tcn import TCN
+from models.tft import TemporalFusionTransformer
+from models.grn import GRN
+from models.nn_head import NNHead
 
-from utils.config import Config
+from utils.config import Config, config_from_dict, config_to_dict
 
 
 class FusedModel(LightningModule):
@@ -43,10 +45,63 @@ class FusedModel(LightningModule):
     5. Project the fused hidden representation to final quantile outputs.
     """
 
-    def __init__(self, config: Config):
+    def __init__(
+        self,
+        config: Config | Mapping[str, Any],
+        *,
+        learning_rate: float = 1e-3,
+        weight_decay: float = 0.0,
+        optimizer_name: str = "adam",
+    ) -> None:
         super().__init__()
 
+        # Accept either the typed project config or its serialized checkpoint
+        # form. This keeps normal code paths strongly typed while allowing
+        # Lightning's `load_from_checkpoint(...)` to reconstruct the model from
+        # the plain hyperparameter dictionary saved in the checkpoint.
+        config = self._coerce_config(config)
         self.config = config
+        # These optimization hyperparameters now live on the model object
+        # instead of being deferred to an external training loop for two
+        # reasons:
+        #
+        # 1. This file is intentionally being strengthened into a true
+        #    LightningModule, following the Lightning tutorial pattern where the
+        #    model owns its optimizer and loss-related training behavior.
+        # 2. Keeping the defaults here makes the future `train.py` much thinner.
+        #    The trainer/bootstrap layer will only need to instantiate the
+        #    model and hand it to Lightning's `Trainer`, rather than rebuilding
+        #    optimizer configuration logic in a second location.
+        #
+        # In other words, these are "model-side training semantics" rather than
+        # "experiment orchestration"; that makes them a good fit for the module
+        # itself.
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.optimizer_name = optimizer_name.lower()
+        # `save_hyperparameters(...)` is a Lightning convention that stores
+        # constructor values inside checkpoints/logs. That gives us a useful
+        # paper trail when resuming runs later: the saved model can tell us
+        # which optimizer settings it expected without requiring a separate
+        # experiment notebook or manually maintained metadata file.
+        #
+        # The top-level `Config` is serialized to a plain nested dictionary
+        # first rather than saved as the dataclass object directly. That extra
+        # step is deliberate:
+        # - Lightning checkpoints should remain easy to reload in notebook and
+        #   Colab environments
+        # - plain dict/list/str/number payloads are much more portable than
+        #   custom Python objects with enums, Paths, and namedtuples inside
+        # - `load_from_checkpoint(...)` can then call this constructor with the
+        #   saved payload and let `_coerce_config(...)` rebuild the typed config
+        self.save_hyperparameters(
+            {
+                "config": config_to_dict(config),
+                "learning_rate": learning_rate,
+                "weight_decay": weight_decay,
+                "optimizer_name": self.optimizer_name,
+            }
+        )
 
         # The top-level config contains both declarative architecture settings
         # and data-dependent values that are only fully known once the
@@ -98,6 +153,20 @@ class FusedModel(LightningModule):
         # TFT handles the future-aware side of the problem: known decoder inputs,
         # static context, and richer temporal reasoning over the full
         # encoder+decoder example axis.
+        #
+        # Lightning-specific lifecycle note:
+        # `TemporalFusionTransformer` still uses a lazily materialized embedding
+        # block for some continuous-input parameters. In plain PyTorch that can
+        # be fine if the first real forward pass happens before optimizer
+        # construction, but Lightning expects `configure_optimizers()` to work
+        # against a fully materialized parameter set.
+        #
+        # To keep the model Lightning-safe, we proactively initialize any lazy
+        # TFT embedding parameters here using a tiny synthetic batch whose
+        # feature widths are derived from the already-bound config. This turns
+        # optimizer setup into a deterministic constructor-time property instead
+        # of relying on a later first batch.
+        self._materialize_tft_lazy_parameters()
 
         fused_feature_size = (
             tft_config.hidden_size
@@ -124,6 +193,90 @@ class FusedModel(LightningModule):
             feedforward_size=tft_config.hidden_size * 2,
             num_blocks=2,
             dropout=tft_config.dropout,
+        )
+        # Cache the quantiles once on the fused model so every training/eval
+        # helper reads from the exact same ordered tuple:
+        # - the final head width is derived from it
+        # - the pinball loss uses it
+        # - the point-forecast extraction picks from it
+        #
+        # Centralizing this here avoids subtle bugs where the model predicts one
+        # quantile order but the loss or metrics accidentally assume another.
+        self.quantiles = tuple(float(quantile) for quantile in tft_config.quantiles)
+
+    @staticmethod
+    def _coerce_config(config: Config | Mapping[str, Any]) -> Config:
+        # Constructor compatibility boundary:
+        # - local training code will usually pass a real `Config`
+        # - checkpoint reloads pass the serialized hyperparameter payload back
+        #   into `__init__`
+        #
+        # Rehydrating here keeps the rest of the class simple because all
+        # downstream logic can continue assuming `self.config` is strongly typed.
+        if isinstance(config, Config):
+            return config
+        return config_from_dict(config)
+
+    def _synthetic_tft_input_group(
+        self,
+        *,
+        time_steps: int,
+        feature_size: int,
+        dtype: torch.dtype = torch.float32,
+    ) -> Tensor | None:
+        # Helper for the lazy-parameter dry run above.
+        #
+        # Returning `None` for zero-width groups matches the real grouped TFT
+        # input contract and avoids inventing fake tensors for feature families
+        # that do not exist in the current data/schema binding.
+        if feature_size == 0:
+            return None
+        return torch.zeros(1, time_steps, feature_size, dtype=dtype)
+
+    def _materialize_tft_lazy_parameters(self) -> None:
+        embedding = getattr(self.tft, "embedding", None)
+        has_uninitialized_params = getattr(embedding, "has_uninitialized_params", None)
+        initialize_parameters = getattr(embedding, "initialize_parameters", None)
+
+        # If the embedding is already eagerly initialized, or if the TFT
+        # implementation changes in the future to remove the lazy path
+        # altogether, there is nothing to do here.
+        if not callable(has_uninitialized_params) or not has_uninitialized_params():
+            return
+        if not callable(initialize_parameters):
+            raise RuntimeError(
+                "TFT embedding reports uninitialized parameters but does not expose "
+                "an initialization hook."
+            )
+
+        # The TFT lazy embedding only needs feature-width information to
+        # materialize its continuous-embedding matrices. Those widths are now
+        # known from `tft_config`, so a one-item synthetic batch is sufficient.
+        #
+        # Shapes mirror the grouped contract used at runtime:
+        # - `s_cont`: [batch, 1, num_static_cont]
+        # - `k_cont`: [batch, encoder + horizon, num_known_cont]
+        # - `o_cont`: [batch, encoder, num_observed_cont]
+        # - `target`: [batch, encoder, num_target]
+        initialize_parameters(
+            {
+                "s_cont": self._synthetic_tft_input_group(
+                    time_steps=1,
+                    feature_size=self.tft_config.static_continuous_inp_size,
+                ),
+                "k_cont": self._synthetic_tft_input_group(
+                    time_steps=self.tft_config.example_length,
+                    feature_size=self.num_known_cont,
+                ),
+                "o_cont": self._synthetic_tft_input_group(
+                    time_steps=self.tft_config.encoder_length,
+                    feature_size=self.num_observed_cont,
+                ),
+                "target": self._synthetic_tft_input_group(
+                    time_steps=self.tft_config.encoder_length,
+                    feature_size=self.num_target,
+                ),
+            }
         )
 
     def _split_encoder_continuous(self, encoder_continuous: Tensor) -> tuple[Tensor, Tensor, Tensor]:
@@ -263,3 +416,237 @@ class FusedModel(LightningModule):
         # the final MLP head converts that fused hidden state into quantiles.
         fused_features = self.grn(fused_features)
         return self.fcn(fused_features)
+
+    def _target_tensor(self, batch: dict[str, Any]) -> Tensor:
+        target = batch["target"].float()
+        if target.ndim == 3 and target.shape[-1] == 1:
+            # Some callers may keep the target in an explicit final channel
+            # dimension, e.g. [batch, horizon, 1], because that is a common
+            # convention for univariate sequence targets. The loss and metrics
+            # below operate on [batch, horizon], so we normalize the shape here
+            # once rather than scattering squeeze logic across training,
+            # validation, and test code paths.
+            target = target.squeeze(-1)
+        if target.ndim != 2:
+            raise ValueError(
+                "Expected batch['target'] to have shape [batch, horizon] or "
+                f"[batch, horizon, 1], got {tuple(target.shape)}."
+            )
+        return target
+
+    def quantile_loss(self, predictions: Tensor, target: Tensor) -> Tensor:
+        # This is the standard pinball loss used for quantile regression.
+        #
+        # Supervision contract:
+        # - the final layer emits multiple quantiles at each horizon step
+        # - the meaning and ordering of those channels is part of the model's
+        #   output contract
+        # - this method is therefore the canonical place where those output
+        #   channels are interpreted during optimization
+        #
+        # Shape contract:
+        # - predictions: [batch, horizon, num_quantiles]
+        # - target:      [batch, horizon]
+        #
+        # The target is broadcast across the quantile axis so each configured
+        # quantile receives its own asymmetric penalty:
+        # - under-predicting a high quantile is penalized strongly
+        # - over-predicting a low quantile is penalized strongly
+        #
+        # That asymmetry is what makes the outputs learn different points of the
+        # predictive distribution instead of collapsing toward the same mean.
+        if predictions.ndim != 3:
+            raise ValueError(
+                "Expected predictions to have shape [batch, horizon, quantiles], "
+                f"got {tuple(predictions.shape)}."
+            )
+        if predictions.shape[-1] != len(self.quantiles):
+            raise ValueError(
+                "Prediction quantile dimension does not match configured quantiles: "
+                f"{predictions.shape[-1]} != {len(self.quantiles)}."
+            )
+
+        quantiles = predictions.new_tensor(self.quantiles).view(1, 1, -1)
+        errors = target.unsqueeze(-1) - predictions
+        return torch.maximum((quantiles - 1.0) * errors, quantiles * errors).mean()
+
+    def point_prediction(self, predictions: Tensor, *, quantile: float = 0.5) -> Tensor:
+        # The fused model is trained probabilistically, but MAE/RMSE are easier
+        # to interpret on a single deterministic forecast. The most natural
+        # choice is the median (0.5 quantile), so this helper selects the
+        # closest configured quantile channel and exposes it as the "point
+        # forecast" for human-readable metrics.
+        #
+        # We intentionally select the *closest* configured quantile rather than
+        # requiring that 0.5 be present exactly. That keeps the method usable if
+        # a future experiment changes the quantile set to something like
+        # (0.1, 0.4, 0.9) while still wanting one representative point curve for
+        # logging or visualization.
+        quantile_index = min(
+            range(len(self.quantiles)),
+            key=lambda index: abs(self.quantiles[index] - quantile),
+        )
+        return predictions[..., quantile_index]
+
+    def _log_metrics(
+        self,
+        stage: str,
+        *,
+        loss: Tensor,
+        mae: Tensor,
+        rmse: Tensor,
+        batch_size: int,
+    ) -> None:
+        # Direct `training_step(...)` calls in unit tests do not attach a
+        # Trainer. In that case we still want the method to remain usable for
+        # smoke tests and loss verification, so logging becomes a no-op.
+        if getattr(self, "_trainer", None) is None:
+            return
+
+        on_step = stage == "train"
+        # Logging policy:
+        # - training metrics are logged both per step and per epoch so Lightning
+        #   can show near-real-time progress while still aggregating epoch-level
+        #   summaries
+        # - validation/test metrics are logged on epoch only to avoid noisy,
+        #   harder-to-read progress output
+        #
+        # `batch_size` is passed explicitly so Lightning can perform weighted
+        # reductions correctly when batch sizes vary, which becomes important
+        # once the real training loop is added.
+        #
+        # `sync_dist` is enabled for validation/test metrics so distributed
+        # Lightning runs report globally reduced values instead of one process's
+        # local shard.
+        #
+        # We leave `train_*` metrics unsynchronized on purpose:
+        # - per-step training logs are primarily for local progress feedback
+        # - synchronizing every training step across devices can add overhead
+        # - the higher-value correctness issue is on validation/test, where the
+        #   reported metrics are commonly treated as run-level results
+        self.log(
+            f"{stage}_loss",
+            loss,
+            prog_bar=True,
+            on_step=on_step,
+            on_epoch=True,
+            batch_size=batch_size,
+            sync_dist=stage != "train",
+        )
+        self.log(
+            f"{stage}_mae",
+            mae,
+            prog_bar=stage != "train",
+            on_step=on_step,
+            on_epoch=True,
+            batch_size=batch_size,
+            sync_dist=stage != "train",
+        )
+        self.log(
+            f"{stage}_rmse",
+            rmse,
+            prog_bar=False,
+            on_step=on_step,
+            on_epoch=True,
+            batch_size=batch_size,
+            sync_dist=stage != "train",
+        )
+
+    def _shared_step(self, batch: dict[str, Any], stage: str) -> Tensor:
+        # Lightning encourages the train/val/test steps to stay small and to
+        # share as much logic as possible. This helper is the fused-model
+        # equivalent of the tutorial's "compute predictions, compute loss, log
+        # metrics" pattern.
+        #
+        # Centralizing the logic here ensures:
+        # - the three stages supervise the exact same forecast tensor in the
+        #   exact same way
+        # - future metric changes are made once instead of three times
+        # - the public step methods remain simple enough that they are easy to
+        #   scan in `train.py` or in notebook experiments
+        predictions = self(batch)
+        target = self._target_tensor(batch)
+        loss = self.quantile_loss(predictions, target)
+
+        # Quantile training objective + point-metric reporting is a deliberate
+        # split of responsibilities:
+        # - optimization uses the full probabilistic forecast
+        # - human-facing summary metrics use one representative curve
+        #
+        # This preserves the probabilistic nature of the model while still
+        # giving us MAE/RMSE values that are intuitive to compare across runs.
+        point_forecast = self.point_prediction(predictions)
+        mae = torch.mean(torch.abs(point_forecast - target))
+        rmse = torch.sqrt(torch.mean(torch.square(point_forecast - target)))
+
+        self._log_metrics(
+            stage,
+            loss=loss,
+            mae=mae,
+            rmse=rmse,
+            batch_size=target.shape[0],
+        )
+        return loss
+
+    def training_step(self, batch: dict[str, Any], batch_idx: int) -> Tensor:
+        del batch_idx
+        # Returning the loss tensor is the Lightning contract: the Trainer will
+        # take care of backward propagation, optimizer stepping, gradient
+        # accumulation, mixed precision, multi-device reduction, and the rest of
+        # the boilerplate that the tutorial is trying to remove from user code.
+        return self._shared_step(batch, "train")
+
+    def validation_step(self, batch: dict[str, Any], batch_idx: int) -> Tensor:
+        del batch_idx
+        # Validation reuses the same supervision path but leaves optimization to
+        # Lightning. The explicit method still matters because Lightning uses it
+        # as the hook boundary for validation scheduling and metric collection.
+        return self._shared_step(batch, "val")
+
+    def test_step(self, batch: dict[str, Any], batch_idx: int) -> Tensor:
+        del batch_idx
+        # Test follows the same pattern as validation so the model's reported
+        # held-out performance is computed with exactly the same loss/metric
+        # semantics used during development.
+        return self._shared_step(batch, "test")
+
+    def predict_step(
+        self,
+        batch: dict[str, Any],
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> Tensor:
+        del batch_idx, dataloader_idx
+        # Prediction intentionally returns the raw quantile tensor rather than a
+        # median-only projection. That keeps inference maximally informative:
+        # callers can compute intervals, extract the median, or evaluate
+        # calibration later without rerunning the model.
+        return self(batch)
+
+    def configure_optimizers(self) -> Optimizer:
+        # The optimizer is configured inside the LightningModule because that is
+        # the Lightning design boundary:
+        # - the module knows which parameters should be trained
+        # - the module owns the learning-rate / weight-decay defaults attached
+        #   to this model family
+        # - the outer Trainer should not need to reconstruct optimizer logic
+        #
+        # We support a very small surface on purpose (`adam`, `adamw`):
+        # enough flexibility for common experiments, but not a sprawling API
+        # before the project has a demonstrated need for it.
+        optimizer_map = {
+            "adam": Adam,
+            "adamw": AdamW,
+        }
+        optimizer_class = optimizer_map.get(self.optimizer_name)
+        if optimizer_class is None:
+            supported = ", ".join(sorted(optimizer_map))
+            raise ValueError(
+                f"Unsupported optimizer '{self.optimizer_name}'. Supported values: {supported}."
+            )
+
+        return optimizer_class(
+            self.parameters(),
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay,
+        )

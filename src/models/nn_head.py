@@ -20,7 +20,7 @@ class ResidualMLPBlock(nn.Module):
     layout: every horizon step is processed independently, but more deeply than
     with a single hidden linear layer.
 
-    Why this block is useful here:
+    Architectural role:
     - the upstream `GRN` has already fused the branch representations into one
       shared hidden state per horizon step
     - the final head still benefits from a small amount of nonlinear

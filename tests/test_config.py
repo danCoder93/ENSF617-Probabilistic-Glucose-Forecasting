@@ -13,7 +13,14 @@ from typing import Any, cast
 
 import pytest
 
-from utils.config import Config, DataConfig, TCNConfig, TFTConfig
+from utils.config import (
+    Config,
+    DataConfig,
+    TCNConfig,
+    TFTConfig,
+    config_from_dict,
+    config_to_dict,
+)
 from utils.tft_utils import DataTypes, FeatureSpec, InputTypes
 
 
@@ -186,3 +193,41 @@ def test_top_level_config_groups_data_tft_and_tcn_contracts() -> None:
     assert isinstance(config.data, DataConfig)
     assert isinstance(config.tft, TFTConfig)
     assert isinstance(config.tcn, TCNConfig)
+
+
+def test_top_level_config_round_trips_through_checkpoint_friendly_dict() -> None:
+    features = _feature_specs(
+        FeatureSpec("subject_id", InputTypes.STATIC, DataTypes.CATEGORICAL),
+        FeatureSpec("hour", InputTypes.KNOWN, DataTypes.CONTINUOUS),
+        FeatureSpec("glucose_mg_dl", InputTypes.TARGET, DataTypes.CONTINUOUS),
+    )
+
+    original = Config(
+        data=DataConfig(
+            dataset_url=None,
+            features=features,
+            raw_dir=Path("custom/raw"),
+            processed_dir=Path("custom/processed"),
+            num_workers=0,
+            pin_memory=False,
+            persistent_workers=False,
+        ),
+        tft=TFTConfig(
+            features=features,
+            static_categorical_inp_lens=(5,),
+            encoder_length=24,
+            example_length=30,
+        ),
+        tcn=TCNConfig(
+            num_inputs=2,
+            num_channels=(8, 16),
+            dilations=(1, 2),
+        ),
+    )
+
+    payload = config_to_dict(original)
+    restored = config_from_dict(payload)
+
+    assert payload["data"]["raw_dir"] == "custom/raw"
+    assert payload["tft"]["features"][0]["feature_type"] == "STATIC"
+    assert restored == original

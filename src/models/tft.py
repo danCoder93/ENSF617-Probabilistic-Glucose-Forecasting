@@ -37,13 +37,32 @@ from torch.nn.modules.lazy import LazyModuleMixin
 
 from torch import Tensor
 from torch.nn.parameter import UninitializedParameter
-from typing import Any, Dict, Tuple, Optional, List, cast
+from typing import Any, Dict, Tuple, Optional, List, Mapping, cast
 
 from torch.nn import LayerNorm
 
-from grn import GLU, GRN
+from models.grn import GLU, GRN
 
 from utils.config import TFTConfig
+
+# The grouped TFT input contract intentionally allows some feature groups to be
+# absent at runtime. For example:
+# - a dataset may have no static categorical variables
+# - a particular experiment may have no observed categorical history
+# - the fused model may pass zero-width tensors for missing groups and convert
+#   them to `None` before calling TFT
+#
+# Using a read-only `Mapping[str, Optional[Tensor]]` instead of `Dict[str,
+# Tensor]` captures that reality more accurately than the earlier type:
+# - `Mapping` is the right abstraction because TFT only reads from the input; it
+#   does not mutate the caller's dictionary
+# - `Optional[Tensor]` matches the actual runtime contract used throughout the
+#   fused model, where "missing feature group" is represented explicitly as
+#   `None`
+#
+# This also resolves the Pylance invariance issue triggered when
+# `FusedModel._build_tft_inputs(...)` returned `dict[str, Tensor | None]`.
+TFTInputBatch = Mapping[str, Optional[Tensor]]
 
 # @torch.jit.script #Currently broken with autocast
 def fused_pointwise_linear_v1(x, a, b):
@@ -195,7 +214,7 @@ class TFTEmbedding(Module):
         else:
             return None
 
-    def forward(self, x: Dict[str, Tensor]):
+    def forward(self, x: TFTInputBatch):
         # Pull apart the semantic batch groups that FusedModel assembled for
         # TFT. Every key corresponds to one role in the shared schema.
         s_cat_inp = x.get('s_cat', None)
@@ -204,7 +223,17 @@ class TFTEmbedding(Module):
         t_cont_k_inp = x.get('k_cont', None)
         t_cat_o_inp = x.get('o_cat', None)
         t_cont_o_inp = x.get('o_cont', None)
+        # `target` is the one temporal group that TFT always requires on the
+        # encoder side: it represents the observed target history used to build
+        # the historical input stream. Unlike optional covariate groups, this is
+        # not something the model can sensibly skip.
         t_tgt_obs = x['target'] # Has to be present
+        if t_tgt_obs is None:
+            # Keep the runtime failure explicit even though the type alias now
+            # allows optional values. The alias reflects the *overall* grouped
+            # contract, but this particular key is semantically mandatory for
+            # TFT's historical-target path.
+            raise ValueError("TFT input batch must include a non-null 'target' tensor.")
 
         # Static inputs are expected to be equal for all timesteps
         # For memory efficiency there is no assert statement
@@ -573,7 +602,11 @@ class TemporalFusionTransformer(Module):
         self.static_encoder = StaticCovariateEncoder(config)
         self.TFTpart2 = torch.jit.script(TFTBack(config))
 
-    def forward_with_features(self, x: Dict[str, Tensor]) -> Tuple[Tensor, Tensor]:
+    def forward_with_features(self, x: TFTInputBatch) -> Tuple[Tensor, Tensor]:
+        # Accept the same optional-group contract as `forward(...)` because the
+        # fused model uses this latent-feature path directly. Keeping the two
+        # signatures aligned prevents the feature-extraction interface from
+        # drifting out of sync with the standard TFT inference interface.
         # Step 1: embed grouped raw inputs into per-variable hidden vectors.
         s_inp, t_known_inp, t_observed_inp, t_observed_tgt = self.embedding(x)
 
@@ -596,13 +629,13 @@ class TemporalFusionTransformer(Module):
         future_inputs = t_known_inp[:, self.encoder_length:]
         return self.TFTpart2(historical_inputs, cs, ch, cc, ce, future_inputs)
 
-    def forward_features(self, x: Dict[str, Tensor]) -> Tensor:
+    def forward_features(self, x: TFTInputBatch) -> Tensor:
         # Expose the decoder representation before quantile projection so the
         # fused model can combine TFT features with TCN features in latent space.
         features, _ = self.forward_with_features(x)
         return features
 
-    def forward(self, x: Dict[str, Tensor]) -> Tensor:
+    def forward(self, x: TFTInputBatch) -> Tensor:
         # Default standalone interface: return probabilistic forecast outputs.
         _, quantiles = self.forward_with_features(x)
         return quantiles

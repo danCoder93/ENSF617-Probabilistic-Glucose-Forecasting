@@ -45,13 +45,21 @@ If you run this project in Colab, add `src/` to the Python import path before
 importing project modules:
 ```python
 import sys
-sys.path.append("/content/ENSF617-Probabilistic-Glucose-Forecasting/src")
+sys.path.insert(0, "/content/ENSF617-Probabilistic-Glucose-Forecasting/src")
 ```
 
 Then install dependencies and run tests:
 ```bash
 pip install -r requirements.txt
 pytest tests/data -q
+```
+
+Model checkpoints can then be loaded directly from notebooks with standard
+Lightning APIs:
+```python
+from models.fused_model import FusedModel
+
+model = FusedModel.load_from_checkpoint("/content/path/to/checkpoint.ckpt")
 ```
 
 If you want to run the manual smoke script in Colab, execute it from the project

@@ -74,7 +74,7 @@ class GRN(Module):
     - add a residual shortcut
     - normalize the result
 
-    Why this is useful in this codebase:
+    Architectural role in this codebase:
     - TFT relies on GRNs repeatedly as its standard nonlinear processing block
     - the fused model also uses a GRN to mix branch features before the final
       readout head

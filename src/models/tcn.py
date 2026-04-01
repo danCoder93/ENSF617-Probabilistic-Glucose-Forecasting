@@ -36,7 +36,7 @@ from utils.config import TCNConfig
 #   Convert the small set of supported activation names from
 #   `TCNConfig` into actual PyTorch modules.
 #
-# Why this exists:
+# Design note:
 #   The refactored TCN intentionally supports a narrow activation
 #   surface. Centralizing the mapping keeps the rest of the file
 #   focused on temporal logic rather than on string branching.
@@ -63,7 +63,7 @@ class ChannelLayerNorm(nn.Module):
     so this module temporarily swaps time and channel axes, applies layer norm,
     then restores the original layout.
 
-    Why layer norm is used here:
+    Normalization choice:
     - In this project the TCN is only one branch inside a larger fused model.
     - Standardizing on layer norm keeps the branch behavior closer to the TFT
       side of the architecture and avoids dependence on batch statistics.
@@ -85,7 +85,7 @@ class CausalConv1d(nn.Module):
     """
     Conv1d with left padding only.
 
-    Why causal padding matters:
+    Forecasting constraint:
     - In forecasting we must prevent each timestep from seeing the future.
     - Left-only padding preserves output length while ensuring the convolution at
       time `t` only depends on timesteps `<= t`.
@@ -139,7 +139,7 @@ class TemporalBlock(nn.Module):
     - keep the implementation minimal and readable
     - expose only the pieces that matter to the fused architecture
 
-    Why two convolutions plus a residual path:
+    Block structure:
     - The first convolution starts to transform the local temporal pattern.
     - The second convolution lets the block refine that representation before it
       is passed onward.

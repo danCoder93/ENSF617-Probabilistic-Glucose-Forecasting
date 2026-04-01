@@ -1,32 +1,26 @@
 from __future__ import annotations
 
-"""
-AI-assisted maintenance note:
-This config file has evolved across multiple refactor passes in this project
-and was updated with AI assistance before being reviewed/adapted for the
-current codebase.
+# AI-assisted maintenance note:
+# This existing module was refined with AI assistance under direct user
+# guidance. The changes here are intended to keep the shared configuration
+# contract coherent across the refactored data and model layers while
+# preserving the project's current architecture and runtime binding flow.
+#
+# The current version keeps `DataConfig`, `TCNConfig`, and `TFTConfig` aligned
+# with:
+# - the DataModule-oriented data pipeline
+# - the lean fused-model TCN branch
+# - the runtime-bound TFT path where categorical cardinalities and sequence
+#   lengths are injected after the data contract is known
+#
+# It also consolidates earlier cleanup work that removed merge-conflict
+# remnants, duplicate definitions, and outdated configuration surfaces so this
+# file remains one readable source of truth for the project.
 
-Recent evolution captured in this version:
-- the data-layer refactor established `DataConfig` as the shared contract for
-  dataset access, preprocessing, sequence construction, and loader behavior
-- the model-layer refactor narrowed `TCNConfig` to match the lean fused-model
-  TCN branch rather than an older generic-library-style surface
-- `TFTConfig` was kept aligned with the newer runtime-bound path where the
-  DataModule and fused model inject discovered metadata such as categorical
-  cardinalities, sequence lengths, and auxiliary future features
-- unresolved merge-conflict markers and duplicate/contradictory definitions
-  from earlier edits were removed so this module again provides one coherent
-  source of truth for configuration
-
-The goal of this file is to keep the shared configuration contract readable and
-stable while remaining compatible with both older declarative construction and
-the newer refactored data/model integration path.
-"""
-
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from math import isclose
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from utils.tft_utils import DataTypes, FeatureSpec, InputTypes
 
@@ -507,3 +501,135 @@ class Config:
 
     # Temporal Convolution Network branch configuration.
     tcn: TCNConfig
+
+
+def _serialize_feature_spec(feature: FeatureSpec) -> dict[str, str]:
+    # `FeatureSpec` is a namedtuple carrying enum values. Converting it to a
+    # plain string-keyed payload keeps checkpoint metadata human-readable and
+    # avoids depending on Python-specific object reconstruction behavior.
+    return {
+        "name": feature.name,
+        "feature_type": InputTypes(feature.feature_type).name,
+        "feature_embed_type": DataTypes(feature.feature_embed_type).name,
+    }
+
+
+def _deserialize_feature_spec(payload: Mapping[str, Any]) -> FeatureSpec:
+    # Rebuild the original strongly typed feature declaration from the plain
+    # checkpoint payload. Using enum names rather than raw integer values makes
+    # the stored representation more stable and easier to inspect by eye.
+    return FeatureSpec(
+        str(payload["name"]),
+        InputTypes[str(payload["feature_type"])],
+        DataTypes[str(payload["feature_embed_type"])],
+    )
+
+
+def _serialize_dataclass_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    serialized: dict[str, Any] = {}
+    for key, value in payload.items():
+        if isinstance(value, Path):
+            # `Path` objects are convenient in live Python code but should be
+            # flattened to strings for checkpoint portability across machines
+            # and notebook runtimes.
+            serialized[key] = str(value)
+        elif isinstance(value, FeatureSpec):
+            serialized[key] = _serialize_feature_spec(value)
+        elif isinstance(value, tuple):
+            # Config dataclasses use tuples heavily for "immutable in practice"
+            # semantics. Converting them to plain lists keeps the serialized
+            # payload JSON/YAML/checkpoint friendly, while the corresponding
+            # `*_from_dict(...)` helpers restore the typed tuple form.
+            serialized[key] = [
+                _serialize_feature_spec(item) if isinstance(item, FeatureSpec) else item
+                for item in value
+            ]
+        else:
+            serialized[key] = value
+    return serialized
+
+
+def data_config_to_dict(config: DataConfig) -> dict[str, Any]:
+    # Serialize only the declared dataclass fields so checkpoint metadata stays
+    # aligned with the public config contract rather than accidentally capturing
+    # computed properties or future incidental attributes.
+    payload = {field_info.name: getattr(config, field_info.name) for field_info in fields(DataConfig)}
+    return _serialize_dataclass_payload(payload)
+
+
+def tft_config_to_dict(config: TFTConfig) -> dict[str, Any]:
+    # `TFTConfig` contains both declarative inputs and derived counts. We keep
+    # the full dataclass field set so checkpoint reloads preserve the exact
+    # bound configuration seen by the model at construction time.
+    payload = {field_info.name: getattr(config, field_info.name) for field_info in fields(TFTConfig)}
+    return _serialize_dataclass_payload(payload)
+
+
+def tcn_config_to_dict(config: TCNConfig) -> dict[str, Any]:
+    # The TCN branch config is already close to plain-Python data, so the main
+    # benefit here is consistency with the other config serializers.
+    payload = {field_info.name: getattr(config, field_info.name) for field_info in fields(TCNConfig)}
+    return _serialize_dataclass_payload(payload)
+
+
+def config_to_dict(config: Config) -> dict[str, Any]:
+    """
+    Convert the top-level config into a checkpoint-friendly plain dictionary.
+
+    Lightning stores hyperparameters inside checkpoint metadata. Serializing the
+    nested config explicitly keeps that metadata portable across local scripts,
+    Colab notebooks, and `load_from_checkpoint(...)` calls without relying on
+    Python object pickling for custom dataclasses, Paths, or enum-backed feature
+    specs.
+    """
+    return {
+        "data": data_config_to_dict(config.data),
+        "tft": tft_config_to_dict(config.tft),
+        "tcn": tcn_config_to_dict(config.tcn),
+    }
+
+
+def data_config_from_dict(payload: Mapping[str, Any]) -> DataConfig:
+    data_payload = dict(payload)
+    # Feature declarations are stored in plain serialized form inside the
+    # checkpoint payload and need to be rebuilt before `DataConfig` validation
+    # runs in `__post_init__`.
+    data_payload["features"] = tuple(
+        _deserialize_feature_spec(feature_payload)
+        for feature_payload in data_payload.get("features", ())
+    )
+    return DataConfig(**data_payload)
+
+
+def tft_config_from_dict(payload: Mapping[str, Any]) -> TFTConfig:
+    tft_payload = dict(payload)
+    # Rehydrate feature specs first so the derived variable counts recomputed by
+    # `TFTConfig.__post_init__` see the same semantic feature contract the model
+    # originally used.
+    tft_payload["features"] = tuple(
+        _deserialize_feature_spec(feature_payload)
+        for feature_payload in tft_payload.get("features", ())
+    )
+    return TFTConfig(**tft_payload)
+
+
+def tcn_config_from_dict(payload: Mapping[str, Any]) -> TCNConfig:
+    # `TCNConfig` normalizes sequences and validates values in `__post_init__`,
+    # so simply passing the plain payload back through the dataclass
+    # constructor is enough to recover the typed config safely.
+    return TCNConfig(**dict(payload))
+
+
+def config_from_dict(payload: Mapping[str, Any]) -> Config:
+    """
+    Rebuild the typed top-level config from `config_to_dict(...)` output.
+
+    This keeps checkpoint reloads and notebook workflows simple: callers can
+    persist only the plain dictionary form and recover the strongly typed config
+    object when constructing the fused model again.
+    """
+    return Config(
+        data=data_config_from_dict(payload["data"]),
+        tft=tft_config_from_dict(payload["tft"]),
+        tcn=tcn_config_from_dict(payload["tcn"]),
+    )
