@@ -25,6 +25,7 @@ from torch import Tensor
 
 from config import PathInput
 from data.datamodule import AZT1DDataModule
+from evaluation import EvaluationResult, select_point_prediction
 from observability.tensors import _as_metadata_lists
 from observability.utils import _has_module
 
@@ -66,16 +67,17 @@ def export_prediction_table(
     rows: list[dict[str, Any]] = []
     test_loader = datamodule.test_dataloader()
     quantile_columns = [f"pred_q{int(round(q * 100)):02d}" for q in quantiles]
-    median_index = min(
-        range(len(quantiles)),
-        key=lambda index: abs(float(quantiles[index]) - 0.5),
-    )
 
     # The exported table intentionally lines up predictions with the original
     # test dataloader batches so metadata such as subject ID and decoder start
     # can be attached row by row.
     for batch_index, (prediction_batch, batch) in enumerate(zip(predictions, test_loader)):
         prediction_cpu = prediction_batch.detach().cpu()
+        point_prediction_cpu = select_point_prediction(
+            prediction_cpu,
+            quantiles,
+            quantile=0.5,
+        )
         target = batch["target"]
         if isinstance(target, Tensor):
             target_cpu = target.detach().cpu()
@@ -121,7 +123,7 @@ def export_prediction_table(
                         ].item()
                     )
                 row["median_prediction"] = float(
-                    prediction_cpu[sample_index, horizon_index, median_index].item()
+                    point_prediction_cpu[sample_index, horizon_index].item()
                 )
                 row["residual"] = row["median_prediction"] - row["target"]
                 if len(quantile_columns) >= 2:
@@ -146,6 +148,7 @@ def generate_plotly_reports(
     *,
     report_dir: PathInput | None,
     max_subjects: int,
+    evaluation_result: EvaluationResult | None = None,
 ) -> dict[str, Path]:
     """
     Generate lightweight Plotly HTML reports from the exported prediction
@@ -188,23 +191,40 @@ def generate_plotly_reports(
     residual_histogram.write_html(str(residual_histogram_path))
     report_paths["residual_histogram"] = residual_histogram_path
 
-    grouped = frame.assign(abs_error=lambda data: data["residual"].abs()).groupby(
-        "horizon_index",
-        as_index=False,
-    )
-    # Grouping by horizon index gives us a simple answer to one of the most
-    # important forecasting diagnostics questions:
-    # "How does error behave as we predict farther into the future?"
-    #
-    # That horizon-wise view is often more informative than one single global
-    # metric because short-horizon and long-horizon behavior can differ a lot.
-    aggregation: dict[str, Any] = {
-        "mae": ("abs_error", "mean"),
-        "rmse": ("residual", lambda values: float((values.pow(2).mean()) ** 0.5)),
-    }
-    if "prediction_interval_width" in frame.columns:
-        aggregation["mean_interval_width"] = ("prediction_interval_width", "mean")
-    horizon_metrics = grouped.agg(**aggregation)
+    # Prefer the structured evaluation result when it exists because it is the
+    # repository's canonical detailed-metric surface. We still keep the CSV
+    # fallback so report generation remains usable in lighter workflows that
+    # only have the flat prediction table available.
+    if evaluation_result is not None and evaluation_result.by_horizon:
+        horizon_metrics = pd.DataFrame(
+            {
+                "horizon_index": [row.group_value for row in evaluation_result.by_horizon],
+                "mae": [row.mae for row in evaluation_result.by_horizon],
+                "rmse": [row.rmse for row in evaluation_result.by_horizon],
+                "mean_interval_width": [
+                    row.mean_interval_width for row in evaluation_result.by_horizon
+                ],
+            }
+        )
+    else:
+        grouped = frame.assign(abs_error=lambda data: data["residual"].abs()).groupby(
+            "horizon_index",
+            as_index=False,
+        )
+        # Grouping by horizon index gives us a simple answer to one of the most
+        # important forecasting diagnostics questions:
+        # "How does error behave as we predict farther into the future?"
+        #
+        # That horizon-wise view is often more informative than one single global
+        # metric because short-horizon and long-horizon behavior can differ a lot.
+        aggregation: dict[str, Any] = {
+            "mae": ("abs_error", "mean"),
+            "rmse": ("residual", lambda values: float((values.pow(2).mean()) ** 0.5)),
+        }
+        if "prediction_interval_width" in frame.columns:
+            aggregation["mean_interval_width"] = ("prediction_interval_width", "mean")
+        horizon_metrics = grouped.agg(**aggregation)
+
     horizon_metrics_fig = go.Figure()
     horizon_metrics_fig.add_trace(
         go.Scatter(
@@ -222,7 +242,9 @@ def generate_plotly_reports(
             name="RMSE",
         )
     )
-    if "mean_interval_width" in horizon_metrics:
+    if "mean_interval_width" in horizon_metrics.columns and not horizon_metrics[
+        "mean_interval_width"
+    ].isna().all():
         horizon_metrics_fig.add_trace(
             go.Scatter(
                 x=horizon_metrics["horizon_index"],

@@ -249,3 +249,25 @@ Internally, though, observability now lives in a package under
 That follow-up refactor did not change the training wrapper's architectural
 role. It simply made the observability internals easier to navigate while
 preserving the wrapper's existing integration points.
+
+## Later Evaluation Follow-up
+
+After the initial training-wrapper and observability refactors, the repository
+also added a dedicated `src/evaluation/` package for structured held-out
+metrics.
+
+That later work did not change the core role of `src/train.py`:
+
+- `src/train.py` still owns Lightning orchestration
+- `FusedModel` still owns forward/loss behavior
+- `src/evaluation/` now owns reusable detailed metric computation
+
+In the current flow, the wrapper still exposes:
+
+- `test(...)` for Lightning scalar test metrics
+- `predict_test(...)` for held-out prediction batches
+
+The top-level entrypoint in `main.py` then uses those prediction batches to
+build the richer structured evaluation payload and reporting artifacts. That is
+why newer docs mention `test_predictions.csv`, Plotly reports, and structured
+`test_evaluation` results alongside the original training-wrapper behavior.

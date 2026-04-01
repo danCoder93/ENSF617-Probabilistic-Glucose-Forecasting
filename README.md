@@ -20,6 +20,10 @@ The new top-level script/notebook entrypoint and shared defaults layer are
 summarized in
 [docs/entrypoint_defaults_summary.md](docs/entrypoint_defaults_summary.md).
 
+The structured detailed evaluation package and held-out evaluation flow are
+summarized in
+[docs/evaluation_package_summary.md](docs/evaluation_package_summary.md).
+
 ## Testing
 
 ### Install dependencies
@@ -30,26 +34,24 @@ Local:
 pip install -r requirements.txt
 ```
 
-### Run the automated data-layer tests
+### Run focused automated tests
 
-Run the full pytest suite for the refactored data pipeline:
-
-```bash
-pytest tests/data -q
-```
-
-Run a single test module:
+Run the full pytest suite that is currently tracked in the repository:
 
 ```bash
-pytest tests/data/test_datamodule.py -q
+pytest tests -q
 ```
 
-### Run model and training-wrapper tests
-
-Run the shared config, model, and training-wrapper tests:
+Run a few representative modules:
 
 ```bash
 pytest tests/test_config.py tests/test_fused_model.py tests/test_train.py -q
+```
+
+Run the evaluation-focused tests:
+
+```bash
+pytest tests/test_evaluation_metrics.py tests/test_evaluation_evaluator.py -q
 ```
 
 ### Manual smoke test
@@ -81,7 +83,8 @@ This entrypoint will:
 - download and preprocess AZT1D automatically if the processed CSV is missing
 - train the fused model
 - run held-out test evaluation when test windows exist
-- save a small run summary and optional test predictions under `artifacts/main_run/`
+- optionally generate detailed held-out evaluation, prediction exports, and
+  report artifacts under `artifacts/main_run/`
 
 Open the notebook:
 
@@ -106,7 +109,7 @@ Then install dependencies and run tests:
 
 ```bash
 pip install -r requirements.txt
-pytest tests/data -q
+pytest tests -q
 ```
 
 Model checkpoints can then be loaded directly from notebooks with standard

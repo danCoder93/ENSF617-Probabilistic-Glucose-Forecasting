@@ -14,6 +14,11 @@ This document summarizes the pass that added:
 - supporting tests and typing configuration updates
 - detailed comments and disclaimers around the new entrypoint layer
 
+Later follow-up note:
+the current top-level workflow has since grown richer post-run observability
+and structured evaluation outputs. This document has been updated where needed
+so its artifact descriptions reflect the current `main.py` behavior.
+
 ## Goals
 
 - Make the repository runnable from a single script entrypoint.
@@ -132,7 +137,9 @@ Instead, it exposes `run_training_workflow(...)`, which:
 4. fits the model
 5. optionally evaluates on the test split
 6. optionally collects raw test predictions
-7. writes a compact JSON summary
+7. optionally computes structured detailed held-out evaluation from the raw
+   predictions plus aligned source batches
+8. writes a compact JSON summary
 
 That function is reusable from:
 
@@ -149,6 +156,8 @@ The top-level workflow can now produce:
 
 - `run_summary.json`
 - `test_predictions.pt`
+- `test_predictions.csv`
+- Plotly HTML reports
 - checkpoint files under the configured output/checkpoint directory
 
 The summary is intentionally lightweight. It records:
@@ -159,6 +168,7 @@ The summary is intentionally lightweight. It records:
 - fit/test availability information
 - checkpoint selection information
 - prediction batch shapes and saved locations
+- structured held-out evaluation when prediction-based evaluation runs
 
 ## `main.ipynb`
 
@@ -213,7 +223,7 @@ The new main-entrypoint test coverage checks that:
 - the top-level workflow can run through a fake trainer surface
 - `"best"` evaluation falls back to in-memory weights when no best checkpoint
   exists
-- summary and prediction artifacts are written
+- summary, prediction, and structured evaluation artifacts are written
 
 ### `tests/test_train.py`
 
@@ -261,6 +271,9 @@ The README now includes:
 - usage notes for `main.py`
 - usage notes for `main.ipynb`
 - a refactor-notes link to this new summary document
+
+The README also now points users at the current repository test layout rather
+than an older `tests/data/` path that no longer matches the tree.
 
 That makes the new entrypoints discoverable from the repository landing page.
 

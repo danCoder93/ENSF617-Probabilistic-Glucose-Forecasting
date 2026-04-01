@@ -35,6 +35,13 @@ from models.tcn import TCN
 from models.tft import TemporalFusionTransformer
 from models.grn import GRN
 from models.nn_head import NNHead
+from evaluation import (
+    mean_absolute_error,
+    mean_prediction_interval_width,
+    normalize_target_tensor,
+    root_mean_squared_error,
+    select_point_prediction,
+)
 
 from config import Config, config_from_dict, config_to_dict
 
@@ -490,21 +497,7 @@ class FusedModel(LightningModule):
         return self.fcn(fused_features)
 
     def _target_tensor(self, batch: dict[str, Any]) -> Tensor:
-        target = batch["target"].float()
-        if target.ndim == 3 and target.shape[-1] == 1:
-            # Some callers may keep the target in an explicit final channel
-            # dimension, e.g. [batch, horizon, 1], because that is a common
-            # convention for univariate sequence targets. The loss and metrics
-            # below operate on [batch, horizon], so we normalize the shape here
-            # once rather than scattering squeeze logic across training,
-            # validation, and test code paths.
-            target = target.squeeze(-1)
-        if target.ndim != 2:
-            raise ValueError(
-                "Expected batch['target'] to have shape [batch, horizon] or "
-                f"[batch, horizon, 1], got {tuple(target.shape)}."
-            )
-        return target
+        return normalize_target_tensor(batch["target"])
 
     def quantile_loss(self, predictions: Tensor, target: Tensor) -> Tensor:
         # This is the standard pinball loss used for quantile regression.
@@ -563,11 +556,11 @@ class FusedModel(LightningModule):
         # a future experiment changes the quantile set to something like
         # (0.1, 0.4, 0.9) while still wanting one representative point curve for
         # logging or visualization.
-        quantile_index = min(
-            range(len(self.quantiles)),
-            key=lambda index: abs(self.quantiles[index] - quantile),
+        return select_point_prediction(
+            predictions,
+            self.quantiles,
+            quantile=quantile,
         )
-        return predictions[..., quantile_index]
 
     def _metric_pair_for_stage(self, stage: str) -> tuple[Any | None, Any | None]:
         # Keep the stage-to-metric-object mapping explicit in one place so the
@@ -709,11 +702,11 @@ class FusedModel(LightningModule):
             batch_size=batch_size,
             sync_dist=stage != "train",
         )
-        if predictions.shape[-1] >= 2:
-            interval_width = predictions[..., -1] - predictions[..., 0]
+        interval_width = mean_prediction_interval_width(predictions)
+        if interval_width is not None:
             self.log(
                 f"{stage}_prediction_interval_width",
-                interval_width.mean(),
+                interval_width,
                 prog_bar=False,
                 on_step=on_step,
                 on_epoch=True,
@@ -753,12 +746,12 @@ class FusedModel(LightningModule):
             mae_metric.update(point_forecast, target)
             mae = mae_metric.compute()
         else:
-            mae = torch.mean(torch.abs(point_forecast - target))
+            mae = mean_absolute_error(point_forecast, target)
         if rmse_metric is not None:
             rmse_metric.update(point_forecast, target)
             rmse = rmse_metric.compute()
         else:
-            rmse = torch.sqrt(torch.mean(torch.square(point_forecast - target)))
+            rmse = root_mean_squared_error(point_forecast, target)
 
         self._log_metrics(
             stage,

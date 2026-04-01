@@ -5,6 +5,12 @@ This summary was drafted with AI assistance and then reviewed/adapted for this
 project. It documents the later structural cleanup wave that followed the
 initial model, training-wrapper, and observability integration work.
 
+Later follow-up note:
+Subsequent work also added a dedicated `src/evaluation/` package for
+structured held-out metrics. This document remains focused on the source-layout,
+typing, and commenting cleanup wave rather than that later evaluation-layer
+addition.
+
 This document focuses on the changes that were made after the repository had
 already become functionally richer:
 

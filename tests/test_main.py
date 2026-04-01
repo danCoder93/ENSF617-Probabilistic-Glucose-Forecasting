@@ -72,7 +72,9 @@ class FakeTrainer(FusedModelTrainer):
     ) -> list[torch.Tensor]:
         del datamodule
         self.predict_ckpt_path = ckpt_path
-        return [torch.ones(2, 3, 1)]
+        # Keep this fake output aligned with the test config:
+        # batch=2, prediction_length=2, quantiles=3.
+        return [torch.ones(2, 2, 3)]
 
 
 def test_run_training_workflow_falls_back_to_in_memory_eval_and_writes_artifacts(
@@ -111,8 +113,10 @@ def test_run_training_workflow_falls_back_to_in_memory_eval_and_writes_artifacts
     assert artifacts.summary_path.exists()
     loaded_predictions = torch.load(artifacts.predictions_path)
     assert len(loaded_predictions) == 1
-    assert tuple(loaded_predictions[0].shape) == (2, 3, 1)
+    assert tuple(loaded_predictions[0].shape) == (2, 2, 3)
     prediction_table = pd.read_csv(artifacts.prediction_table_path)
     assert not prediction_table.empty
     assert "median_prediction" in prediction_table.columns
+    assert artifacts.test_evaluation is not None
+    assert artifacts.test_evaluation.summary.count == 4
     assert artifacts.report_paths == {}

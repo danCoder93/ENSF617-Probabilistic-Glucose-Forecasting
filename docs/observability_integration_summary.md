@@ -6,6 +6,12 @@ project. It documents the work that introduced a repository-level
 observability, logging, telemetry, and visualization stack on top of the
 existing PyTorch Lightning training flow.
 
+Later follow-up note:
+the repository now also has a dedicated `src/evaluation/` package for
+structured detailed model-quality evaluation. This document remains centered on
+observability, but its artifact descriptions have been updated so they do not
+imply that all detailed metrics live only in the reporting layer.
+
 This document focuses on:
 
 - what changed
@@ -567,6 +573,7 @@ The top-level workflow can now produce, depending on configuration:
 - `run_summary.json`
 - `test_predictions.pt`
 - `test_predictions.csv`
+- structured detailed test evaluation embedded in `run_summary.json`
 - Plotly HTML reports
 - TensorBoard log directory contents
 - text run log
@@ -596,6 +603,12 @@ This complements the raw `.pt` prediction tensor artifact:
 - `.pt` keeps the original tensor structure
 - `.csv` is easier for manual inspection, pandas analysis, and plotting
 
+Later follow-up:
+the flat prediction table is no longer the repository's only detailed metric
+surface. The newer `src/evaluation/` package now produces a structured held-out
+evaluation result, and the reporting layer can consume that grouped horizon
+view when available.
+
 ### Plotly reports
 
 The initial automatic Plotly reports include:
@@ -606,6 +619,10 @@ The initial automatic Plotly reports include:
 
 These are intentionally lightweight first-pass reports rather than a complete
 experiment-reporting system.
+
+The report layer still relies on the prediction-table artifact for the full
+plot set, but horizon metrics can now prefer the canonical grouped horizon
+evaluation output when it is available.
 
 ## CLI Surface
 
@@ -654,6 +671,8 @@ Notable remaining gaps include:
   environment
 - no end-to-end runtime verification in every target environment documented in
   this file
+- detailed evaluation still hangs off the prediction path rather than the
+  scalar `trainer.test(...)` path
 
 These are not hidden issues; they are known areas for future follow-up.
 

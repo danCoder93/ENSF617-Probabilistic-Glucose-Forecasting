@@ -40,6 +40,7 @@ from defaults import (
 )
 
 from data.datamodule import AZT1DDataModule
+from evaluation import EvaluationResult, evaluate_prediction_batches
 from observability import export_prediction_table, generate_plotly_reports
 from train import CheckpointSelection, FitArtifacts, FusedModelTrainer
 from config import (
@@ -73,9 +74,15 @@ class MainRunArtifacts:
     the CLI, tests, and notebooks all receive the same named result contract,
     which keeps downstream inspection much clearer than relying on positional
     tuples or peeking into mutable workflow internals.
+
+    Evaluation note:
+    `test_metrics` reflects Lightning's reduced scalar test output, while
+    `test_evaluation` carries the repository's richer structured detailed
+    evaluation derived from raw test predictions plus aligned targets/metadata.
     """
     fit: FitArtifacts
     test_metrics: list[Mapping[str, float]] | None
+    test_evaluation: EvaluationResult | None
     test_predictions: list[torch.Tensor] | None
     summary: dict[str, Any]
     summary_path: Path | None
@@ -191,6 +198,7 @@ def _build_run_summary(
     optimizer_name: str,
     output_dir: Path | None,
     test_metrics: list[Mapping[str, float]] | None,
+    test_evaluation: EvaluationResult | None,
     predictions: list[torch.Tensor] | None,
     predictions_path: Path | None,
     prediction_table_path: Path | None,
@@ -238,6 +246,7 @@ def _build_run_summary(
             if eval_ckpt_path not in (None, "best", "last")
             else eval_ckpt_path,
             "test_metrics": _json_ready(test_metrics),
+            "test_evaluation": _json_ready(test_evaluation),
         },
         "predictions": {
             "num_batches": 0 if predictions is None else len(predictions),
@@ -351,6 +360,7 @@ def run_training_workflow(
     resolved_eval_ckpt_path = _resolve_eval_ckpt_path(fit_artifacts, eval_ckpt_path)
 
     test_metrics: list[Mapping[str, float]] | None = None
+    test_evaluation: EvaluationResult | None = None
     test_predictions: list[torch.Tensor] | None = None
     predictions_path: Path | None = None
     prediction_table_path: Path | None = None
@@ -367,6 +377,16 @@ def run_training_workflow(
             datamodule,
             ckpt_path=resolved_eval_ckpt_path,
         )
+        # Detailed evaluation currently hangs off the prediction path rather
+        # than the `trainer.test(...)` path because the richer evaluator needs
+        # raw forecast tensors plus the aligned source batches, not just
+        # Lightning's already-reduced scalar metrics.
+        quantiles = getattr(fit_artifacts.model, "quantiles", (0.1, 0.5, 0.9))
+        test_evaluation = evaluate_prediction_batches(
+            predictions=test_predictions,
+            batches=datamodule.test_dataloader(),
+            quantiles=quantiles,
+        )
         if output_dir is not None and save_predictions:
             # Predictions are saved as raw tensors on purpose. That preserves
             # the model's direct output without forcing an opinionated export
@@ -381,7 +401,6 @@ def run_training_workflow(
             # The CSV export is intentionally additive rather than a replacement
             # for the raw tensor artifact. We keep both because they serve
             # different debugging/research use cases.
-            quantiles = getattr(fit_artifacts.model, "quantiles", (0.1, 0.5, 0.9))
             prediction_table_path = export_prediction_table(
                 datamodule=datamodule,
                 predictions=test_predictions,
@@ -397,6 +416,7 @@ def run_training_workflow(
                 prediction_table_path,
                 report_dir=effective_observability_config.report_dir,
                 max_subjects=effective_observability_config.max_forecast_subjects_per_report,
+                evaluation_result=test_evaluation,
             )
 
     summary = _build_run_summary(
@@ -411,6 +431,7 @@ def run_training_workflow(
         optimizer_name=optimizer_name,
         output_dir=output_dir,
         test_metrics=test_metrics,
+        test_evaluation=test_evaluation,
         predictions=test_predictions,
         predictions_path=predictions_path,
         prediction_table_path=prediction_table_path,
@@ -430,6 +451,7 @@ def run_training_workflow(
     return MainRunArtifacts(
         fit=fit_artifacts,
         test_metrics=test_metrics,
+        test_evaluation=test_evaluation,
         test_predictions=test_predictions,
         summary=summary,
         summary_path=summary_path,

@@ -99,18 +99,17 @@ sizes and feature metadata into `Config.tft` before constructing the model.
 
 ## Testing and Tooling
 
-The refactor also introduced a dedicated pytest-based test layout:
+The refactor also introduced pytest-based test support for the data layer.
+
+The current repository layout keeps the shared test support in:
 
 - `tests/conftest.py`
 - `tests/support.py`
-- `tests/data/test_schema.py`
-- `tests/data/test_transforms.py`
-- `tests/data/test_indexing.py`
-- `tests/data/test_dataset.py`
-- `tests/data/test_preprocessor.py`
-- `tests/data/test_downloader.py`
-- `tests/data/test_datamodule.py`
 - `tests/manual_data_smoke.py`
+
+Later repository cleanup consolidated the test tree, so older dedicated
+`tests/data/...` module paths mentioned in the original refactor notes no
+longer match the current filesystem layout exactly.
 
 Additional tooling/config support:
 

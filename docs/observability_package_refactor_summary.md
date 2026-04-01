@@ -6,6 +6,14 @@ project. It documents the later refactor that split the observability
 implementation into a small package while preserving the same public import
 surface for the rest of the repository.
 
+Later follow-up note:
+This document is specifically about the observability package split. The
+repository now also has a dedicated `src/evaluation/` package for structured
+model-quality metrics. That later addition complements this refactor rather
+than replacing it: `src/observability/` still owns runtime diagnostics,
+telemetry, logging, and report generation, while `src/evaluation/` owns the
+metric definitions and grouped held-out evaluation outputs.
+
 ## Goal
 
 The goal of this refactor was not to add new observability features.
@@ -23,7 +31,7 @@ The goal was to make the existing observability code easier to:
 The repository previously carried most observability implementation inside one
 large module:
 
-- `src/observability.py`
+- historical path: `src/observability.py`
 
 That implementation now lives in a package:
 
@@ -104,6 +112,8 @@ Owns:
 
 - flat prediction-table export
 - lightweight Plotly HTML report generation
+- downstream consumption of structured evaluation outputs when they are
+  available from the newer evaluation layer
 
 ### `utils.py`
 
