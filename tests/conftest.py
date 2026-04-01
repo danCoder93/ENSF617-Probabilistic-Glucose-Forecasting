@@ -28,7 +28,7 @@ import pytest
 # ============================================================
 
 # Pytest runs from the repository root, but the project code currently lives
-# under `src/` and uses imports like `from data...` and `from utils...`.
+# under `src/` and uses imports like `from data...` and `from config...`.
 # Adding `src` to sys.path here makes the tests match the way the project is run
 # in local scripts and in notebook-style environments such as Colab.
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -36,7 +36,7 @@ SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from utils.config import DataConfig
+from config import DataConfig
 from tests.support import BuildDataConfig, WriteProcessedCsv
 
 

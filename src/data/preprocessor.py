@@ -1,14 +1,12 @@
-"""
-AI-assisted implementation note:
-This file was drafted with AI assistance and then reviewed/adapted for this
-project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
-work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
-DataModule docs/tutorial
-(https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
-original AZT1D dataset release on Mendeley Data
-(https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to isolate
-raw-data standardization as a dedicated preprocessing stage.
-"""
+# AI-assisted implementation note:
+# This file was drafted with AI assistance and then reviewed/adapted for this
+# project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
+# work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
+# DataModule docs/tutorial
+# (https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
+# original AZT1D dataset release on Mendeley Data
+# (https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to isolate
+# raw-data standardization as a dedicated preprocessing stage.
 
 from __future__ import annotations
 
@@ -48,11 +46,15 @@ class AZT1DPreprocessor:
     """
     Standardize raw AZT1D CSV exports into one canonical processed CSV.
 
-    Why this exists as its own layer:
-    - Raw files are a storage concern, not a dataset concern.
-    - This class knows how to read vendor-shaped files and emit one clean table.
-    - It intentionally does not know anything about train/val/test splits or
-      tensor windows. That logic lives later in indexing/dataset/datamodule.
+    Purpose:
+    isolate raw-file standardization from the rest of the learning pipeline.
+
+    Context:
+    - raw files are a storage concern, not a dataset-window concern
+    - this class knows how to read vendor-shaped CSVs and emit one clean table
+    - it intentionally does not know anything about train/val/test splits or
+      tensor windows; that logic lives later in indexing, dataset, and
+      DataModule code
     """
 
     def __init__(

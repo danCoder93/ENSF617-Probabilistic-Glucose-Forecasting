@@ -24,6 +24,12 @@
 # through `GRN.from_tft_config(...)` so the current TFT implementation is easier
 # to maintain and slightly more robust, without changing the underlying model
 # design or claiming new architectural ideas.
+#
+# Context:
+# this file remains closer to the upstream TFT lineage than several other model
+# modules in the repository, so the most valuable comments here are the ones
+# that explain how the implementation maps onto the project-specific grouped
+# input contract and how the major sub-blocks relate to the fused model.
 
 from dataclasses import dataclass
 
@@ -36,14 +42,14 @@ from torch.nn.functional import glu, elu
 from torch.nn.modules.lazy import LazyModuleMixin
 
 from torch import Tensor
-from torch.nn.parameter import UninitializedParameter
+from torch.nn.parameter import Parameter, UninitializedParameter
 from typing import Any, Dict, Tuple, Optional, List, Mapping, cast
 
 from torch.nn import LayerNorm
 
 from models.grn import GLU, GRN
 
-from utils.config import TFTConfig
+from config import TFTConfig
 
 # The grouped TFT input contract intentionally allows some feature groups to be
 # absent at runtime. For example:
@@ -66,21 +72,48 @@ TFTInputBatch = Mapping[str, Optional[Tensor]]
 
 # @torch.jit.script #Currently broken with autocast
 def fused_pointwise_linear_v1(x, a, b):
+    """
+    Apply the learned continuous-feature embedding transform for generic inputs.
+
+    Context:
+    this is the compact broadcasted form of multiplying each scalar continuous
+    input by its learned embedding vector and then adding a learned bias.
+    """
     # Multiply each scalar continuous feature value by its learnable embedding
     # vector and add a per-feature bias, producing one hidden vector per input
     # feature without writing the equivalent einsum more verbosely.
-    # squeeze adds one additional shape of 1 at the end '-1'
-    # This is so that it is easier for broadcasting and matrix compatible
-    # i.e. [b, t, f, 1] is the shape of x * [f, h] is the shape of a
+    #
+    # Shape mechanics:
+    # - `x` starts as `[batch, time?, features]`
+    # - `x.unsqueeze(-1)` becomes `[batch, time?, features, 1]`
+    # - `a` has shape `[features, hidden]`
+    # - broadcasting yields `[batch, time?, features, hidden]`
+    #
+    # The result is "one hidden embedding vector per continuous feature" while
+    # preserving batch and optional time axes.
     out = torch.mul(x.unsqueeze(-1), a)
     out = out + b
     return out
 
-@torch.jit.script
+# Pylance can flag `torch.jit.script` as a private-export usage even though it
+# is a valid runtime TorchScript entrypoint. Keep the runtime API unchanged and
+# suppress the false-positive warning at the exact use site.
+@torch.jit.script  # pyright: ignore[reportPrivateImportUsage]
 def fused_pointwise_linear_v2(x, a, b):
+    """
+    Apply the learned continuous-feature embedding transform for target history.
+
+    Context:
+    this variant is shaped for the temporal target path, which always carries a
+    time dimension and is handled separately from the other continuous groups.
+    """
     # Same idea as `fused_pointwise_linear_v1`, but shaped for the target path
     # where the target tensor is always temporal and handled separately from the
     # generic continuous input groups.
+    #
+    # The target path keeps an explicit temporal axis because TFT uses the
+    # historical target trajectory as one of the historical variable groups in
+    # its encoder-side stream.
     out = x.unsqueeze(3) * a
     out = out + b
     return out
@@ -98,8 +131,9 @@ class TFTEmbedding(Module):
     """
 
     def __init__(self, config, initialize_cont_params=True):
-        # initialize_cont_params=False prevents form initializing parameters inside this class
-        # so they can be lazily initialized in LazyEmbedding module
+        # `initialize_cont_params=False` is used by `LazyEmbedding` so the
+        # continuous embedding parameters can be materialized only after the
+        # real grouped-input widths are known at runtime.
         super().__init__()
         self.s_cat_inp_lens    = config.static_categorical_inp_lens
         self.t_cat_k_inp_lens  = config.temporal_known_categorical_inp_lens
@@ -120,14 +154,9 @@ class TFTEmbedding(Module):
         # 6. Temporal observed continuous
         # 7. Temporal observed targets (time series obseved so far - Output)
 
-        # given the static categorical input lengths -> create vector embeddings in submodules
-        # Maintained via moduleList (pytorch compatible python list, where submodules can be executed not
-        # sequentially ) 
-        # example, there are 4 categorical features, with unique values, 3 in feature # 1, 4 in feature # 2 etc.
-        # then s_cat_inp_lens = [3, 4, 5, 17]
-        # s_cat_embed = module list[[embeddings for feature 1 - 3 rows and length (column) of hidden size], 
-        # [embeddings for feature 2 - 4 rows and length of hidden size]]
-        # we need to ensure that our hidden size is enough to hold our embeddings
+        # Each categorical variable gets its own embedding table so the later
+        # variable-selection network can reason about variables separately
+        # rather than after they have already been merged together.
         self.s_cat_embed = nn.ModuleList([
             nn.Embedding(n, self.hidden_size) for n in self.s_cat_inp_lens]) if self.s_cat_inp_lens else None
         self.t_cat_k_embed = nn.ModuleList([
@@ -136,20 +165,40 @@ class TFTEmbedding(Module):
             nn.Embedding(n, self.hidden_size) for n in self.t_cat_o_inp_lens]) if self.t_cat_o_inp_lens else None
 
         if initialize_cont_params:
-            self.s_cont_embedding_vectors = nn.Parameter(torch.Tensor(self.s_cont_inp_size, self.hidden_size)) if self.s_cont_inp_size else None
-            self.t_cont_k_embedding_vectors = nn.Parameter(torch.Tensor(self.t_cont_k_inp_size, self.hidden_size)) if self.t_cont_k_inp_size else None
-            self.t_cont_o_embedding_vectors = nn.Parameter(torch.Tensor(self.t_cont_o_inp_size, self.hidden_size)) if self.t_cont_o_inp_size else None
-            self.t_tgt_embedding_vectors = nn.Parameter(torch.Tensor(self.t_tgt_size, self.hidden_size))
+            self.s_cont_embedding_vectors = Parameter(
+                torch.Tensor(self.s_cont_inp_size, self.hidden_size)
+            ) if self.s_cont_inp_size else None
+            self.t_cont_k_embedding_vectors = Parameter(
+                torch.Tensor(self.t_cont_k_inp_size, self.hidden_size)
+            ) if self.t_cont_k_inp_size else None
+            self.t_cont_o_embedding_vectors = Parameter(
+                torch.Tensor(self.t_cont_o_inp_size, self.hidden_size)
+            ) if self.t_cont_o_inp_size else None
+            self.t_tgt_embedding_vectors = Parameter(
+                torch.Tensor(self.t_tgt_size, self.hidden_size)
+            )
 
-            self.s_cont_embedding_bias = nn.Parameter(torch.zeros(self.s_cont_inp_size, self.hidden_size)) if self.s_cont_inp_size else None
-            self.t_cont_k_embedding_bias = nn.Parameter(torch.zeros(self.t_cont_k_inp_size, self.hidden_size)) if self.t_cont_k_inp_size else None
-            self.t_cont_o_embedding_bias = nn.Parameter(torch.zeros(self.t_cont_o_inp_size, self.hidden_size)) if self.t_cont_o_inp_size else None
-            self.t_tgt_embedding_bias = nn.Parameter(torch.zeros(self.t_tgt_size, self.hidden_size))
+            self.s_cont_embedding_bias = Parameter(
+                torch.zeros(self.s_cont_inp_size, self.hidden_size)
+            ) if self.s_cont_inp_size else None
+            self.t_cont_k_embedding_bias = Parameter(
+                torch.zeros(self.t_cont_k_inp_size, self.hidden_size)
+            ) if self.t_cont_k_inp_size else None
+            self.t_cont_o_embedding_bias = Parameter(
+                torch.zeros(self.t_cont_o_inp_size, self.hidden_size)
+            ) if self.t_cont_o_inp_size else None
+            self.t_tgt_embedding_bias = Parameter(
+                torch.zeros(self.t_tgt_size, self.hidden_size)
+            )
 
             self.reset_parameters()
 
 
     def reset_parameters(self):
+        # Continuous embedding matrices are initialized with Xavier so each
+        # feature-specific hidden vector starts with a reasonable scale instead
+        # of collapsing to zero or exploding. Bias terms start at zero so the
+        # learned projection is initially centered around the raw scalar value.
         if self.s_cont_embedding_vectors is not None:
             assert self.s_cont_embedding_bias is not None
             # instead of just initializing weights by all 0 or infinity which will lead to gradient explosion/vanishing, initialize randomly using a xavier normal distribution
@@ -179,9 +228,6 @@ class TFTEmbedding(Module):
                 if isinstance(module, nn.Embedding):
                     module.reset_parameters()
 
-
-    # One function that can take static, past observed, future known inputs and converts them into fixed size
-    # (hidden size) embeddings
     def _apply_embedding(self,
             cat: Optional[Tensor], # categorical values
             cont: Optional[Tensor], # continuous values
@@ -189,6 +235,16 @@ class TFTEmbedding(Module):
             cont_emb: Optional[Tensor], # continuous weights embeddings
             cont_bias: Optional[Tensor], # continuous bias embeddings
             ) -> Optional[Tensor]:
+        # Convert one semantic feature group into per-variable hidden vectors.
+        # This helper keeps categorical and continuous paths aligned so the rest
+        # of the module can work in terms of "embedded variable slots" rather
+        # than special-casing raw input types repeatedly.
+        #
+        # Important output convention:
+        # - every returned tensor keeps a dedicated "variable" axis
+        # - TFT does not merge variables immediately after embedding
+        # - later variable-selection networks need to see the variables as
+        #   separate slots so they can learn variable importance weights
         # For each categorical variable:
         #   - take its integer IDs from `cat[..., i]` across the batch (and time)
         #   - pass them through its corresponding embedding layer to get vectors of size hidden_size
@@ -200,7 +256,9 @@ class TFTEmbedding(Module):
             #the line below is equivalent to following einsums
             #e_cont = torch.einsum('btf,fh->bthf', cont, cont_emb)
             #e_cont = torch.einsum('bf,fh->bhf', cont, cont_emb)
-            # take scalars of continuous input value in a [batch, time, feature index] to a vector [batch, time, feature index, hidden size]
+            # take scalars of continuous input value in a [batch, time, feature index]
+            # tensor to hidden vectors in a
+            # [batch, time, feature index, hidden size] tensor
             e_cont = fused_pointwise_linear_v1(cont, cont_emb, cont_bias)
         else:
             e_cont = None
@@ -237,6 +295,11 @@ class TFTEmbedding(Module):
 
         # Static inputs are expected to be equal for all timesteps
         # For memory efficiency there is no assert statement
+        #
+        # The dataset repeats static values across the encoder axis because that
+        # makes batching simpler and keeps all sample groups aligned to the same
+        # sequence contract. TFT only needs one copy, so we take the first
+        # timestep here instead of carrying the redundant axis forward.
         s_cat_inp = s_cat_inp[:,0,:] if s_cat_inp is not None else None
         s_cont_inp = s_cont_inp[:,0,:] if s_cont_inp is not None else None
 
@@ -261,6 +324,16 @@ class TFTEmbedding(Module):
         # Temporal observed targets
         # t_observed_tgt = torch.einsum('btf,fh->btfh', t_tgt_obs, self.t_tgt_embedding_vectors)
         t_observed_tgt = fused_pointwise_linear_v2(t_tgt_obs, self.t_tgt_embedding_vectors, self.t_tgt_embedding_bias)
+        # The four returned tensors line up with the four semantic streams TFT
+        # reasons about later:
+        # - static inputs
+        # - known temporal inputs
+        # - observed temporal covariates
+        # - observed target history
+        #
+        # Keeping them separate here is what allows the static encoder and the
+        # historical/future variable-selection networks to consume the right
+        # groups downstream.
 
         return s_inp, t_known_inp, t_observed_inp, t_observed_tgt
 
@@ -275,7 +348,9 @@ class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
     cls_to_become = TFTEmbedding
 
     def __init__(self, config):
-        # Super constructor but 'initialize_cont_params=False' enforces to not initialize continuous params
+        # Call into `TFTEmbedding` without eager continuous-parameter creation.
+        # This preserves the same public behavior while deferring shape binding
+        # until the first real batch arrives.
         cast(Any, super()).__init__(config, initialize_cont_params=False)
 
         # if data contains static continuous inputs
@@ -306,7 +381,6 @@ class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
         self.t_tgt_embedding_vectors = UninitializedParameter()
         self.t_tgt_embedding_bias = UninitializedParameter()
 
-    # runs when see actual inputs
     def initialize_parameters(self, x):
         # Materialize any continuous-embedding parameters the first time the
         # module sees a real batch. After this, the module behaves like a normal
@@ -320,7 +394,10 @@ class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
             if s_cont_inp is not None:
                 assert self.s_cont_embedding_vectors is not None
                 assert self.s_cont_embedding_bias is not None
-                # materialize i.e. populate/initialize parameters with shape ([each static continuous feature], [hidden size from config coming from TFT Embeddings])
+                # Materialize one learned embedding vector and one bias vector
+                # per static continuous feature. The hidden size comes from the
+                # bound TFT config, while the number of features comes from the
+                # real runtime batch.
                 self.s_cont_embedding_vectors.materialize((s_cont_inp.shape[-1], self.hidden_size))
                 self.s_cont_embedding_bias.materialize((s_cont_inp.shape[-1], self.hidden_size))
 
@@ -380,15 +457,27 @@ class VariableSelectionNetwork(Module):
         # Flatten the per-variable embeddings so the joint GRN can score all
         # variables together, then normalize those scores into attention-like
         # sparse weights over the variable axis.
+        #
+        # Conceptually this block answers two questions:
+        # 1. "How should each variable be transformed into the common hidden
+        #    representation space?"
+        # 2. "How much should each transformed variable matter right now?"
+        #
+        # The joint GRN handles the second question by producing weights, while
+        # the per-variable GRNs handle the first by transforming each variable
+        # slot independently before the weighted reduction.
         Xi = torch.flatten(x, start_dim=-2)
         grn_outputs = self.joint_grn(Xi, c=context)
         sparse_weights = F.softmax(grn_outputs, dim=-1)
         transformed_embed_list = [m(x[...,i,:]) for i, m in enumerate(self.var_grns)]
         transformed_embed = torch.stack(transformed_embed_list, dim=-1)
-        #the line below performs batched matrix vector multiplication
-        #for temporal features it's bthf,btf->bth
-        #for static features it's bhf,bf->bh
+        # The matmul below computes a weighted sum across the variable axis:
+        # - temporal features: [batch, time, hidden, vars] x [batch, time, vars]
+        # - static features:   [batch, hidden, vars] x [batch, vars]
         variable_ctx = torch.matmul(transformed_embed, sparse_weights.unsqueeze(-1)).squeeze(-1)
+        # After the matmul, the dedicated variable axis has been reduced away.
+        # The output is now one hidden vector per batch item or timestep,
+        # representing the weighted mixture of the original variable slots.
 
         return variable_ctx, sparse_weights
 
@@ -416,12 +505,17 @@ class StaticCovariateEncoder(Module):
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         variable_ctx, sparse_weights = self.vsn(x)
+        # `variable_ctx` is the single static summary vector after TFT has
+        # decided which static variables matter most. From that one summary, the
+        # model derives multiple context vectors for different downstream roles
+        # rather than forcing each downstream stage to relearn the static view
+        # from scratch.
 
         # Context vectors:
-        # variable selection context - cs
-        # enrichment context - ce
-        # state_c context - cc - cell state
-        # state_h context - ch - hiddne state
+        # - `cs`: variable-selection context
+        # - `ce`: static-enrichment context
+        # - `ch`: initial recurrent hidden state
+        # - `cc`: initial recurrent cell state
         cs, ce, ch, cc = [m(variable_ctx) for m in self.context_grns]
 
         return cs, ce, ch, cc
@@ -453,13 +547,25 @@ class InterpretableMultiHeadAttention(Module):
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
         bs, t, h_size = x.shape
+        # The linear layer emits:
+        # - one query vector per head
+        # - one key vector per head
+        # - one shared value vector
+        #
+        # TFT's "interpretable" attention variant shares the value projection
+        # across heads, then averages head-specific attention outputs later.
         qkv = self.qkv_linears(x)
         q, k, v = qkv.split((self.n_head * self.d_head, self.n_head * self.d_head, self.d_head), dim=-1)
         q = q.view(bs, t, self.n_head, self.d_head)
         k = k.view(bs, t, self.n_head, self.d_head)
         v = v.view(bs, t, self.d_head)
 
-        # attn_score = torch.einsum('bind,bjnd->bnij', q, k)
+        # Attention score shape after matmul:
+        #   [batch, heads, query_time, key_time]
+        #
+        # Every decoder/history position can attend to earlier positions, but
+        # the causal mask below prevents it from attending to anything to its
+        # right.
         attn_score = torch.matmul(q.permute((0, 2, 1, 3)), k.permute((0, 2, 3, 1)))
         attn_score.mul_(self.scale)
 
@@ -468,7 +574,8 @@ class InterpretableMultiHeadAttention(Module):
         attn_prob = F.softmax(attn_score, dim=3)
         attn_prob = self.attn_dropout(attn_prob)
 
-        # attn_vec = torch.einsum('bnij,bjd->bnid', attn_prob, v)
+        # Multiply the attention probabilities by the shared value vectors, then
+        # average across heads to preserve TFT's interpretable-head design.
         attn_vec = torch.matmul(attn_prob, v.unsqueeze(1))
         m_attn_vec = torch.mean(attn_vec, dim=1)
         out = self.out_proj(m_attn_vec)
@@ -544,11 +651,20 @@ class TFTBack(Module):
         # not lose the raw variable-selection output.
         input_embedding = torch.cat([historical_features, future_features], dim=1)
         temporal_features = torch.cat([history, future], dim=1)
+        # At this point both tensors are aligned over the full example axis:
+        # - `input_embedding` is the pre-LSTM representation after variable selection
+        # - `temporal_features` is the post-LSTM temporal representation
+        #
+        # The gated residual merge lets TFT refine the recurrent output without
+        # discarding the direct variable-selection signal.
         temporal_features = self.input_gate(temporal_features)
         temporal_features = temporal_features + input_embedding
         temporal_features = self.input_gate_ln(temporal_features)
 
         # Static enrichment
+        # This is where the static context vector `ce` is injected back into the
+        # temporal stream so the per-timestep representation can depend on the
+        # subject-level/static context learned earlier.
         enriched = self.enrichment_grn(temporal_features, c=ce)
 
         # Temporal self attention
@@ -564,6 +680,9 @@ class TFTBack(Module):
         x = self.attention_gate(x)
         x = x + enriched
         x = self.attention_ln(x)
+        # After causal attention, TFT keeps another residual path from the
+        # enriched temporal features so the attention block learns adjustments
+        # rather than replacing the whole decoder representation.
 
         # Position-wise feed-forward
         x = self.positionwise_grn(x)
@@ -600,7 +719,12 @@ class TemporalFusionTransformer(Module):
         self.embedding = LazyEmbedding(config)
 
         self.static_encoder = StaticCovariateEncoder(config)
-        self.TFTpart2 = torch.jit.script(TFTBack(config))
+        # Same targeted suppression as above: this is valid TorchScript usage,
+        # but some Pylance/PyTorch stub combinations report it as a private
+        # export even when runtime behavior is correct.
+        self.TFTpart2 = torch.jit.script(  # pyright: ignore[reportPrivateImportUsage]
+            TFTBack(config)
+        )
 
     def forward_with_features(self, x: TFTInputBatch) -> Tuple[Tensor, Tensor]:
         # Accept the same optional-group contract as `forward(...)` because the
@@ -624,6 +748,10 @@ class TemporalFusionTransformer(Module):
             _historical_inputs.insert(0,t_observed_inp[:,:self.encoder_length,:])
 
         historical_inputs = torch.cat(_historical_inputs, dim=-2)
+        # Concatenation happens along the variable axis, not the time axis:
+        # - all historical groups already share the same encoder timeline
+        # - TFT needs them as separate variable slots available at each
+        #   historical timestep
         # The future stream contains only variables known ahead at inference
         # time. Observed-only inputs and the target are not available there.
         future_inputs = t_known_inp[:, self.encoder_length:]

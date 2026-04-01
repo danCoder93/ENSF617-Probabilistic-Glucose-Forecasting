@@ -25,7 +25,9 @@ forecasting stack.
 ## Files Added or Updated
 
 - `src/train.py`
-- `src/utils/config.py`
+- `src/config/runtime.py`
+- `src/config/observability.py`
+- `src/config/__init__.py`
 - `tests/test_train.py`
 - `README.md`
 
@@ -100,7 +102,7 @@ instead of only a bare `Trainer(...)` call in ad hoc notebooks.
 ### 3. Snapshot and Trainer Config Types
 
 The work also added two project-level config dataclasses in
-`src/utils/config.py`:
+`src/config/runtime.py`:
 
 - `SnapshotConfig`
 - `TrainConfig`
@@ -198,7 +200,7 @@ The intended usage pattern is:
 ```python
 from data.datamodule import AZT1DDataModule
 from train import FusedModelTrainer
-from utils.config import SnapshotConfig, TrainConfig
+from config import SnapshotConfig, TrainConfig
 
 datamodule = AZT1DDataModule(config.data)
 
@@ -213,3 +215,23 @@ artifacts = runner.fit_test_predict(datamodule)
 
 This keeps notebook or `main.py` setup code small while still making the
 Lightning run policy explicit and configurable.
+
+## Later Structural Update
+
+After the initial training-wrapper work, the repository also promoted the
+configuration layer into a dedicated top-level package:
+
+- `src/config/data.py`
+- `src/config/model.py`
+- `src/config/runtime.py`
+- `src/config/observability.py`
+- `src/config/serde.py`
+
+That means the training wrapper now sits on top of a clearer config ownership
+boundary instead of relying on one oversized `utils/config.py` module.
+
+The behavioral intent stayed the same, but the architectural story improved:
+
+- config is no longer treated as a generic utility
+- runtime policy now lives in a purpose-specific config module
+- imports better reflect the true structure of the repository

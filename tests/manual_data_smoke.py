@@ -24,7 +24,7 @@ if str(SRC_DIR) not in sys.path:
 
 from data.datamodule import AZT1DDataModule
 from data.dataset import BatchItem
-from utils.config import DataConfig
+from config import DataConfig
 
 
 # ============================================================

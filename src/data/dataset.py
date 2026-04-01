@@ -1,15 +1,13 @@
-"""
-AI-assisted implementation note:
-This file was drafted with AI assistance and then reviewed/adapted for this
-project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
-work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
-DataModule docs/tutorial
-(https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
-original AZT1D dataset release on Mendeley Data
-(https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to move
-sample assembly into a dedicated Dataset layer aligned with the fused TCN +
-TFT batch contract.
-"""
+# AI-assisted implementation note:
+# This file was drafted with AI assistance and then reviewed/adapted for this
+# project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
+# work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
+# DataModule docs/tutorial
+# (https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
+# original AZT1D dataset release on Mendeley Data
+# (https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to move
+# sample assembly into a dedicated Dataset layer aligned with the fused TCN +
+# TFT batch contract.
 
 from __future__ import annotations
 
@@ -34,6 +32,14 @@ from data.schema import FeatureGroups
 # ============================================================
 
 class BatchMetadata(TypedDict):
+    """
+    Human-readable sequence boundary metadata attached to one sample.
+
+    Context:
+    this payload is carried alongside tensors so debugging, report generation,
+    and prediction export can still identify which subject and which time range
+    produced a given window.
+    """
     subject_id: str
     encoder_start: str
     encoder_end: str
@@ -42,6 +48,14 @@ class BatchMetadata(TypedDict):
 
 
 class BatchItem(TypedDict):
+    """
+    Full batch-item contract emitted by `AZT1DSequenceDataset`.
+
+    Context:
+    the keys here are semantic model-input groups, not raw dataframe columns.
+    Keeping that contract explicit makes the dataset, model, and observability
+    layers easier to align and debug.
+    """
     static_categorical: Tensor
     static_continuous: Tensor
     encoder_continuous: Tensor

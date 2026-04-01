@@ -27,7 +27,19 @@ from torch import Tensor
 
 from data.datamodule import AZT1DDataModule
 from models.fused_model import FusedModel
-from utils.config import Config, SnapshotConfig, TrainConfig
+from observability import (
+    ObservabilityArtifacts,
+    build_observability_callbacks,
+    log_hyperparameters,
+    setup_observability,
+)
+from config import (
+    Config,
+    ObservabilityConfig,
+    SnapshotConfig,
+    TrainConfig,
+    config_to_dict,
+)
 
 
 CheckpointAlias = Literal["best", "last"]
@@ -35,9 +47,20 @@ CheckpointSelection = CheckpointAlias | str | Path | None
 
 @dataclass(frozen=True)
 class FitArtifacts:
-    # Lightweight record returned by `fit(...)` so outer scripts can inspect
-    # the exact model/trainer/runtime-config combination used for the run
-    # without poking at mutable trainer-wrapper internals.
+    """
+    Immutable summary of the fitted training state.
+
+    Purpose:
+    give higher-level workflow code one stable object to inspect after
+    `fit(...)` completes.
+
+    Context:
+    the trainer wrapper owns several pieces of state that matter after fitting,
+    including the bound runtime config, the Trainer instance, split
+    availability, and the resolved best-checkpoint path. Returning them through
+    one immutable structure is clearer than asking callers to inspect mutable
+    wrapper internals.
+    """
     model: FusedModel
     runtime_config: Config
     trainer: Trainer
@@ -48,16 +71,30 @@ class FitArtifacts:
 
 @dataclass(frozen=True)
 class TrainingRunArtifacts:
-    # Convenience container for the common "train, then evaluate, then collect
-    # held-out predictions" workflow. Keeping this explicit makes notebook
-    # experimentation less error-prone than returning a loosely structured
-    # tuple whose ordering has to be remembered by the caller.
+    """
+    Convenience container for the end-to-end train/evaluate/predict workflow.
+
+    Purpose:
+    hold the common "train, then evaluate, then collect held-out predictions"
+    workflow outputs in one explicit structure.
+
+    Context:
+    notebook and script call sites are less error-prone when they receive named
+    fields instead of a positional tuple whose ordering has to be remembered.
+    """
     fit: FitArtifacts
     test_metrics: list[Mapping[str, float]] | None
     test_predictions: list[Tensor] | None
 
 
 def _dataset_size(dataset: Sized | None) -> int:
+    """
+    Return the size of a split dataset, treating `None` as zero.
+
+    Context:
+    the DataModule starts with split datasets unset, so this helper keeps the
+    trainer wrapper's availability checks simple and uniform.
+    """
     # Small helper to keep all "does this split actually have any windows?"
     # checks consistent across fit/validation/test orchestration.
     #
@@ -71,13 +108,18 @@ class FusedModelTrainer:
     """
     Thin orchestration layer around Lightning's Trainer for this repository.
 
+    Purpose:
+    keep Trainer lifecycle orchestration in one reusable place for this
+    repository.
+
     Responsibility boundary:
     - `FusedModel` owns forward/loss/optimizer behavior
     - `AZT1DDataModule` owns data preparation and loaders
     - this class owns the Trainer lifecycle: fit, validation, test, prediction,
       and optional checkpoint snapshots
 
-    This keeps `main.py` or notebooks free to handle experiment-specific setup
+    Context:
+    this keeps `main.py` and notebooks free to handle experiment-specific setup
     without rebuilding the same Lightning orchestration glue each time.
     """
 
@@ -90,6 +132,7 @@ class FusedModelTrainer:
         optimizer_name: str = "adam",
         trainer_config: TrainConfig | None = None,
         snapshot_config: SnapshotConfig | None = None,
+        observability_config: ObservabilityConfig | None = None,
         logger: Any = None,
         callbacks: Sequence[Callback] = (),
     ) -> None:
@@ -113,12 +156,20 @@ class FusedModelTrainer:
         # hand for a first experiment.
         self.trainer_config = trainer_config or TrainConfig()
         self.snapshot_config = snapshot_config or SnapshotConfig()
+        self.observability_config = observability_config or ObservabilityConfig()
 
         # `logger` and custom callbacks are left fully injectable because those
         # often vary from one experiment surface to another even when the
         # underlying model/data config stays the same.
+        #
+        # The observability bundle is constructed here, outside the model,
+        # because logger/profiler/debug policy should remain a runtime concern
+        # that can evolve without altering the checkpointed model contract.
         self.logger = logger
         self.callbacks = tuple(callbacks)
+        self.observability_artifacts: ObservabilityArtifacts = setup_observability(
+            self.observability_config
+        )
 
         # The fields below are populated lazily as the wrapper progresses
         # through `fit(...)`. Keeping them on the instance allows later calls to
@@ -184,7 +235,27 @@ class FusedModelTrainer:
         # Start from any user-supplied callbacks so the wrapper remains
         # extensible; the project-specific callbacks are appended after that so
         # they can coexist with logger-specific or experiment-specific hooks.
+        #
+        # Centralizing this in the trainer wrapper means CLI runs, notebook
+        # runs, and future automation all receive the same observability policy
+        # without duplicating callback assembly logic.
         callbacks = list(self.callbacks)
+        callbacks.extend(
+            build_observability_callbacks(
+                self.observability_config,
+                text_logger=self.observability_artifacts.text_logger,
+            )
+        )
+        # Ordering note:
+        # - start with caller-supplied callbacks so the wrapper respects any
+        #   explicit experiment hooks
+        # - append project observability callbacks next so the standard logging
+        #   and telemetry stack is active by default
+        # - append checkpointing / early stopping after that because those are
+        #   run-control policies rather than diagnostic hooks
+        #
+        # In practice, this means the callback list reads from "observe the run"
+        # toward "control the run".
         snapshot_config = self.snapshot_config
 
         if snapshot_config.enabled:
@@ -251,6 +322,8 @@ class FusedModelTrainer:
                     patience=self.trainer_config.early_stopping_patience,
                 )
             )
+        # The resulting callback list is the wrapper's full training policy:
+        # diagnostics, checkpoints, and early stopping all leave here together.
 
         return callbacks
 
@@ -281,9 +354,22 @@ class FusedModelTrainer:
             "limit_test_batches": config.limit_test_batches,
             "enable_progress_bar": config.enable_progress_bar,
             "enable_model_summary": config.enable_model_summary,
-            "logger": self.logger,
+            "logger": self.logger or self.observability_artifacts.logger,
             "callbacks": self.build_callbacks(has_validation_data=has_validation_data),
+            "profiler": self.observability_artifacts.profiler,
         }
+        # The kwargs dictionary is effectively the translation layer between the
+        # repository's typed runtime config objects and Lightning's Trainer API.
+        # Keeping that mapping explicit here makes it much easier to answer:
+        # - which config field controls which Trainer behavior?
+        # - what changes when validation data is absent?
+        # - where does observability enter the Trainer lifecycle?
+        # Important disclaimer:
+        # - an explicitly supplied logger wins over the observability-managed
+        #   logger bundle
+        # - otherwise the wrapper uses the configured TensorBoard/CSV logger
+        # This keeps the wrapper flexible for future experiment surfaces while
+        # still giving the project a strong default logging path.
         if config.default_root_dir is not None:
             # Lightning accepts `str | PathLike`, but we normalize to plain
             # strings here for consistency with the rest of the wrapper.
@@ -293,6 +379,10 @@ class FusedModelTrainer:
         # gradient steps, validation scheduling, accelerator/device placement,
         # precision behavior, callback dispatch, and loop bookkeeping.
         trainer = Trainer(**trainer_kwargs)
+        # After construction, the wrapper keeps a handle to the Trainer because
+        # later stages like `test(...)` and `predict_test(...)` intentionally
+        # reuse the same in-memory Lightning session instead of rebuilding
+        # everything from scratch.
         self.trainer = trainer
         return trainer
 
@@ -311,12 +401,33 @@ class FusedModelTrainer:
         has_validation_data = _dataset_size(datamodule.val_dataset) > 0
         has_test_data = _dataset_size(datamodule.test_dataset) > 0
         trainer = self.build_trainer(has_validation_data=has_validation_data)
+        # Log the effective runtime contract right before training starts so
+        # TensorBoard's hparams view reflects the final bound config and the
+        # active observability policy, not just the original declarative input.
+        log_hyperparameters(
+            trainer,
+            {
+                "config": config_to_dict(self.runtime_config or self.config),
+                "optimizer": {
+                    "learning_rate": self.learning_rate,
+                    "weight_decay": self.weight_decay,
+                    "optimizer_name": self.optimizer_name,
+                },
+                "train_config": dict(self.trainer_config.__dict__),
+                "snapshot_config": dict(self.snapshot_config.__dict__),
+                "observability_config": dict(self.observability_config.__dict__),
+            },
+        )
 
         trainer.fit(
             model=model,
             datamodule=datamodule,
             ckpt_path=str(ckpt_path) if ckpt_path is not None else None,
         )
+        # Once `trainer.fit(...)` starts, Lightning owns the epoch loop:
+        # optimization, validation scheduling, callback dispatch, accelerator
+        # placement, precision behavior, and checkpoint updates all happen
+        # inside Lightning rather than in this wrapper.
 
         # Cache the best checkpoint path after fitting so later calls to
         # `test(..., ckpt_path="best")` or `predict_test(..., ckpt_path="best")`
@@ -381,6 +492,11 @@ class FusedModelTrainer:
                     "`ckpt_path=None` to evaluate the current in-memory weights."
                 )
             alias: CheckpointAlias = "best" if ckpt_path == "best" else "last"
+            # For these aliases we intentionally keep Lightning in the loop
+            # rather than resolving to a raw filesystem path ourselves. That
+            # preserves Lightning's built-in alias semantics and keeps the
+            # surrounding `trainer.test(...)` / `trainer.predict(...)` calls
+            # aligned with normal Trainer behavior.
             return alias
         return str(Path(ckpt_path))
 
@@ -428,6 +544,12 @@ class FusedModelTrainer:
         resolved_ckpt_path = self._resolve_checkpoint_reference(ckpt_path)
         model = self._model_for_evaluation(resolved_ckpt_path)
         _, trainer = self._require_fit_state()
+        # The wrapper's job here is only to choose:
+        # - which weights should be evaluated?
+        # - which split should be evaluated?
+        #
+        # The actual loop semantics, metric reduction, and callback handling are
+        # still delegated to Lightning's `trainer.test(...)`.
 
         # Lightning handles the test loop itself; this wrapper just chooses the
         # model/checkpoint source and provides the correct DataModule.
@@ -462,6 +584,9 @@ class FusedModelTrainer:
         resolved_ckpt_path = self._resolve_checkpoint_reference(ckpt_path)
         model = self._model_for_evaluation(resolved_ckpt_path)
         _, trainer = self._require_fit_state()
+        # This mirrors the checkpoint-selection logic used by `test(...)`, but
+        # routes into the prediction loop so the caller gets raw forecast
+        # tensors instead of reduced scalar metrics.
 
         # We pass the explicit test dataloader rather than the whole DataModule
         # because this method is specifically about producing predictions for

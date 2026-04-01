@@ -50,7 +50,9 @@ trainer/bootstrap concerns for a later step.
 - `src/models/grn.py`
 - `src/models/nn_head.py`
 - `src/models/tcn.py`
-- `src/utils/config.py`
+- `src/config/model.py`
+- `src/config/serde.py`
+- `src/config/__init__.py`
 - `tests/test_fused_model.py`
 - `tests/test_config.py`
 - `README.md`
@@ -231,7 +233,7 @@ and checkpoint-loading workflows.
 
 ### Implementation details
 
-`src/utils/config.py` now includes:
+the config layer now includes:
 
 - `config_to_dict(...)`
 - `config_from_dict(...)`
@@ -308,8 +310,18 @@ This pass also cleaned up documentation style inside the model files.
   - `Normalization choice:`
   - `Forecasting constraint:`
   - `Block structure:`
-- the top AI-maintenance note in `src/utils/config.py` was reformatted to match
+- the top AI-maintenance note in the config layer was reformatted to match
   the style used in `src/models/`
+
+### Later structural note
+
+After this integration pass, the repository moved its config system into the
+dedicated `src/config/` package. The behavior described here still applies, but
+the canonical paths are now:
+
+- `src/config/model.py`
+- `src/config/serde.py`
+- `src/config/__init__.py`
 
 ### Design rationale
 

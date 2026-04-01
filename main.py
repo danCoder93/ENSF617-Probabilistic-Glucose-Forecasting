@@ -34,13 +34,21 @@ from defaults import (
     DEFAULT_OUTPUT_DIR,
     ROOT_DIR,
     build_default_config,
+    build_default_observability_config,
     build_default_snapshot_config,
     build_default_train_config,
 )
 
 from data.datamodule import AZT1DDataModule
+from observability import export_prediction_table, generate_plotly_reports
 from train import CheckpointSelection, FitArtifacts, FusedModelTrainer
-from utils.config import Config, SnapshotConfig, TrainConfig, config_to_dict
+from config import (
+    Config,
+    ObservabilityConfig,
+    SnapshotConfig,
+    TrainConfig,
+    config_to_dict,
+)
 
 try:
     from pytorch_lightning import seed_everything
@@ -54,16 +62,29 @@ except ImportError:  # pragma: no cover - import failure is surfaced at runtime
 
 @dataclass(frozen=True)
 class MainRunArtifacts:
-    # This dataclass gives callers one stable object to inspect after a run.
-    # That makes the notebook experience nicer than having to remember tuple
-    # positions, and it keeps the CLI/workflow code explicit about which
-    # artifacts are expected to exist.
+    """
+    Stable summary of the major artifacts produced by a top-level run.
+
+    Purpose:
+    provide one stable object describing the major outputs of a top-level
+    workflow execution.
+
+    Context:
+    the CLI, tests, and notebooks all receive the same named result contract,
+    which keeps downstream inspection much clearer than relying on positional
+    tuples or peeking into mutable workflow internals.
+    """
     fit: FitArtifacts
     test_metrics: list[Mapping[str, float]] | None
     test_predictions: list[torch.Tensor] | None
     summary: dict[str, Any]
     summary_path: Path | None
     predictions_path: Path | None
+    prediction_table_path: Path | None
+    report_paths: dict[str, Path]
+    telemetry_path: Path | None
+    logger_dir: Path | None
+    text_log_path: Path | None
 
 
 def _json_ready(value: Any) -> Any:
@@ -162,6 +183,7 @@ def _build_run_summary(
     config: Config,
     train_config: TrainConfig,
     snapshot_config: SnapshotConfig,
+    observability_config: ObservabilityConfig,
     fit_artifacts: FitArtifacts,
     eval_ckpt_path: CheckpointSelection,
     learning_rate: float,
@@ -171,6 +193,11 @@ def _build_run_summary(
     test_metrics: list[Mapping[str, float]] | None,
     predictions: list[torch.Tensor] | None,
     predictions_path: Path | None,
+    prediction_table_path: Path | None,
+    report_paths: Mapping[str, Path],
+    logger_dir: Path | None,
+    text_log_path: Path | None,
+    telemetry_path: Path | None,
 ) -> dict[str, Any]:
     # The summary is intentionally lightweight and human-readable:
     # enough to reproduce the broad run setup and locate the major artifacts,
@@ -185,10 +212,21 @@ def _build_run_summary(
         "config": config_to_dict(config),
         "train_config": _json_ready(train_config),
         "snapshot_config": _json_ready(snapshot_config),
+        "observability_config": _json_ready(observability_config),
         "optimizer": {
             "learning_rate": learning_rate,
             "weight_decay": weight_decay,
             "optimizer_name": optimizer_name,
+        },
+        "environment": {
+            "torch_version": torch.__version__,
+            "cuda_available": torch.cuda.is_available(),
+            "cuda_device_count": torch.cuda.device_count(),
+            "cuda_device_name": (
+                torch.cuda.get_device_name(torch.cuda.current_device())
+                if torch.cuda.is_available()
+                else None
+            ),
         },
         "fit": {
             "has_validation_data": fit_artifacts.has_validation_data,
@@ -207,6 +245,22 @@ def _build_run_summary(
             if predictions is None
             else [list(tensor.shape) for tensor in predictions],
             "saved_to": str(predictions_path) if predictions_path is not None else None,
+            "table_path": (
+                str(prediction_table_path)
+                if prediction_table_path is not None
+                else None
+            ),
+        },
+        "observability": {
+            "logger_dir": str(logger_dir) if logger_dir is not None else None,
+            "text_log_path": str(text_log_path) if text_log_path is not None else None,
+            "telemetry_path": str(telemetry_path) if telemetry_path is not None else None,
+            "profiler_path": (
+                str(observability_config.profiler_path)
+                if observability_config.profiler_path is not None
+                else None
+            ),
+            "report_paths": {name: str(path) for name, path in report_paths.items()},
         },
     }
 
@@ -216,6 +270,7 @@ def run_training_workflow(
     *,
     train_config: TrainConfig | None = None,
     snapshot_config: SnapshotConfig | None = None,
+    observability_config: ObservabilityConfig | None = None,
     learning_rate: float = 1e-3,
     weight_decay: float = 0.0,
     optimizer_name: str = "adam",
@@ -260,8 +315,16 @@ def run_training_workflow(
     effective_snapshot_config = snapshot_config or build_default_snapshot_config(
         output_dir=output_dir,
     )
+    effective_observability_config = observability_config or build_default_observability_config(
+        output_dir=output_dir,
+    )
     # If the caller supplied explicit configs we respect them verbatim.
     # Otherwise we derive defaults that are aligned with the chosen output dir.
+    #
+    # Important disclaimer:
+    # - this workflow treats observability as first-class run configuration
+    # - the defaults are intentionally visibility-friendly, but callers still
+    #   remain free to dial them down for very constrained hardware sessions
 
     datamodule = AZT1DDataModule(config.data)
     # The training wrapper deliberately sits between the top-level workflow and
@@ -274,7 +337,12 @@ def run_training_workflow(
         optimizer_name=optimizer_name,
         trainer_config=effective_train_config,
         snapshot_config=effective_snapshot_config,
+        observability_config=effective_observability_config,
     )
+    trainer_observability = getattr(trainer, "observability_artifacts", None)
+    text_logger = getattr(trainer_observability, "text_logger", None)
+    if text_logger is not None:
+        text_logger.info("starting training workflow")
 
     fit_artifacts = trainer.fit(datamodule, ckpt_path=fit_ckpt_path)
     # Evaluation may target `"best"`, `"last"`, an explicit checkpoint path,
@@ -285,6 +353,8 @@ def run_training_workflow(
     test_metrics: list[Mapping[str, float]] | None = None
     test_predictions: list[torch.Tensor] | None = None
     predictions_path: Path | None = None
+    prediction_table_path: Path | None = None
+    report_paths: dict[str, Path] = {}
 
     if fit_artifacts.has_test_data and not skip_test:
         test_metrics = trainer.test(datamodule, ckpt_path=resolved_eval_ckpt_path)
@@ -307,11 +377,33 @@ def run_training_workflow(
                 [tensor.detach().cpu() for tensor in test_predictions],
                 predictions_path,
             )
+        if effective_observability_config.enable_prediction_exports:
+            # The CSV export is intentionally additive rather than a replacement
+            # for the raw tensor artifact. We keep both because they serve
+            # different debugging/research use cases.
+            quantiles = getattr(fit_artifacts.model, "quantiles", (0.1, 0.5, 0.9))
+            prediction_table_path = export_prediction_table(
+                datamodule=datamodule,
+                predictions=test_predictions,
+                quantiles=quantiles,
+                output_path=effective_observability_config.prediction_table_path,
+                sampling_interval_minutes=config.data.sampling_interval_minutes,
+            )
+        if effective_observability_config.enable_plot_reports:
+            # Plotly reports are generated from the flat prediction table so the
+            # reporting path stays decoupled from the in-memory prediction
+            # tensor structure.
+            report_paths = generate_plotly_reports(
+                prediction_table_path,
+                report_dir=effective_observability_config.report_dir,
+                max_subjects=effective_observability_config.max_forecast_subjects_per_report,
+            )
 
     summary = _build_run_summary(
         config=config,
         train_config=effective_train_config,
         snapshot_config=effective_snapshot_config,
+        observability_config=effective_observability_config,
         fit_artifacts=fit_artifacts,
         eval_ckpt_path=resolved_eval_ckpt_path,
         learning_rate=learning_rate,
@@ -321,6 +413,11 @@ def run_training_workflow(
         test_metrics=test_metrics,
         predictions=test_predictions,
         predictions_path=predictions_path,
+        prediction_table_path=prediction_table_path,
+        report_paths=report_paths,
+        logger_dir=getattr(trainer_observability, "logger_dir", None),
+        text_log_path=getattr(trainer_observability, "text_log_path", None),
+        telemetry_path=getattr(trainer_observability, "telemetry_path", None),
     )
 
     summary_path: Path | None = None
@@ -337,6 +434,11 @@ def run_training_workflow(
         summary=summary,
         summary_path=summary_path,
         predictions_path=predictions_path,
+        prediction_table_path=prediction_table_path,
+        report_paths=report_paths,
+        telemetry_path=getattr(trainer_observability, "telemetry_path", None),
+        logger_dir=getattr(trainer_observability, "logger_dir", None),
+        text_log_path=getattr(trainer_observability, "text_log_path", None),
     )
 
 
@@ -399,6 +501,21 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-save-predictions", action="store_true")
     parser.add_argument("--disable-checkpoints", action="store_true")
     parser.add_argument("--save-weights-only", action="store_true")
+    parser.add_argument("--observability-mode", default="baseline")
+    parser.add_argument("--disable-tensorboard", action="store_true")
+    parser.add_argument("--disable-plot-reports", action="store_true")
+    parser.add_argument("--disable-system-telemetry", action="store_true")
+    parser.add_argument("--disable-gradient-stats", action="store_true")
+    parser.add_argument("--enable-activation-stats", action="store_true")
+    parser.add_argument("--disable-parameter-histograms", action="store_true")
+    parser.add_argument("--disable-parameter-scalars", action="store_true")
+    parser.add_argument("--disable-prediction-figures", action="store_true")
+    parser.add_argument("--disable-model-graph", action="store_true")
+    parser.add_argument("--disable-model-text", action="store_true")
+    parser.add_argument("--disable-torchview", action="store_true")
+    parser.add_argument("--torchview-depth", type=int, default=4)
+    parser.add_argument("--enable-profiler", action="store_true")
+    parser.add_argument("--profiler-type", default="simple")
     # This parser intentionally does not try to expose every possible nested
     # config field. The goal is a practical top-level entrypoint, not a
     # one-to-one command-line mirror of every internal dataclass.
@@ -460,15 +577,36 @@ def main(argv: Sequence[str] | None = None) -> MainRunArtifacts:
         dirpath=None if args.checkpoint_dir is None else Path(args.checkpoint_dir),
         save_weights_only=args.save_weights_only,
     )
+    observability_config = build_default_observability_config(
+        mode=args.observability_mode,
+        output_dir=output_dir,
+        enable_tensorboard=not args.disable_tensorboard,
+        enable_system_telemetry=not args.disable_system_telemetry,
+        enable_gradient_stats=not args.disable_gradient_stats,
+        enable_activation_stats=args.enable_activation_stats,
+        enable_parameter_histograms=not args.disable_parameter_histograms,
+        enable_parameter_scalars=not args.disable_parameter_scalars,
+        enable_prediction_figures=not args.disable_prediction_figures,
+        enable_model_graph=not args.disable_model_graph,
+        enable_model_text=not args.disable_model_text,
+        enable_torchview=not args.disable_torchview,
+        enable_profiler=args.enable_profiler,
+        enable_plot_reports=not args.disable_plot_reports,
+        profiler_type=args.profiler_type,
+        torchview_depth=args.torchview_depth,
+    )
     # At this point we have three layers of structured configuration:
     # - `config` for data/model semantics
     # - `train_config` for Trainer behavior
     # - `snapshot_config` for checkpoint policy
+    # - `observability_config` for logging, telemetry, visualization, and
+    #   debug/report artifacts
 
     artifacts = run_training_workflow(
         config,
         train_config=train_config,
         snapshot_config=snapshot_config,
+        observability_config=observability_config,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         optimizer_name=args.optimizer,
@@ -501,6 +639,21 @@ def main(argv: Sequence[str] | None = None) -> MainRunArtifacts:
         print(json.dumps(_json_ready(artifacts.test_metrics), indent=2))
     if artifacts.predictions_path is not None:
         print(f"Saved test predictions to: {artifacts.predictions_path}")
+    if artifacts.prediction_table_path is not None:
+        print(f"Saved prediction table to: {artifacts.prediction_table_path}")
+    if artifacts.report_paths:
+        print("Saved Plotly reports:")
+        print(json.dumps(_json_ready(artifacts.report_paths), indent=2))
+    if artifacts.telemetry_path is not None:
+        print(f"Saved telemetry log to: {artifacts.telemetry_path}")
+    if artifacts.text_log_path is not None:
+        print(f"Saved text log to: {artifacts.text_log_path}")
+    profiler_path = artifacts.summary.get("observability", {}).get("profiler_path")
+    if profiler_path is not None:
+        print(f"Profiler output path: {profiler_path}")
+    torchview_path = artifacts.summary.get("observability_config", {}).get("torchview_path")
+    if torchview_path is not None:
+        print(f"Torchview output base path: {torchview_path}")
     if artifacts.summary_path is not None:
         print(f"Saved run summary to: {artifacts.summary_path}")
 

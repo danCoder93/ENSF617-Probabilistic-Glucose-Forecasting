@@ -1,14 +1,12 @@
-"""
-AI-assisted implementation note:
-This file was drafted with AI assistance and then reviewed/adapted for this
-project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
-work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
-DataModule docs/tutorial
-(https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
-original AZT1D dataset release on Mendeley Data
-(https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to separate
-split policy and sequence indexing from dataset tensor assembly.
-"""
+# AI-assisted implementation note:
+# This file was drafted with AI assistance and then reviewed/adapted for this
+# project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
+# work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
+# DataModule docs/tutorial
+# (https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
+# original AZT1D dataset release on Mendeley Data
+# (https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to separate
+# split policy and sequence indexing from dataset tensor assembly.
 
 from __future__ import annotations
 
@@ -17,7 +15,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from data.schema import FeatureGroups
-from utils.config import DataConfig
+from config import DataConfig
 
 
 # ============================================================
@@ -50,6 +48,14 @@ def split_processed_frame(
     config: DataConfig,
     feature_groups: FeatureGroups,
 ) -> dict[str, pd.DataFrame]:
+    """
+    Apply the configured split policy to the cleaned dataframe.
+
+    Context:
+    this function is the policy boundary between one full cleaned table and the
+    split-specific tables later consumed by sequence indexing and dataset
+    assembly.
+    """
     # Split policy belongs to orchestration, not to the Dataset. Keeping it
     # here lets us swap policies without changing sample assembly code.
     if config.split_by_subject:
@@ -141,6 +147,13 @@ def _split_by_subject(
     subject_id_column: str,
     time_column: str,
 ) -> dict[str, pd.DataFrame]:
+    """
+    Assign entire subjects to exactly one split.
+
+    Context:
+    this is the strongest leakage barrier because no subject contributes rows to
+    more than one split.
+    """
     # Strongest leakage barrier: one subject belongs to exactly one split.
     sorted_frame = dataframe.sort_values([subject_id_column, time_column]).reset_index(drop=True)
     subject_ids = sorted(sorted_frame[subject_id_column].astype(str).unique())
@@ -164,6 +177,13 @@ def _split_within_subject(
     subject_id_column: str,
     time_column: str,
 ) -> dict[str, pd.DataFrame]:
+    """
+    Split each subject timeline chronologically into train/val/test segments.
+
+    Context:
+    this preserves subject presence across splits while still respecting time
+    order within each subject trajectory.
+    """
     # Closest to the original behavior: each subject timeline is split
     # chronologically into train/val/test segments.
     train_parts: list[pd.DataFrame] = []
@@ -199,6 +219,13 @@ def _split_globally(
     subject_id_column: str,
     time_column: str,
 ) -> dict[str, pd.DataFrame]:
+    """
+    Split the full dataframe chronologically after global sorting.
+
+    Context:
+    this is the least subject-aware policy and mainly exists as a fallback for
+    experiments that intentionally want a simple global split.
+    """
     # Kept as a fallback policy, although subject-aware splitting is usually
     # more appropriate for patient time-series forecasting.
     dataframe = dataframe.sort_values([subject_id_column, time_column]).reset_index(drop=True)
@@ -221,6 +248,13 @@ def _find_contiguous_segments(
     time_column: str,
     sampling_interval_minutes: int,
 ) -> list[tuple[int, int]]:
+    """
+    Find contiguous row spans that preserve the expected sampling interval.
+
+    Context:
+    sequence windows may not cross real time gaps, so each gap breaks one
+    subject trajectory into separate valid indexing segments.
+    """
     # The forecasting pipeline assumes evenly sampled timesteps, so any time gap
     # breaks one subject trajectory into separate valid segments.
     timestamps = subject_frame[time_column]
@@ -248,6 +282,13 @@ def _split_ids(
     val_ratio: float,
     test_ratio: float,
 ) -> tuple[set[str], set[str], set[str]]:
+    """
+    Partition a sorted subject-id list into split-specific ID sets.
+
+    Context:
+    this helper keeps the subject-level boundary math shared between the split
+    policy and the lower-level bounds calculation.
+    """
     # Integer truncation is deliberate here because split boundaries must land on
     # whole subjects. We still compute test allocation explicitly from
     # `test_ratio` rather than treating it as an implicit remainder, so the code
@@ -262,6 +303,13 @@ def _split_ids(
 
 @dataclass(frozen=True)
 class SplitBounds:
+    """
+    Half-open split boundaries expressed as row or item end indices.
+
+    Context:
+    this small dataclass makes the split math readable and explicit instead of
+    passing around loosely named tuples of integers.
+    """
     train_end: int
     val_end: int
     test_end: int
@@ -273,6 +321,13 @@ def _split_bounds(
     val_ratio: float,
     test_ratio: float,
 ) -> SplitBounds:
+    """
+    Convert split ratios and a total item count into concrete boundaries.
+
+    Context:
+    this helper centralizes the integer-rounding behavior so every split policy
+    treats leftover rows consistently.
+    """
     # We compute each split size from its own declared ratio so `test_ratio` has
     # explicit effect rather than only acting as "whatever rows are left over".
     # Because integer truncation can leave a few unassigned rows, any remainder
@@ -297,6 +352,13 @@ def _split_bounds(
 
 
 def _concat_split_parts(parts: list[pd.DataFrame]) -> pd.DataFrame:
+    """
+    Concatenate split fragments while preserving the empty-split case.
+
+    Context:
+    returning an empty dataframe instead of `None` keeps downstream indexing and
+    DataModule logic simpler and more uniform.
+    """
     if not parts:
         # Returning an empty dataframe keeps downstream code uniform: the
         # DataModule can still attempt index construction and then decide whether

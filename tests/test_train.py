@@ -7,11 +7,27 @@ import pytest
 
 pytest.importorskip("pytorch_lightning")
 from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+from pytorch_lightning.callbacks import (
+    DeviceStatsMonitor,
+    EarlyStopping,
+    LearningRateMonitor,
+    ModelCheckpoint,
+    RichProgressBar,
+)
 
 from data.datamodule import AZT1DDataModule
+from models.fused_model import FusedModel
+from observability import (
+    BatchAuditCallback,
+    GradientStatsCallback,
+    ModelTensorBoardCallback,
+    ParameterHistogramCallback,
+    ParameterScalarTelemetryCallback,
+    PredictionFigureCallback,
+    SystemTelemetryCallback,
+)
 from train import FitArtifacts, FusedModelTrainer
-from utils.config import Config, DataConfig, SnapshotConfig, TCNConfig, TFTConfig, TrainConfig
+from config import Config, DataConfig, SnapshotConfig, TCNConfig, TFTConfig, TrainConfig
 
 
 def _build_base_config(data_config: DataConfig) -> Config:
@@ -74,6 +90,18 @@ def test_build_callbacks_monitor_validation_loss_when_validation_exists() -> Non
     assert checkpoint.save_weights_only is False
     assert early_stopping.monitor == "val_loss"
     assert early_stopping.patience == 3
+    assert any(isinstance(callback, LearningRateMonitor) for callback in callbacks)
+    assert any(isinstance(callback, DeviceStatsMonitor) for callback in callbacks)
+    assert any(isinstance(callback, RichProgressBar) for callback in callbacks)
+    assert any(isinstance(callback, BatchAuditCallback) for callback in callbacks)
+    assert any(isinstance(callback, GradientStatsCallback) for callback in callbacks)
+    assert any(isinstance(callback, SystemTelemetryCallback) for callback in callbacks)
+    assert any(isinstance(callback, ModelTensorBoardCallback) for callback in callbacks)
+    assert any(
+        isinstance(callback, ParameterScalarTelemetryCallback) for callback in callbacks
+    )
+    assert any(isinstance(callback, ParameterHistogramCallback) for callback in callbacks)
+    assert any(isinstance(callback, PredictionFigureCallback) for callback in callbacks)
 
 
 def test_build_callbacks_can_snapshot_weights_only_without_validation() -> None:
@@ -89,14 +117,16 @@ def test_build_callbacks_can_snapshot_weights_only_without_validation() -> None:
 
     callbacks = trainer.build_callbacks(has_validation_data=False)
 
-    assert len(callbacks) == 1
-    checkpoint = callbacks[0]
+    checkpoint = next(
+        callback for callback in callbacks if isinstance(callback, ModelCheckpoint)
+    )
 
     assert isinstance(checkpoint, ModelCheckpoint)
     assert checkpoint.monitor is None
     assert checkpoint.save_top_k == 0
     assert checkpoint.save_last is True
     assert checkpoint.save_weights_only is True
+    assert not any(isinstance(callback, EarlyStopping) for callback in callbacks)
 
 
 def test_checkpoint_alias_requires_fit_before_evaluation(
@@ -123,7 +153,10 @@ def test_fit_test_predict_falls_back_to_in_memory_weights_without_best_checkpoin
     trainer = FusedModelTrainer(_build_base_config(data_config))
 
     fit_artifacts = FitArtifacts(
-        model=cast(object, object()),
+        # Use a real model instance so the test fixture stays compatible with
+        # the typed `FitArtifacts` contract and does not rely on broad object
+        # placeholders that static analysis rejects.
+        model=FusedModel(_build_base_config(data_config)),
         runtime_config=_build_base_config(data_config),
         trainer=cast(Trainer, object()),
         has_validation_data=False,

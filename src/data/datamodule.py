@@ -1,15 +1,13 @@
-"""
-AI-assisted implementation note:
-This file was drafted with AI assistance and then reviewed/adapted for this
-project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
-work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
-DataModule docs/tutorial
-(https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
-original AZT1D dataset release on Mendeley Data
-(https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to support
-the cleaner DataModule-oriented architecture required by the fused TCN + TFT
-training pipeline.
-"""
+# AI-assisted implementation note:
+# This file was drafted with AI assistance and then reviewed/adapted for this
+# project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
+# work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
+# DataModule docs/tutorial
+# (https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
+# original AZT1D dataset release on Mendeley Data
+# (https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to support
+# the cleaner DataModule-oriented architecture required by the fused TCN + TFT
+# training pipeline.
 
 from __future__ import annotations
 
@@ -25,7 +23,7 @@ from data.indexing import build_sequence_index, split_processed_frame
 from data.preprocessor import AZT1DPreprocessor
 from data.schema import FeatureGroups, build_feature_groups
 from data.transforms import build_category_maps, load_processed_frame
-from utils.config import Config, DataConfig
+from config import Config, DataConfig
 from utils.tft_utils import DataTypes, FeatureSpec, InputTypes
 
 # This import block is intentionally a little more complex than a normal import.
@@ -238,7 +236,7 @@ class AZT1DDataModule(_LightningDataModuleBase):
         """
         Return categorical embedding sizes in the exact order expected by TFTConfig.
 
-        Why this method lives on the DataModule:
+        Context:
         - vocabulary sizes are discovered from the cleaned dataframe at runtime
         - the DataModule is the layer that owns that dataframe and fits category
           maps during `setup()`

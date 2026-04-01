@@ -7,6 +7,12 @@ from __future__ import annotations
 # position-wise predictor so the fused model has more expressive final-stage
 # predictive capacity without moving fusion responsibility out of the upstream
 # GRN.
+#
+# Context:
+# this file intentionally stays narrow. It does not own temporal reasoning,
+# multimodal fusion, or probabilistic loss computation. Its job is only to turn
+# one already-fused hidden vector per horizon step into final forecast
+# channels.
 
 import torch.nn as nn
 from torch import Tensor
@@ -110,6 +116,10 @@ class NNHead(nn.Module):
         #   room for a richer nonlinear transformation
         hidden_size = hidden_size or max(input_size, output_size * 8)
         feedforward_size = feedforward_size or hidden_size * 2
+        if hidden_size <= 0:
+            raise ValueError("hidden_size must be > 0")
+        if feedforward_size <= 0:
+            raise ValueError("feedforward_size must be > 0")
 
         # The input projection lets the head widen the representation before
         # the residual refinement stack. A normalization layer immediately

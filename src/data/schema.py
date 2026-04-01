@@ -1,21 +1,19 @@
-"""
-AI-assisted implementation note:
-This file was drafted with AI assistance and then reviewed/adapted for this
-project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
-work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
-DataModule docs/tutorial
-(https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
-original AZT1D dataset release on Mendeley Data
-(https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to define the
-shared schema contract used across preprocessing, indexing, datasets, and
-model configuration.
-"""
+# AI-assisted implementation note:
+# This file was drafted with AI assistance and then reviewed/adapted for this
+# project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
+# work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
+# DataModule docs/tutorial
+# (https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
+# original AZT1D dataset release on Mendeley Data
+# (https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to define the
+# shared schema contract used across preprocessing, indexing, datasets, and
+# model configuration.
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from utils.config import DataConfig
+from config import DataConfig
 from utils.tft_utils import DataTypes, InputTypes
 
 
@@ -108,7 +106,7 @@ DEFAULT_OBSERVED_CATEGORICAL_COLUMNS = ("device_mode", "bolus_type")
 #   Represent the semantic feature groups consumed by the fused
 #   forecasting pipeline.
 #
-# Why this exists:
+# Context:
 #   The dataframe is column-based, but the model contract is
 #   tensor-group based. This object is the translation layer.
 # ============================================================
@@ -117,7 +115,7 @@ class FeatureGroups:
     """
     The data contract used across transforms, indexing, and dataset assembly.
 
-    Why a dedicated structure exists:
+    Context:
     - The raw dataframe is column-oriented.
     - The model pipeline is tensor-group oriented.
     - We need one place that explains how columns map into semantic groups.
@@ -275,6 +273,13 @@ def build_feature_groups(config: DataConfig) -> FeatureGroups:
 
 
 def declared_category_order(column_name: str) -> tuple[str, ...] | None:
+    """
+    Return the canonical category order for known categorical columns.
+
+    Context:
+    returning `None` means the column is still categorical, but its vocabulary
+    should be discovered from the cleaned dataframe rather than hardcoded.
+    """
     # `None` means the column is still categorical, but its vocabulary should be
     # discovered from the cleaned dataframe rather than hardcoded.
     if column_name == "device_mode":
@@ -285,6 +290,14 @@ def declared_category_order(column_name: str) -> tuple[str, ...] | None:
 
 
 def _ordered_unique(values: tuple[str, ...]) -> tuple[str, ...]:
+    """
+    Preserve the first occurrence of each feature name while removing duplicates.
+
+    Context:
+    tensor column order must stay stable across data preparation, checkpoint
+    serialization, and model construction, so deduplication cannot scramble the
+    declared order.
+    """
     # Feature order matters because tensor column order must be stable across
     # every batch, checkpoint, and model initialization. A small helper keeps
     # that guarantee explicit and reusable.

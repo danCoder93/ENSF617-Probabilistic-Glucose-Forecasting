@@ -4,7 +4,7 @@ from __future__ import annotations
 # This module centralizes the repository's "starter" runtime configuration for
 # the top-level script and notebook entrypoints.
 #
-# Why this file exists:
+# Context:
 # - `main.py` and `main.ipynb` should share one source of truth for baseline
 #   data/model/training settings.
 # - keeping those defaults in one place reduces drift between the CLI and the
@@ -28,13 +28,21 @@ from typing import Sequence
 
 ROOT_DIR = Path(__file__).resolve().parent
 SRC_DIR = ROOT_DIR / "src"
-# The project uses direct imports like `from data...` and `from utils...`.
+# The project uses direct imports like `from data...` and `from config...`.
 # Adding `src/` here means any consumer that imports `defaults.py` from the
 # repository root gets the same import behavior as the tests and notebooks.
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from utils.config import Config, DataConfig, SnapshotConfig, TCNConfig, TFTConfig, TrainConfig
+from config import (
+    Config,
+    DataConfig,
+    ObservabilityConfig,
+    SnapshotConfig,
+    TCNConfig,
+    TFTConfig,
+    TrainConfig,
+)
 
 
 DEFAULT_OUTPUT_DIR = ROOT_DIR / "artifacts" / "main_run"
@@ -205,4 +213,109 @@ def build_default_snapshot_config(
         save_top_k=save_top_k,
         save_last=save_last,
         save_weights_only=save_weights_only,
+    )
+
+
+def build_default_observability_config(
+    *,
+    mode: str = "baseline",
+    output_dir: Path | None = DEFAULT_OUTPUT_DIR,
+    enable_tensorboard: bool = True,
+    enable_text_logging: bool = True,
+    enable_csv_fallback_logger: bool = True,
+    enable_learning_rate_monitor: bool = True,
+    enable_device_stats: bool = True,
+    enable_rich_progress_bar: bool = True,
+    enable_system_telemetry: bool = True,
+    enable_parameter_histograms: bool = True,
+    enable_parameter_scalars: bool = True,
+    enable_prediction_figures: bool = True,
+    enable_model_graph: bool = True,
+    enable_model_text: bool = True,
+    enable_torchview: bool = True,
+    enable_profiler: bool = False,
+    enable_gradient_stats: bool = True,
+    enable_activation_stats: bool | None = None,
+    enable_batch_audit: bool = True,
+    enable_prediction_exports: bool = True,
+    enable_plot_reports: bool = True,
+    debug_every_n_steps: int = 10,
+    telemetry_every_n_steps: int = 10,
+    histogram_every_n_epochs: int = 1,
+    parameter_scalar_every_n_epochs: int = 1,
+    figure_every_n_epochs: int = 1,
+    max_prediction_plots: int = 2,
+    profiler_type: str = "simple",
+    torchview_depth: int = 4,
+    torchview_roll: bool = True,
+    torchview_expand_nested: bool = True,
+) -> ObservabilityConfig:
+    # This helper intentionally defines a "strong default visibility" profile
+    # for normal experiments:
+    # - TensorBoard stays on by default because Lightning already integrates
+    #   with it naturally for scalars, graphs, figures, and profiler outputs
+    # - text logs and telemetry CSVs are enabled so a run still leaves behind
+    #   readable artifacts outside the TensorBoard UI
+    # - the heavier debugging hooks remain configurable, with activation hooks
+    #   automatically promoted in debug/trace modes
+    #
+    # Important disclaimer:
+    # - these defaults favor observability and debuggability over absolute
+    #   minimal overhead
+    # - callers running on very constrained Colab sessions may still want to
+    #   reduce figure frequency, histogram frequency, or optional callbacks
+    # Observability defaults are designed to give strong diagnostics without
+    # making the baseline run path too heavy. Trace-level internals remain
+    # opt-in because they can slow notebook and Colab runs substantially.
+    if enable_activation_stats is None:
+        enable_activation_stats = mode in {"debug", "trace"}
+
+    log_dir = None if output_dir is None else output_dir / "logs"
+    text_log_path = None if output_dir is None else output_dir / "run.log"
+    telemetry_path = None if output_dir is None else output_dir / "telemetry.csv"
+    prediction_table_path = (
+        None if output_dir is None else output_dir / "test_predictions.csv"
+    )
+    report_dir = None if output_dir is None else output_dir / "reports"
+    profiler_path = None if output_dir is None else output_dir / "profiler"
+    torchview_path = None if output_dir is None else output_dir / "model_viz" / "fused_model"
+
+    return ObservabilityConfig(
+        mode=mode,
+        enable_tensorboard=enable_tensorboard,
+        enable_text_logging=enable_text_logging,
+        enable_csv_fallback_logger=enable_csv_fallback_logger,
+        enable_learning_rate_monitor=enable_learning_rate_monitor,
+        enable_device_stats=enable_device_stats,
+        enable_rich_progress_bar=enable_rich_progress_bar,
+        enable_system_telemetry=enable_system_telemetry,
+        enable_parameter_histograms=enable_parameter_histograms,
+        enable_parameter_scalars=enable_parameter_scalars,
+        enable_prediction_figures=enable_prediction_figures,
+        enable_model_graph=enable_model_graph,
+        enable_model_text=enable_model_text,
+        enable_torchview=enable_torchview,
+        enable_profiler=enable_profiler,
+        enable_gradient_stats=enable_gradient_stats,
+        enable_activation_stats=enable_activation_stats,
+        enable_batch_audit=enable_batch_audit,
+        enable_prediction_exports=enable_prediction_exports,
+        enable_plot_reports=enable_plot_reports,
+        log_dir=log_dir,
+        text_log_path=text_log_path,
+        telemetry_path=telemetry_path,
+        prediction_table_path=prediction_table_path,
+        report_dir=report_dir,
+        profiler_path=profiler_path,
+        torchview_path=torchview_path,
+        debug_every_n_steps=debug_every_n_steps,
+        telemetry_every_n_steps=telemetry_every_n_steps,
+        histogram_every_n_epochs=histogram_every_n_epochs,
+        parameter_scalar_every_n_epochs=parameter_scalar_every_n_epochs,
+        figure_every_n_epochs=figure_every_n_epochs,
+        max_prediction_plots=max_prediction_plots,
+        profiler_type=profiler_type,
+        torchview_depth=torchview_depth,
+        torchview_roll=torchview_roll,
+        torchview_expand_nested=torchview_expand_nested,
     )

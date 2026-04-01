@@ -1,15 +1,13 @@
-"""
-AI-assisted implementation note:
-This file was drafted with AI assistance and then reviewed/adapted for this
-project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
-work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
-DataModule docs/tutorial
-(https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
-original AZT1D dataset release on Mendeley Data
-(https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to isolate
-cleaning and normalization as reusable dataframe transforms for the new data
-contract.
-"""
+# AI-assisted implementation note:
+# This file was drafted with AI assistance and then reviewed/adapted for this
+# project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
+# work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
+# DataModule docs/tutorial
+# (https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
+# original AZT1D dataset release on Mendeley Data
+# (https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to isolate
+# cleaning and normalization as reusable dataframe transforms for the new data
+# contract.
 
 from __future__ import annotations
 
@@ -23,7 +21,7 @@ from data.schema import (
     FeatureGroups,
     declared_category_order,
 )
-from utils.config import DataConfig
+from config import DataConfig
 
 
 # ============================================================
@@ -152,6 +150,13 @@ def build_category_maps(
 
 
 def normalize_device_mode(value: object) -> str:
+    """
+    Collapse raw device-mode strings into a small controlled vocabulary.
+
+    Context:
+    the raw exports contain messy spellings and placeholder values, but the
+    model side needs stable category IDs and cardinalities.
+    """
     # These normalization helpers intentionally collapse messy raw spellings into
     # a small controlled vocabulary. That keeps category IDs stable and reduces
     # the chance that the model learns spurious distinctions from export noise.
@@ -169,6 +174,13 @@ def normalize_device_mode(value: object) -> str:
 
 
 def normalize_bolus_type(value: object) -> str:
+    """
+    Collapse raw bolus-type strings into the canonical modeling vocabulary.
+
+    Context:
+    this mirrors `normalize_device_mode(...)`, but for the more varied bolus
+    event labels found in the AZT1D exports.
+    """
     if pd.isna(cast(Any, value)):
         return "none"
 
@@ -195,6 +207,13 @@ def normalize_bolus_type(value: object) -> str:
 
 
 def _add_time_features(dataframe: pd.DataFrame, time_column: str) -> pd.DataFrame:
+    """
+    Add cyclical and calendar-derived known-ahead time features.
+
+    Context:
+    these features let the model see time-of-day and day-of-week structure
+    without suffering the discontinuities of raw integer clock values.
+    """
     # Cyclical encodings let the model see periodic structure without the sharp
     # discontinuities that raw hour/day integers would create.
     minute_of_day = dataframe[time_column].dt.hour * 60 + dataframe[time_column].dt.minute
@@ -213,6 +232,13 @@ def _normalize_declared_categories(
     dataframe: pd.DataFrame,
     feature_groups: FeatureGroups,
 ) -> pd.DataFrame:
+    """
+    Normalize categorical columns according to declared or discovered vocabularies.
+
+    Context:
+    this keeps category IDs stable before the DataModule fits vocabularies and
+    prevents messy raw spellings from leaking into embedding cardinalities.
+    """
     for column in feature_groups.categorical_columns:
         if column not in dataframe.columns:
             continue
@@ -239,6 +265,13 @@ def _validate_required_columns(
     feature_groups: FeatureGroups,
     config: DataConfig,
 ) -> None:
+    """
+    Verify that the cleaned dataframe satisfies the declared feature contract.
+
+    Context:
+    surfacing schema drift during setup is much easier to debug than allowing
+    the mismatch to appear later inside tensor assembly or model forward passes.
+    """
     # Turn schema drift into a setup-time error. That is much easier to diagnose
     # than discovering the mismatch later inside model forward passes.
     required_columns = {
@@ -263,14 +296,35 @@ def _validate_required_columns(
 
 
 def _prepare_text_column(series: pd.Series) -> pd.Series:
+    """
+    Normalize a text-like series into stripped string values with empty-fill.
+
+    Context:
+    the category-normalization helpers expect one consistent textual
+    representation before they apply controlled-vocabulary cleanup.
+    """
     return series.fillna("").astype(str).str.strip()
 
 
 def _sin_from_period(values: pd.Series, period: float) -> pd.Series:
+    """
+    Encode one periodic scalar signal with a sine transform.
+
+    Context:
+    paired with the cosine transform, this gives the model a smooth cyclical
+    representation of repeating time features.
+    """
     angles = values.astype("float64") * (2.0 * math.pi / period)
     return angles.apply(math.sin).astype("float32")
 
 
 def _cos_from_period(values: pd.Series, period: float) -> pd.Series:
+    """
+    Encode one periodic scalar signal with a cosine transform.
+
+    Context:
+    this complements `_sin_from_period(...)` so cyclical features can represent
+    wrap-around positions without discontinuities.
+    """
     angles = values.astype("float64") * (2.0 * math.pi / period)
     return angles.apply(math.cos).astype("float32")

@@ -119,7 +119,7 @@ the shared config layer so it once again matched the current code paths.
 
 The main config-side changes were:
 
-- `src/utils/config.py`
+- `src/config/`
   Cleaned up unresolved merge-conflict markers and removed duplicate /
   contradictory definitions that had accumulated during earlier edits.
 - `DataConfig`
@@ -140,8 +140,8 @@ The main config-side changes were:
   shared config and feature-schema imports remain usable in environments with a
   partial numpy install.
 
-This cleanup restored `config.py` as one coherent source of truth instead of a
-partially merged mix of older and newer contracts.
+This cleanup restored the config layer as one coherent source of truth instead
+of a partially merged mix of older and newer contracts.
 
 ## Fusion Behavior
 
@@ -208,7 +208,7 @@ shared config contract already used by the rest of the model stack.
 
 The main changes were:
 
-- `src/utils/config.py`
+- `src/config/model.py`
   Added `layer_norm_eps` to `TFTConfig` so TFT-owned normalization behavior,
   including GRN-backed blocks, can share one validated epsilon value rather
   than relying on a hardcoded constant inside `grn.py`.
@@ -228,6 +228,13 @@ The main changes were:
   Unsupported rank combinations now fail loudly instead of relying on implicit
   broadcasting assumptions.
 - `src/models/tft.py`
+
+### Later structural note
+
+After the earlier config cleanup described above, the repository promoted that
+shared config layer into the dedicated `src/config/` package. The behavioral
+intent described in this summary is unchanged, but the canonical home of those
+config objects is now `src/config/` rather than `src/utils/config.py`.
   Replaced repeated direct GRN construction sites with
   `GRN.from_tft_config(...)` in the variable-selection network, static context
   encoder, enrichment GRN, and position-wise GRN paths.

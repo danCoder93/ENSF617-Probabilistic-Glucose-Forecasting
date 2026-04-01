@@ -24,13 +24,19 @@ from torch import Tensor
 from torch.nn import LayerNorm, Module
 from torch.nn.functional import elu, glu
 
-from utils.config import TFTConfig
+from config import TFTConfig
+
 
 class MaybeLayerNorm(Module):
     """
     Apply layer norm unless the output collapses to a single scalar channel.
 
-    A size-1 output is a special case because normalizing a single scalar per
+    Purpose:
+    keep the GRN normalization step numerically sensible when the output width
+    is only one channel.
+
+    Context:
+    a size-1 output is a special case because normalizing a single scalar per
     position is not very meaningful and can introduce avoidable instability.
     """
 
@@ -40,15 +46,21 @@ class MaybeLayerNorm(Module):
             self.ln = nn.Identity()
         else:
             self.ln = LayerNorm(output_size if output_size else hidden_size, eps=eps)
-    
+
     def forward(self, x):
         return self.ln(x)
+
 
 class GLU(Module):
     """
     Gated linear unit used inside the GRN blocks.
 
-    Conceptually this learns:
+    Purpose:
+    turn one hidden representation into a gated output where the block can
+    learn both content and how much of that content should pass through.
+
+    Context:
+    conceptually this learns:
     - a candidate transformed signal
     - a gate deciding how much of that signal should pass through
     """
@@ -61,6 +73,7 @@ class GLU(Module):
         x = self.lin(x)
         x = glu(x)
         return x
+
 
 class GRN(Module):
     """
@@ -82,13 +95,15 @@ class GRN(Module):
       numerically aligned with the TFT internals
     """
 
-    def __init__(self,
-                 input_size,
-                 hidden_size,
-                 output_size=None,
-                 context_hidden_size=None,
-                 dropout=0.0,
-                 layer_norm_eps=1e-3,):
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        output_size=None,
+        context_hidden_size=None,
+        dropout=0.0,
+        layer_norm_eps=1e-3,
+    ):
         super().__init__()
         # Validate the low-level GRN contract at construction time so
         # configuration mistakes fail early and consistently. The rest of the
@@ -178,4 +193,4 @@ class GRN(Module):
         # so the residual addition stays shape-compatible.
         y = a if self.out_proj is None else self.out_proj(a)
         x = x + y
-        return self.layer_norm(x) 
+        return self.layer_norm(x)

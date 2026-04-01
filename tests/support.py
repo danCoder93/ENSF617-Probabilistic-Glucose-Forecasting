@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
-from utils.config import DataConfig
+from config import DataConfig
 
 
 # These Protocols describe the callable fixtures provided by `conftest.py`.

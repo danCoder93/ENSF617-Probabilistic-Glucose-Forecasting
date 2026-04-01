@@ -2,7 +2,13 @@
 AI-assisted implementation note:
 This test file was drafted with AI assistance and then reviewed/adapted for
 this project. It validates the shared config contracts used by the refactored
-data and model layers.
+data, model, and runtime orchestration layers.
+
+This file now covers more than the original data/model config surface. It also
+checks the newer runtime-oriented configuration contracts that support the
+training wrapper and observability stack, including path normalization for
+string-based inputs that commonly come from CLI arguments, notebook cells, and
+temporary test directories.
 """
 
 from __future__ import annotations
@@ -13,9 +19,10 @@ from typing import Any, cast
 
 import pytest
 
-from utils.config import (
+from config import (
     Config,
     DataConfig,
+    ObservabilityConfig,
     TCNConfig,
     TFTConfig,
     config_from_dict,
@@ -231,3 +238,29 @@ def test_top_level_config_round_trips_through_checkpoint_friendly_dict() -> None
     assert payload["data"]["raw_dir"] == "custom/raw"
     assert payload["tft"]["features"][0]["feature_type"] == "STATIC"
     assert restored == original
+
+
+def test_observability_config_normalizes_paths_and_validates_mode(
+    tmp_path: Path,
+) -> None:
+    # Observability config is commonly assembled from CLI-style string paths.
+    # The type contract intentionally accepts those strings and normalizes them
+    # to `Path` instances in `__post_init__` so the rest of the runtime code
+    # can treat the values uniformly.
+    config = ObservabilityConfig(
+        mode="debug",
+        log_dir=str(tmp_path / "logs"),
+        text_log_path=str(tmp_path / "run.log"),
+        telemetry_path=str(tmp_path / "telemetry.csv"),
+        prediction_table_path=str(tmp_path / "predictions.csv"),
+        report_dir=str(tmp_path / "reports"),
+    )
+
+    assert config.log_dir == tmp_path / "logs"
+    assert config.text_log_path == tmp_path / "run.log"
+    assert config.telemetry_path == tmp_path / "telemetry.csv"
+    assert config.prediction_table_path == tmp_path / "predictions.csv"
+    assert config.report_dir == tmp_path / "reports"
+
+    with pytest.raises(ValueError, match="mode must be one of"):
+        ObservabilityConfig(mode="nope")

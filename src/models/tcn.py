@@ -26,7 +26,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from utils.config import TCNConfig
+from config import TCNConfig
 
 
 # ============================================================
@@ -42,6 +42,13 @@ from utils.config import TCNConfig
 #   focused on temporal logic rather than on string branching.
 # ============================================================
 def _build_activation(name: str) -> nn.Module:
+    """
+    Convert a supported activation name from `TCNConfig` into a PyTorch module.
+
+    Context:
+    the TCN branch intentionally supports a small activation surface, so this
+    helper centralizes the mapping and validation.
+    """
     activation_map: dict[str, Callable[[], nn.Module]] = {
         "relu": nn.ReLU,
         "gelu": nn.GELU,

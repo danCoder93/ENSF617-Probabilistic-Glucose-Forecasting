@@ -19,7 +19,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from models.grn import GRN
-from utils.config import TFTConfig
+from config import TFTConfig
 
 
 def test_grn_from_tft_config_uses_shared_defaults() -> None:

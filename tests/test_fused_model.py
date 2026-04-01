@@ -15,11 +15,16 @@ They intentionally stay narrow:
 import pytest
 
 pytest.importorskip("pytorch_lightning")
+# `pytest.importorskip(...)` returns a runtime module object, which is fine for
+# executing the tests but is not a valid namespace for static type expressions
+# such as `torch.Tensor`. We therefore import `Tensor` explicitly for
+# annotations after confirming the dependency is available.
 torch = pytest.importorskip("torch")
+from torch import Tensor
 from torch.nn.parameter import UninitializedParameter
 
 from models.fused_model import FusedModel
-from utils.config import Config, DataConfig, TCNConfig, TFTConfig, config_to_dict
+from config import Config, DataConfig, TCNConfig, TFTConfig, config_to_dict
 from utils.tft_utils import DataTypes, FeatureSpec, InputTypes
 
 
@@ -62,7 +67,9 @@ def _build_config() -> Config:
     )
 
 
-def _build_batch(config: Config, batch_size: int = 2) -> dict[str, torch.Tensor]:
+def _build_batch(config: Config, batch_size: int = 2) -> dict[str, Tensor]:
+    # Keep the synthetic batch small and explicit so the tests exercise the
+    # fused-model contract without depending on the full data pipeline.
     encoder_length = config.data.encoder_length
     prediction_length = config.data.prediction_length
 

@@ -22,17 +22,39 @@ import torch
 from torch import Tensor
 from torch.optim import Adam, AdamW, Optimizer
 
+try:
+    from torchmetrics import MeanAbsoluteError, MeanSquaredError
+except ImportError:  # pragma: no cover - optional dependency until installed
+    # `torchmetrics` is preferred for Lightning-native metric state handling,
+    # but the model keeps manual fallbacks so unit tests and lightweight
+    # environments do not fail purely because the extra package is missing.
+    MeanAbsoluteError = None  # type: ignore[assignment]
+    MeanSquaredError = None  # type: ignore[assignment]
+
 from models.tcn import TCN
 from models.tft import TemporalFusionTransformer
 from models.grn import GRN
 from models.nn_head import NNHead
 
-from utils.config import Config, config_from_dict, config_to_dict
+from config import Config, config_from_dict, config_to_dict
 
 
 class FusedModel(LightningModule):
     """
-    Hybrid glucose forecaster with:
+    Hybrid glucose forecaster built from fused TCN and TFT branches.
+
+    Purpose:
+    provide one Lightning-native model that owns the fused architecture, the
+    probabilistic training objective, the optimizer contract, and the core
+    train/validation/test logging behavior.
+
+    Context:
+    this module reflects the repository's current late-fusion design rather
+    than the earlier idea of feeding TCN forecasts directly into the TFT
+    decoder. The TCN branches and TFT branch now produce horizon-wise latent
+    features that meet at the fusion layer before final quantile prediction.
+
+    Architecture overview:
     - three multi-kernel TCN branches for short/mid-range forecasts
     - a TFT branch that models future-aware decoder context
     - a final fusion path where TCN and TFT latent features meet before output
@@ -203,6 +225,23 @@ class FusedModel(LightningModule):
         # Centralizing this here avoids subtle bugs where the model predicts one
         # quantile order but the loss or metrics accidentally assume another.
         self.quantiles = tuple(float(quantile) for quantile in tft_config.quantiles)
+        # These stage-specific metric objects are optional by design:
+        # - when `torchmetrics` is installed, Lightning can manage their state
+        #   and aggregate them naturally across epochs
+        # - when it is not installed, the model still computes scalar MAE/RMSE
+        #   manually so training remains usable
+        self.train_mae_metric = MeanAbsoluteError() if MeanAbsoluteError is not None else None
+        self.val_mae_metric = MeanAbsoluteError() if MeanAbsoluteError is not None else None
+        self.test_mae_metric = MeanAbsoluteError() if MeanAbsoluteError is not None else None
+        self.train_rmse_metric = (
+            MeanSquaredError(squared=False) if MeanSquaredError is not None else None
+        )
+        self.val_rmse_metric = (
+            MeanSquaredError(squared=False) if MeanSquaredError is not None else None
+        )
+        self.test_rmse_metric = (
+            MeanSquaredError(squared=False) if MeanSquaredError is not None else None
+        )
 
     @staticmethod
     def _coerce_config(config: Config | Mapping[str, Any]) -> Config:
@@ -253,6 +292,12 @@ class FusedModel(LightningModule):
         # materialize its continuous-embedding matrices. Those widths are now
         # known from `tft_config`, so a one-item synthetic batch is sufficient.
         #
+        # The important detail here is that we are not trying to simulate a
+        # meaningful training example. We only need to trigger parameter-shape
+        # binding for the lazy embedding tensors. Zero-valued placeholders are
+        # therefore fine because the initializer cares about trailing feature
+        # widths, not the actual numeric content.
+        #
         # Shapes mirror the grouped contract used at runtime:
         # - `s_cont`: [batch, 1, num_static_cont]
         # - `k_cont`: [batch, encoder + horizon, num_known_cont]
@@ -285,6 +330,13 @@ class FusedModel(LightningModule):
         #
         # This helper recovers the semantic groups so each branch only receives
         # the information it is supposed to consume.
+        #
+        # That separation matters because the branches do not share the same
+        # information budget:
+        # - TCN only gets encoder-side observed dynamics plus target history
+        # - TFT gets a semantically richer grouped view with known future inputs
+        # - the fusion layer assumes both branches are already aligned to the
+        #   same decoder horizon by the time their latent features meet
         known_history = encoder_continuous[:, :, : self.num_known_cont]
         observed_end = self.num_known_cont + self.num_observed_cont
         observed_history = encoder_continuous[:, :, self.num_known_cont:observed_end]
@@ -303,6 +355,9 @@ class FusedModel(LightningModule):
     def _split_encoder_categorical(self, encoder_categorical: Tensor) -> tuple[Tensor, Tensor]:
         # Historical categorical features are ordered as:
         # [known categorical | observed categorical]
+        #
+        # Unlike the continuous path, there is no target slice here because the
+        # target series is represented only in the continuous history channel.
         known_history = encoder_categorical[:, :, : self.num_known_cat]
         observed_history = encoder_categorical[:, :, self.num_known_cat :]
         return known_history, observed_history
@@ -343,6 +398,12 @@ class FusedModel(LightningModule):
         #
         # Resulting shape:
         # - `[batch, encoder_length + prediction_length, num_known_continuous]`
+        #
+        # This is one of the key semantic differences between the TFT path and
+        # the TCN path:
+        # - the TCN branches never see decoder-known future covariates
+        # - TFT explicitly consumes them because it is designed to reason over
+        #   the combined historical+future-known example axis
         known_categorical = torch.cat(
             [known_history_cat, batch["decoder_known_categorical"]],
             dim=1,
@@ -370,6 +431,12 @@ class FusedModel(LightningModule):
         tcn_inputs = torch.cat([observed_history_cont, target_history], dim=-1)
         # `tcn_inputs` shape:
         #   [batch, encoder_length, num_observed_cont + num_target]
+        #
+        # This tensor is intentionally narrower than the full encoder input.
+        # We do not pass known-ahead covariates into the TCN branches because
+        # those branches are meant to specialize in "what can be inferred from
+        # observed history dynamics alone?" The TFT branch carries the richer
+        # future-aware context in parallel.
 
         # -----------------------------
         # Step 2: Run multiscale TCNs
@@ -408,6 +475,11 @@ class FusedModel(LightningModule):
         #
         # The model is therefore fusing "different views of the same forecast
         # step" rather than mixing different timesteps together at this stage.
+        #
+        # That is an important architectural boundary:
+        # - temporal reasoning happened inside the individual branches
+        # - this stage is purely feature fusion at each decoder position
+        # - the GRN and final head do not need to rediscover sequence alignment
 
         # -----------------------------
         # Step 5: Predict outputs
@@ -468,6 +540,15 @@ class FusedModel(LightningModule):
 
         quantiles = predictions.new_tensor(self.quantiles).view(1, 1, -1)
         errors = target.unsqueeze(-1) - predictions
+        # Broadcasting works as follows:
+        # - `target.unsqueeze(-1)` turns `[batch, horizon]` into
+        #   `[batch, horizon, 1]`
+        # - subtracting predictions expands the target across the quantile axis
+        # - each quantile channel therefore receives its own signed error tensor
+        #
+        # The two terms inside `torch.maximum(...)` are the upper and lower
+        # branches of the pinball loss. Which one is active at each position
+        # depends on the sign of the prediction error.
         return torch.maximum((quantiles - 1.0) * errors, quantiles * errors).mean()
 
     def point_prediction(self, predictions: Tensor, *, quantile: float = 0.5) -> Tensor:
@@ -488,6 +569,15 @@ class FusedModel(LightningModule):
         )
         return predictions[..., quantile_index]
 
+    def _metric_pair_for_stage(self, stage: str) -> tuple[Any | None, Any | None]:
+        # Keep the stage-to-metric-object mapping explicit in one place so the
+        # step methods do not each have to duplicate the same branching logic.
+        if stage == "train":
+            return self.train_mae_metric, self.train_rmse_metric
+        if stage == "val":
+            return self.val_mae_metric, self.val_rmse_metric
+        return self.test_mae_metric, self.test_rmse_metric
+
     def _log_metrics(
         self,
         stage: str,
@@ -495,6 +585,11 @@ class FusedModel(LightningModule):
         loss: Tensor,
         mae: Tensor,
         rmse: Tensor,
+        mae_metric: Any | None,
+        rmse_metric: Any | None,
+        point_forecast: Tensor,
+        target: Tensor,
+        predictions: Tensor,
         batch_size: int,
     ) -> None:
         # Direct `training_step(...)` calls in unit tests do not attach a
@@ -524,6 +619,11 @@ class FusedModel(LightningModule):
         # - synchronizing every training step across devices can add overhead
         # - the higher-value correctness issue is on validation/test, where the
         #   reported metrics are commonly treated as run-level results
+        #
+        # Additional observability note:
+        # - besides loss/MAE/RMSE, we also log target distribution summaries and
+        #   prediction distribution summaries so TensorBoard can reveal drift,
+        #   collapse, or implausibly narrow/wide prediction intervals
         self.log(
             f"{stage}_loss",
             loss,
@@ -533,24 +633,93 @@ class FusedModel(LightningModule):
             batch_size=batch_size,
             sync_dist=stage != "train",
         )
+        if mae_metric is not None:
+            self.log(
+                f"{stage}_mae",
+                mae_metric,
+                prog_bar=stage != "train",
+                on_step=on_step,
+                on_epoch=True,
+                batch_size=batch_size,
+                sync_dist=stage != "train",
+            )
+        else:
+            self.log(
+                f"{stage}_mae",
+                mae,
+                prog_bar=stage != "train",
+                on_step=on_step,
+                on_epoch=True,
+                batch_size=batch_size,
+                sync_dist=stage != "train",
+            )
+        if rmse_metric is not None:
+            self.log(
+                f"{stage}_rmse",
+                rmse_metric,
+                prog_bar=False,
+                on_step=on_step,
+                on_epoch=True,
+                batch_size=batch_size,
+                sync_dist=stage != "train",
+            )
+        else:
+            self.log(
+                f"{stage}_rmse",
+                rmse,
+                prog_bar=False,
+                on_step=on_step,
+                on_epoch=True,
+                batch_size=batch_size,
+                sync_dist=stage != "train",
+            )
         self.log(
-            f"{stage}_mae",
-            mae,
-            prog_bar=stage != "train",
-            on_step=on_step,
-            on_epoch=True,
-            batch_size=batch_size,
-            sync_dist=stage != "train",
-        )
-        self.log(
-            f"{stage}_rmse",
-            rmse,
+            f"{stage}_target_mean",
+            target.mean(),
             prog_bar=False,
             on_step=on_step,
             on_epoch=True,
             batch_size=batch_size,
             sync_dist=stage != "train",
         )
+        self.log(
+            f"{stage}_target_std",
+            target.std(unbiased=False),
+            prog_bar=False,
+            on_step=on_step,
+            on_epoch=True,
+            batch_size=batch_size,
+            sync_dist=stage != "train",
+        )
+        self.log(
+            f"{stage}_median_prediction_mean",
+            point_forecast.mean(),
+            prog_bar=False,
+            on_step=on_step,
+            on_epoch=True,
+            batch_size=batch_size,
+            sync_dist=stage != "train",
+        )
+        self.log(
+            f"{stage}_quantile_prediction_mean",
+            predictions.mean(),
+            prog_bar=False,
+            on_step=on_step,
+            on_epoch=True,
+            batch_size=batch_size,
+            sync_dist=stage != "train",
+        )
+        if predictions.shape[-1] >= 2:
+            interval_width = predictions[..., -1] - predictions[..., 0]
+            self.log(
+                f"{stage}_prediction_interval_width",
+                interval_width.mean(),
+                prog_bar=False,
+                on_step=on_step,
+                on_epoch=True,
+                batch_size=batch_size,
+                sync_dist=stage != "train",
+            )
 
     def _shared_step(self, batch: dict[str, Any], stage: str) -> Tensor:
         # Lightning encourages the train/val/test steps to stay small and to
@@ -576,14 +745,31 @@ class FusedModel(LightningModule):
         # This preserves the probabilistic nature of the model while still
         # giving us MAE/RMSE values that are intuitive to compare across runs.
         point_forecast = self.point_prediction(predictions)
-        mae = torch.mean(torch.abs(point_forecast - target))
-        rmse = torch.sqrt(torch.mean(torch.square(point_forecast - target)))
+        mae_metric, rmse_metric = self._metric_pair_for_stage(stage)
+        # We prefer stateful torchmetrics when present because they integrate
+        # cleanly with Lightning logging, but we intentionally keep exact
+        # scalar fallbacks so the model remains robust in reduced environments.
+        if mae_metric is not None:
+            mae_metric.update(point_forecast, target)
+            mae = mae_metric.compute()
+        else:
+            mae = torch.mean(torch.abs(point_forecast - target))
+        if rmse_metric is not None:
+            rmse_metric.update(point_forecast, target)
+            rmse = rmse_metric.compute()
+        else:
+            rmse = torch.sqrt(torch.mean(torch.square(point_forecast - target)))
 
         self._log_metrics(
             stage,
             loss=loss,
             mae=mae,
             rmse=rmse,
+            mae_metric=mae_metric,
+            rmse_metric=rmse_metric,
+            point_forecast=point_forecast,
+            target=target,
+            predictions=predictions,
             batch_size=target.shape[0],
         )
         return loss

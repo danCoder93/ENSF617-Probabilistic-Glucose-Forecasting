@@ -1,15 +1,13 @@
-"""
-AI-assisted implementation note:
-This file was drafted with AI assistance and then reviewed/adapted for this
-project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
-work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
-DataModule docs/tutorial
-(https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
-original AZT1D dataset release on Mendeley Data
-(https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to keep raw
-data download and extraction separate from preprocessing, indexing, and
-dataset assembly.
-"""
+# AI-assisted implementation note:
+# This file was drafted with AI assistance and then reviewed/adapted for this
+# project. The refactor draws on the earlier AZT1D pipeline in this repo, prior
+# work by SlickMik (https://github.com/SlickMik), the PyTorch Lightning
+# DataModule docs/tutorial
+# (https://lightning.ai/docs/pytorch/stable/data/datamodule.html), and the
+# original AZT1D dataset release on Mendeley Data
+# (https://data.mendeley.com/datasets/gk9m674wcx/1). Its purpose is to keep raw
+# data download and extraction separate from preprocessing, indexing, and
+# dataset assembly.
 
 from __future__ import annotations
 
@@ -31,12 +29,20 @@ import requests
 #   Describe the outcome of downloading and optionally extracting
 #   the raw AZT1D archive.
 #
-# Why this exists:
+# Context:
 #   The downloader should return structured metadata instead of
 #   leaking HTTP/archive details into the DataModule.
 # ============================================================
 @dataclass
 class DownloadResult:
+    """
+    Structured description of one download/extraction outcome.
+
+    Context:
+    the DataModule and setup code care about where the file landed, whether the
+    result came from cache, and whether an extracted directory exists. Returning
+    those facts in one object keeps downloader-specific logic out of callers.
+    """
     url: str
     file_path: Path
     extracted_path: Optional[Path]
@@ -49,7 +55,12 @@ class AZT1DDownloader:
     """
     Download the raw AZT1D archive and optionally extract it.
 
-    The downloader intentionally knows nothing about:
+    Purpose:
+    isolate remote file acquisition and optional archive extraction from the
+    rest of the data pipeline.
+
+    Context:
+    the downloader intentionally knows nothing about:
     - dataframe columns
     - subject splits
     - tensors
