@@ -17,6 +17,13 @@
 # https://github.com/NVIDIA/DeepLearningExamples
 # Modifications by danCoder93 (March 24, 2026).
 # Updated to integrate PyTorch Lightning.
+#
+# AI-assisted maintenance note (April 1, 2026):
+# The GRN construction sites in this existing module were refined with AI
+# assistance under direct user guidance. The updates route shared defaults
+# through `GRN.from_tft_config(...)` so the current TFT implementation is easier
+# to maintain and slightly more robust, without changing the underlying model
+# design or claiming new architectural ideas.
 
 from dataclasses import dataclass
 
@@ -293,8 +300,23 @@ class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
 class VariableSelectionNetwork(Module):
     def __init__(self, config, num_inputs):
         super().__init__()
-        self.joint_grn = GRN(config.hidden_size*num_inputs, config.hidden_size, output_size=num_inputs, context_hidden_size=config.hidden_size)
-        self.var_grns = nn.ModuleList([GRN(config.hidden_size, config.hidden_size, dropout=config.dropout) for _ in range(num_inputs)])
+        # The joint GRN consumes the flattened per-variable embeddings and emits
+        # one score per input variable. We keep the input/output sizing explicit
+        # here because it is part of the variable-selection architecture, while
+        # the shared hidden/dropout defaults come from the TFT config.
+        self.joint_grn = GRN.from_tft_config(
+            config,
+            input_size=config.hidden_size * num_inputs,
+            output_size=num_inputs,
+            context_hidden_size=config.hidden_size,
+        )
+        # Each variable-specific GRN transforms one embedded variable into the
+        # common hidden space before sparse weighting. These blocks all share
+        # the same TFT defaults, so the factory keeps their construction
+        # consistent without repeating the same low-level config plumbing.
+        self.var_grns = nn.ModuleList(
+            [GRN.from_tft_config(config, input_size=config.hidden_size) for _ in range(num_inputs)]
+        )
 
     def forward(self, x: Tensor, context: Optional[Tensor] = None):
         Xi = torch.flatten(x, start_dim=-2)
@@ -313,7 +335,13 @@ class StaticCovariateEncoder(Module):
     def __init__(self, config):
         super().__init__()
         self.vsn = VariableSelectionNetwork(config, config.num_static_vars)
-        self.context_grns = nn.ModuleList([GRN(config.hidden_size, config.hidden_size, dropout=config.dropout) for _ in range(4)])
+        # The static encoder produces four distinct context vectors used by the
+        # downstream recurrent and enrichment stages. The GRNs themselves are
+        # architecturally identical, so they now inherit shared defaults from
+        # one config-backed construction path.
+        self.context_grns = nn.ModuleList(
+            [GRN.from_tft_config(config, input_size=config.hidden_size) for _ in range(4)]
+        )
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         variable_ctx, sparse_weights = self.vsn(x)
@@ -378,22 +406,32 @@ class TFTBack(Module):
 
 
         self.input_gate = GLU(config.hidden_size, config.hidden_size)
-        self.input_gate_ln = LayerNorm(config.hidden_size, eps=1e-3)
+        # LayerNorm epsilon is now sourced from TFTConfig so the GRN blocks and
+        # the surrounding normalization layers can stay numerically aligned.
+        self.input_gate_ln = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
-        self.enrichment_grn = GRN(config.hidden_size,
-                                  config.hidden_size,
-                                  context_hidden_size=config.hidden_size, 
-                                  dropout=config.dropout)
+        # This GRN injects static enrichment context into the temporal stream.
+        # The context size remains explicit because it is part of the block's
+        # role in the TFT architecture rather than a generic shared default.
+        self.enrichment_grn = GRN.from_tft_config(
+            config,
+            input_size=config.hidden_size,
+            context_hidden_size=config.hidden_size,
+        )
         self.attention = InterpretableMultiHeadAttention(config)
         self.attention_gate = GLU(config.hidden_size, config.hidden_size)
-        self.attention_ln = LayerNorm(config.hidden_size, eps=1e-3)
+        self.attention_ln = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
-        self.positionwise_grn = GRN(config.hidden_size,
-                                    config.hidden_size,
-                                    dropout=config.dropout)
+        # The position-wise GRN is another standard TFT sub-block; using the
+        # same factory keeps its hidden/dropout/norm defaults synchronized with
+        # the other GRN instances in this model.
+        self.positionwise_grn = GRN.from_tft_config(
+            config,
+            input_size=config.hidden_size,
+        )
 
         self.decoder_gate = GLU(config.hidden_size, config.hidden_size)
-        self.decoder_ln = LayerNorm(config.hidden_size, eps=1e-3)
+        self.decoder_ln = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
         self.quantile_proj = nn.Linear(config.hidden_size, len(config.quantiles))
         

@@ -337,6 +337,11 @@ class TFTConfig:
     hidden_size: int = 128
     dropout: float = 0.1
     attn_dropout: float = 0.0
+    # Shared epsilon for layer normalization across TFT submodules, including
+    # GRN-backed blocks. Keeping this in TFTConfig lets the model remain
+    # numerically consistent without introducing a separate GRN config surface
+    # before the project actually needs one.
+    layer_norm_eps: float = 1e-3
 
     # Quantiles predicted by the TFT output head.
     quantiles: Sequence[float] = field(default_factory=lambda: (0.1, 0.5, 0.9))
@@ -470,6 +475,8 @@ class TFTConfig:
             raise ValueError("dropout must be in [0.0, 1.0)")
         if self.attn_dropout < 0.0 or self.attn_dropout >= 1.0:
             raise ValueError("attn_dropout must be in [0.0, 1.0)")
+        if self.layer_norm_eps <= 0.0:
+            raise ValueError("layer_norm_eps must be > 0.0")
         if self.encoder_length <= 0:
             raise ValueError("encoder_length must be > 0")
         if self.example_length < self.encoder_length:

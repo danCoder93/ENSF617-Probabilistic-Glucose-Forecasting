@@ -5,6 +5,11 @@ This summary was drafted with AI assistance and then reviewed/adapted for this
 project. It documents the current model-folder refactor around the fused TCN +
 TFT forecasting path and related documentation asset moves.
 
+Where AI assistance is mentioned in this document, it refers to user-directed
+refinement of existing project code and documentation. The intent was to help
+clarify, harden, and document the current codebase rather than to claim new
+model ideas or original architectural authorship.
+
 This document summarizes the model-side cleanup and integration work completed
 for the fused glucose forecasting architecture.
 
@@ -147,6 +152,61 @@ The current fused behavior is:
 This keeps TFT as the future-aware refinement branch while allowing the TCNs to
 contribute explicit short/mid-range forecast signals.
 
+## GRN Encapsulation Follow-up
+
+After the broader fused-model and config cleanup, a smaller follow-up pass was
+completed around `src/models/grn.py` to make the gated residual network easier
+to reuse safely across both the TFT internals and the fused model's final
+fusion head.
+
+This work was intentionally conservative. It did not redesign the GRN math or
+change the model's high-level architecture. Instead, it made the existing GRN
+construction path more explicit, more consistent, and better aligned with the
+shared config contract already used by the rest of the model stack.
+
+The main changes were:
+
+- `src/utils/config.py`
+  Added `layer_norm_eps` to `TFTConfig` so TFT-owned normalization behavior,
+  including GRN-backed blocks, can share one validated epsilon value rather
+  than relying on a hardcoded constant inside `grn.py`.
+- `src/models/grn.py`
+  Added constructor validation for dimensions, dropout, and normalization
+  epsilon so invalid GRN configurations fail early and clearly.
+- `src/models/grn.py`
+  Added `GRN.from_tft_config(...)` as a narrow factory method. This keeps
+  per-call structural dimensions such as `input_size`, `output_size`, and
+  `context_hidden_size` explicit at the call site while inheriting shared
+  defaults such as `hidden_size`, dropout, and layer-norm epsilon from
+  `TFTConfig`.
+- `src/models/grn.py`
+  Tightened the context-broadcasting behavior so the module supports both:
+  rank-2 feature tensors with rank-2 context, and the original TFT pattern of
+  rank-3 temporal inputs with rank-2 static context broadcast across time.
+  Unsupported rank combinations now fail loudly instead of relying on implicit
+  broadcasting assumptions.
+- `src/models/tft.py`
+  Replaced repeated direct GRN construction sites with
+  `GRN.from_tft_config(...)` in the variable-selection network, static context
+  encoder, enrichment GRN, and position-wise GRN paths.
+- `src/models/tft.py`
+  Updated local `LayerNorm` construction to use `config.layer_norm_eps` so the
+  surrounding TFT normalization layers remain numerically aligned with the
+  config-backed GRN path.
+- `src/models/fused_model.py`
+  Updated the post-fusion GRN construction to use the same config-backed
+  factory while keeping the fusion-specific feature width explicit in the fused
+  model itself.
+
+One key design decision in this follow-up was *not* adding a separate `GRNConfig`
+surface yet. At the time of this refactor, GRN-specific structural dimensions
+still vary by call site and the shared defaults already belong naturally to the
+TFT branch contract. Introducing a second config object at this stage would
+have duplicated fields without adding much practical flexibility.
+
+This leaves the door open for a future `GRNConfig` only if the project later
+needs GRN-specific behavior that diverges from the current TFT-level defaults.
+
 ## Documentation and Assets
 
 Model diagrams were moved out of `src/models/` and into `docs/`:
@@ -191,6 +251,12 @@ Verification completed during this refactor:
   runtime rebinding via `replace(...)`,
   TCN config narrowing,
   and derived TFT metadata counts
+- a dedicated `tests/test_grn.py` file was added to document and protect the
+  GRN encapsulation follow-up, including:
+  config-backed GRN construction from `TFTConfig`,
+  rank-2 input plus context handling,
+  rank-3 temporal input plus broadcast context handling,
+  and explicit failure for unsupported context-rank combinations
 
 Verification still pending in a runtime environment with `torch` installed:
 

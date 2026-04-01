@@ -1,12 +1,31 @@
+from __future__ import annotations
+
+"""
+AI-assisted maintenance note:
+This existing module was refined with AI assistance on April 1, 2026 under
+direct user guidance. The changes here are intended to clarify, harden, and
+better encapsulate the project's current GRN implementation for reuse across
+the TFT internals and the fused forecast head while preserving the established
+architecture.
+
+The refactor intentionally kept per-call structural dimensions explicit
+(`input_size`, `output_size`, and `context_hidden_size`) because those vary by
+use site, but centralized shared defaults such as `hidden_size`, `dropout`,
+and layer-norm epsilon through the TFT config path via `GRN.from_tft_config`.
+
+The goal of these changes is not to present new model ideas, but to improve the
+robustness, consistency, and maintainability of the existing GRN math block and
+its config-driven construction path.
+"""
+
+from typing import Optional
+
 import torch.nn as nn
-from torch.nn import Module
-import torch.nn.functional as F
-from torch.nn.functional import glu, elu
-
 from torch import Tensor
-from typing import Optional, cast
+from torch.nn import LayerNorm, Module
+from torch.nn.functional import elu, glu
 
-from torch.nn import LayerNorm
+from utils.config import TFTConfig
 
 class MaybeLayerNorm(Module):
     def __init__(self, output_size, hidden_size, eps):
@@ -35,9 +54,32 @@ class GRN(Module):
                  hidden_size,
                  output_size=None,
                  context_hidden_size=None,
-                 dropout=0.0,):
+                 dropout=0.0,
+                 layer_norm_eps=1e-3,):
         super().__init__()
-        self.layer_norm = MaybeLayerNorm(output_size, hidden_size, eps=1e-3)
+        # Validate the low-level GRN contract at construction time so
+        # configuration mistakes fail early and consistently. The rest of the
+        # codebase already validates dataclass-backed model settings in this
+        # style, so keeping the same pattern here makes the shared block safer
+        # to instantiate from multiple callers.
+        if hidden_size <= 0:
+            raise ValueError("hidden_size must be > 0")
+        if input_size <= 0:
+            raise ValueError("input_size must be > 0")
+        if output_size is not None and output_size <= 0:
+            raise ValueError("output_size must be > 0 when provided")
+        if context_hidden_size is not None and context_hidden_size <= 0:
+            raise ValueError("context_hidden_size must be > 0 when provided")
+        if dropout < 0.0 or dropout >= 1.0:
+            raise ValueError("dropout must be in [0.0, 1.0)")
+        if layer_norm_eps <= 0.0:
+            raise ValueError("layer_norm_eps must be > 0.0")
+
+        # Layer norm epsilon is now configurable through the shared TFT config
+        # path rather than hardcoded. This keeps GRN normalization aligned with
+        # the rest of the TFT stack while still allowing direct GRN construction
+        # in tests or future non-TFT callers.
+        self.layer_norm = MaybeLayerNorm(output_size, hidden_size, eps=layer_norm_eps)
         self.lin_a = nn.Linear(input_size, hidden_size)
         if context_hidden_size is not None:
             self.lin_c = nn.Linear(context_hidden_size, hidden_size, bias=False)
@@ -48,10 +90,45 @@ class GRN(Module):
         self.dropout = nn.Dropout(dropout)
         self.out_proj = nn.Linear(input_size, output_size) if output_size else None
 
+    @classmethod
+    def from_tft_config(
+        cls,
+        config: TFTConfig,
+        *,
+        input_size: int,
+        output_size: Optional[int] = None,
+        context_hidden_size: Optional[int] = None,
+    ) -> "GRN":
+        # Keep the shape-defining dimensions explicit at the call site while
+        # inheriting the shared architectural defaults that should stay aligned
+        # across TFT-owned GRNs and the fused model's post-TFT fusion block.
+        return cls(
+            input_size=input_size,
+            hidden_size=config.hidden_size,
+            output_size=output_size,
+            context_hidden_size=context_hidden_size,
+            dropout=config.dropout,
+            layer_norm_eps=getattr(config, "layer_norm_eps", 1e-3),
+        )
+
     def forward(self, a: Tensor, c: Optional[Tensor] = None):
         x = self.lin_a(a)
         if c is not None:
-            x = x + self.lin_c(c).unsqueeze(1)
+            context = self.lin_c(c)
+            # Historically the TFT path passed rank-3 temporal inputs and rank-2
+            # static context, which requires broadcasting across the time axis.
+            # The new branch below preserves that behavior while also supporting
+            # rank-2 feature inputs with rank-2 context so the GRN can be reused
+            # more safely outside the exact original TFT call pattern.
+            if x.dim() == context.dim():
+                x = x + context
+            elif x.dim() == context.dim() + 1:
+                x = x + context.unsqueeze(1)
+            else:
+                raise ValueError(
+                    "Context tensor rank must match the input rank or be broadcastable "
+                    "across a single temporal dimension."
+                )
         x = elu(x)
         x = self.lin_i(x)
         x = self.dropout(x)

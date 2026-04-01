@@ -133,6 +133,7 @@ def test_tft_config_derives_counts_from_feature_schema_and_runtime_metadata() ->
     assert config.num_static_vars == 2
     assert config.num_future_vars == 4
     assert config.num_historic_vars == 6
+    assert config.layer_norm_eps == 1e-3
 
 
 def test_tft_config_supports_runtime_rebinding_used_by_datamodule_and_fused_model() -> None:
@@ -163,6 +164,13 @@ def test_tft_config_supports_runtime_rebinding_used_by_datamodule_and_fused_mode
     assert bound_config.example_length == 30
     assert bound_config.num_future_vars == 4
     assert bound_config.num_historic_vars == 5
+
+
+def test_tft_config_validates_layer_norm_epsilon() -> None:
+    # The GRN refactor now lets TFT-owned normalization share one epsilon value
+    # from config, so invalid values should fail before model construction.
+    with pytest.raises(ValueError, match="layer_norm_eps must be > 0.0"):
+        TFTConfig(layer_norm_eps=0.0)
 
 
 def test_top_level_config_groups_data_tft_and_tcn_contracts() -> None:
