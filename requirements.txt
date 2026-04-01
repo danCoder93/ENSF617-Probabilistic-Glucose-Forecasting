@@ -1,3 +1,6 @@
+numpy
 pandas
+pytorch-lightning
+pytest
 requests
 torch
