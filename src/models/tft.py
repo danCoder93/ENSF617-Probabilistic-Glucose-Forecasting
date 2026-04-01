@@ -47,6 +47,9 @@ from utils.config import TFTConfig
 
 # @torch.jit.script #Currently broken with autocast
 def fused_pointwise_linear_v1(x, a, b):
+    # Multiply each scalar continuous feature value by its learnable embedding
+    # vector and add a per-feature bias, producing one hidden vector per input
+    # feature without writing the equivalent einsum more verbosely.
     # squeeze adds one additional shape of 1 at the end '-1'
     # This is so that it is easier for broadcasting and matrix compatible
     # i.e. [b, t, f, 1] is the shape of x * [f, h] is the shape of a
@@ -56,15 +59,25 @@ def fused_pointwise_linear_v1(x, a, b):
 
 @torch.jit.script
 def fused_pointwise_linear_v2(x, a, b):
+    # Same idea as `fused_pointwise_linear_v1`, but shaped for the target path
+    # where the target tensor is always temporal and handled separately from the
+    # generic continuous input groups.
     out = x.unsqueeze(3) * a
     out = out + b
     return out
 
 
 class TFTEmbedding(Module):
-    '''
-    # Internal vector embeddings for the tft models from inputs
-    '''
+    """
+    Convert grouped raw inputs into per-variable hidden embeddings.
+
+    This stage is the front door to TFT:
+    - categorical variables become learned lookup embeddings
+    - continuous variables become learned linear embeddings
+    - each variable keeps its own slot so the later variable-selection network
+      can decide which inputs matter most at each stage
+    """
+
     def __init__(self, config, initialize_cont_params=True):
         # initialize_cont_params=False prevents form initializing parameters inside this class
         # so they can be lazily initialized in LazyEmbedding module
@@ -183,7 +196,8 @@ class TFTEmbedding(Module):
             return None
 
     def forward(self, x: Dict[str, Tensor]):
-        # temporal/static categorical/continuous known/observed input 
+        # Pull apart the semantic batch groups that FusedModel assembled for
+        # TFT. Every key corresponds to one role in the shared schema.
         s_cat_inp = x.get('s_cat', None)
         s_cont_inp = x.get('s_cont', None)
         t_cat_k_inp = x.get('k_cat', None)
@@ -197,8 +211,8 @@ class TFTEmbedding(Module):
         s_cat_inp = s_cat_inp[:,0,:] if s_cat_inp is not None else None
         s_cont_inp = s_cont_inp[:,0,:] if s_cont_inp is not None else None
 
-        # convert all three inputs into vector embeddings
-        #   static (s), temporal known inputs (t_known), temporal observed inputs (t_observed)
+        # Convert each semantic input group into a tensor of per-variable
+        # embeddings in the common hidden space.
         s_inp = self._apply_embedding(s_cat_inp,
                                       s_cont_inp,
                                       self.s_cat_embed,
@@ -222,10 +236,12 @@ class TFTEmbedding(Module):
         return s_inp, t_known_inp, t_observed_inp, t_observed_tgt
 
 class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
-    '''
-    Converts Continuous inputs to embeddings lazily i.e. allocate parameters to when see the real input
-    Create dynamically allocated parameters on input data in real time
-    '''
+    """
+    Lazily allocate continuous-embedding parameters once real input shapes are known.
+
+    This is helpful because several input widths are only fully known after the
+    data pipeline binds runtime metadata such as discovered feature counts.
+    """
 
     cls_to_become = TFTEmbedding
 
@@ -263,8 +279,9 @@ class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
 
     # runs when see actual inputs
     def initialize_parameters(self, x):
-        # if any uninitized parameter in this class (and not None)
-        # get([field name], [default value if not found])
+        # Materialize any continuous-embedding parameters the first time the
+        # module sees a real batch. After this, the module behaves like a normal
+        # eagerly initialized embedding block.
         if cast(Any, self).has_uninitialized_params():
             s_cont_inp = x.get('s_cont', None)
             t_cont_k_inp = x.get('k_cont', None)
@@ -298,6 +315,18 @@ class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
             self.reset_parameters()
 
 class VariableSelectionNetwork(Module):
+    """
+    Learn which variables matter most at a given stage of TFT.
+
+    Input shape convention:
+    - static path:   [batch, num_variables, hidden]
+    - temporal path: [batch, time, num_variables, hidden]
+
+    Output:
+    - one blended hidden representation per example or timestep
+    - one sparse weighting over the original variables
+    """
+
     def __init__(self, config, num_inputs):
         super().__init__()
         # The joint GRN consumes the flattened per-variable embeddings and emits
@@ -319,6 +348,9 @@ class VariableSelectionNetwork(Module):
         )
 
     def forward(self, x: Tensor, context: Optional[Tensor] = None):
+        # Flatten the per-variable embeddings so the joint GRN can score all
+        # variables together, then normalize those scores into attention-like
+        # sparse weights over the variable axis.
         Xi = torch.flatten(x, start_dim=-2)
         grn_outputs = self.joint_grn(Xi, c=context)
         sparse_weights = F.softmax(grn_outputs, dim=-1)
@@ -332,6 +364,16 @@ class VariableSelectionNetwork(Module):
         return variable_ctx, sparse_weights
 
 class StaticCovariateEncoder(Module):
+    """
+    Turn static covariates into the context vectors consumed throughout TFT.
+
+    These four vectors seed different downstream roles:
+    - `cs`: context for variable selection
+    - `ce`: context for static enrichment
+    - `ch`: initial hidden state for the temporal LSTMs
+    - `cc`: initial cell state for the temporal LSTMs
+    """
+
     def __init__(self, config):
         super().__init__()
         self.vsn = VariableSelectionNetwork(config, config.num_static_vars)
@@ -357,6 +399,14 @@ class StaticCovariateEncoder(Module):
 
 
 class InterpretableMultiHeadAttention(Module):
+    """
+    Causal self-attention over the combined historical+future temporal stream.
+
+    TFT uses attention after recurrent encoding so the model can revisit
+    relevant timesteps with a flexible dependency pattern while still obeying a
+    strict causal mask.
+    """
+
     def __init__(self, config):
         super().__init__()
         self.n_head = config.n_head
@@ -367,6 +417,9 @@ class InterpretableMultiHeadAttention(Module):
         self.attn_dropout = nn.Dropout(config.attn_dropout)
         self.out_dropout = nn.Dropout(config.dropout)
         self.scale = self.d_head**-0.5
+        # The mask prevents any position from attending to positions to its
+        # right, preserving the forecasting constraint during both training and
+        # inference.
         self.register_buffer("_mask", torch.triu(torch.full((config.example_length, config.example_length), float('-inf')), 1).unsqueeze(0))
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
@@ -395,6 +448,17 @@ class InterpretableMultiHeadAttention(Module):
         return out, attn_prob
 
 class TFTBack(Module):
+    """
+    Core temporal reasoning stack of TFT after embeddings and static encoding.
+
+    This block:
+    - selects variables for historical and future inputs
+    - encodes them recurrently
+    - enriches them with static context
+    - applies causal self-attention
+    - returns both latent decoder features and projected quantile outputs
+    """
+
     def __init__(self, config):
         super().__init__()
 
@@ -436,6 +500,9 @@ class TFTBack(Module):
         self.quantile_proj = nn.Linear(config.hidden_size, len(config.quantiles))
         
     def forward(self, historical_inputs, cs, ch, cc, ce, future_inputs):
+        # Historical and future inputs are processed separately at first because
+        # TFT treats "already observed" and "known ahead" information
+        # differently before joining them into one temporal stream.
         historical_features, _ = self.history_vsn(historical_inputs, cs)
         history, state = self.history_encoder(historical_features, (ch, cc))
         future_features, _ = self.future_vsn(future_inputs, cs)
@@ -443,7 +510,9 @@ class TFTBack(Module):
         if torch.cuda.is_available():
             torch.cuda.synchronize()
 
-        # skip connection
+        # First residual block over the recurrent temporal stream. TFT keeps the
+        # original input embedding available as a skip path so later stages do
+        # not lose the raw variable-selection output.
         input_embedding = torch.cat([historical_features, future_features], dim=1)
         temporal_features = torch.cat([history, future], dim=1)
         temporal_features = self.input_gate(temporal_features)
@@ -456,7 +525,9 @@ class TFTBack(Module):
         # Temporal self attention
         x, _ = self.attention(enriched)
 
-        # Don't compute hictorical quantiles i.e. leave everything before the encoderLength index - 0 based
+        # The model only needs predictions over the decoder horizon, so all
+        # hidden states corresponding to encoder-history positions are removed
+        # before the final decoder-side processing.
         x = x[:, self.encoder_length:, :]
         temporal_features = temporal_features[:, self.encoder_length:, :]
         enriched = enriched[:, self.encoder_length:, :]
@@ -468,42 +539,70 @@ class TFTBack(Module):
         # Position-wise feed-forward
         x = self.positionwise_grn(x)
 
-        # Final skip connection
+        # Final decoder-side residual block before quantile projection.
         x = self.decoder_gate(x)
         x = x + temporal_features
         x = self.decoder_ln(x)
 
+        # Return both:
+        # - `x`: horizon-aligned latent decoder features for late fusion
+        # - `out`: direct TFT quantile outputs for standalone TFT use
         out = self.quantile_proj(x)
 
-        return out
+        return x, out
 
 class TemporalFusionTransformer(Module):
-    """ 
-    Implementation of https://arxiv.org/abs/1912.09363 
+    """
+    Repository TFT wrapper with both latent-feature and quantile-output interfaces.
+
+    In this project the same TFT module serves two roles:
+    - as a standalone probabilistic forecaster via `forward(...)`
+    - as a representation branch inside the fused model via `forward_features(...)`
     """
     def __init__(self, config: TFTConfig):
         super().__init__()
 
-        self.encoder_length = config.encoder_length #this determines from how distant past we want to use data from
+        # This determines where the example transitions from encoder history to
+        # decoder horizon.
+        self.encoder_length = config.encoder_length
 
-        # lazily, i.e. dynamic shape input tensor for converting inputs to tensors embeddings
+        # Lazily bind continuous embedding widths to the actual grouped input
+        # tensors seen at runtime.
         self.embedding = LazyEmbedding(config)
 
         self.static_encoder = StaticCovariateEncoder(config)
         self.TFTpart2 = torch.jit.script(TFTBack(config))
 
-    def forward(self, x: Dict[str, Tensor]) -> Tensor:
+    def forward_with_features(self, x: Dict[str, Tensor]) -> Tuple[Tensor, Tensor]:
+        # Step 1: embed grouped raw inputs into per-variable hidden vectors.
         s_inp, t_known_inp, t_observed_inp, t_observed_tgt = self.embedding(x)
 
-        # Static context
+        # Step 2: derive the static context vectors that condition the temporal
+        # variable-selection and recurrent blocks.
         cs, ce, ch, cc = self.static_encoder(s_inp)
-        ch, cc = ch.unsqueeze(0), cc.unsqueeze(0) #lstm initial states
+        ch, cc = ch.unsqueeze(0), cc.unsqueeze(0)
 
-        # Temporal input
+        # Step 3: assemble the historical temporal stream from:
+        # - known inputs observed along the encoder axis
+        # - the target history itself
+        # - optional observed-only covariates
         _historical_inputs = [t_known_inp[:,:self.encoder_length,:], t_observed_tgt[:,:self.encoder_length,:]]
         if t_observed_inp is not None:
             _historical_inputs.insert(0,t_observed_inp[:,:self.encoder_length,:])
 
         historical_inputs = torch.cat(_historical_inputs, dim=-2)
+        # The future stream contains only variables known ahead at inference
+        # time. Observed-only inputs and the target are not available there.
         future_inputs = t_known_inp[:, self.encoder_length:]
         return self.TFTpart2(historical_inputs, cs, ch, cc, ce, future_inputs)
+
+    def forward_features(self, x: Dict[str, Tensor]) -> Tensor:
+        # Expose the decoder representation before quantile projection so the
+        # fused model can combine TFT features with TCN features in latent space.
+        features, _ = self.forward_with_features(x)
+        return features
+
+    def forward(self, x: Dict[str, Tensor]) -> Tensor:
+        # Default standalone interface: return probabilistic forecast outputs.
+        _, quantiles = self.forward_with_features(x)
+        return quantiles

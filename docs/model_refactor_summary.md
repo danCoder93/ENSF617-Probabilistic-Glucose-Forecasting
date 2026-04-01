@@ -33,23 +33,28 @@ making the responsibilities of each model file narrower and clearer.
   Replaced the previous large, library-style TCN implementation with a
   project-specific causal residual forecaster. The new file keeps:
   causal Conv1d, residual temporal blocks, fixed NLC input handling, and a
-  small horizon projection head. It removes unused features such as streaming
-  buffer management, transposed-convolution decoding, and compatibility paths.
+  horizon projection path that now supports both fusion-ready latent features
+  and branch-local forecast outputs. It removes unused features such as
+  streaming buffer management, transposed-convolution decoding, and
+  compatibility paths.
 - `src/models/fused_model.py`
   Refactored `FusedModel` to consume the structured batch dictionary emitted by
   the data pipeline. The model now:
   splits encoder history into known / observed / target groups,
   runs three TCN branches with kernel sizes 3, 5, and 7,
-  injects the three TCN horizon forecasts into TFT as auxiliary future
-  continuous features, and fuses TFT output with raw TCN forecasts before the
-  final readout.
+  keeps the TFT branch focused on its own future-known decoder inputs,
+  and fuses TCN branch features with TFT decoder features before the final
+  readout.
 - `src/models/nn_head.py`
-  Simplified the readout head into a lightweight MLP that maps fused
-  horizon-wise features to the final output dimension.
+  Evolved from a tiny readout MLP into a stronger residual position-wise
+  prediction head with GELU, LayerNorm, dropout, and stacked feed-forward
+  blocks so the final fused representation has a more expressive last-stage
+  predictor.
 - `src/models/tft.py`
-  Kept the core TFT implementation intact, but added a CUDA availability guard
+  Kept the core TFT implementation intact, added a CUDA availability guard
   around `torch.cuda.synchronize()` so the model path is safer on CPU-only
-  environments.
+  environments, and exposed a latent-feature interface so the fused model can
+  consume decoder representations before `quantile_proj`.
 
 ## TCN Refactor
 
@@ -61,13 +66,15 @@ design is intentionally narrower:
 - input contract:
   `[batch, encoder_length, num_inputs]`
 - output contract:
-  `[batch, prediction_length, output_size]`
+  `forward_features(...) -> [batch, prediction_length, branch_hidden_size]`
+  and `forward(...) -> [batch, prediction_length, output_size]`
 - backbone:
   stacked residual temporal blocks
 - temporal logic:
   causal convolutions only
 - branch role:
-  one TCN instance forecasts one kernel-scale view of the future
+  one TCN instance encodes one kernel-scale view of the history and contributes
+  a horizon-aligned latent feature stream to the fused predictor
 
 The fused model instantiates three such branches:
 
@@ -126,7 +133,8 @@ The main config-side changes were:
 - `TFTConfig`
   Kept aligned with the runtime-bound path used by `AZT1DDataModule` and
   `FusedModel`, including explicit support for sequence lengths, categorical
-  cardinalities, and auxiliary future features injected from the TCN branches.
+  cardinalities, and optional auxiliary future-feature counts when a caller
+  chooses to use that TFT capability outside the current default fused path.
 - `src/utils/tft_utils.py`
   Received a small compatibility guard around numpy scalar-type lookups so the
   shared config and feature-schema imports remain usable in environments with a
@@ -142,15 +150,49 @@ The current fused behavior is:
 1. `encoder_continuous` history is split into known, observed, and target
    history groups.
 2. Observed history plus target history are passed into the TCN branches.
-3. Each TCN branch emits a horizon-aligned forecast.
-4. Those three TCN forecasts are appended to TFT's future continuous inputs as
-   auxiliary forecast features.
-5. TFT output and the three raw TCN forecasts are concatenated.
+3. Each TCN branch emits a horizon-aligned latent feature tensor for fusion.
+4. TFT processes the structured batch inputs and exposes horizon-aligned
+   decoder features before its final quantile projection.
+5. TFT features and the three TCN branch feature tensors are concatenated.
 6. The concatenated representation is passed through `GRN` and then through the
    final `NNHead`.
 
 This keeps TFT as the future-aware refinement branch while allowing the TCNs to
-contribute explicit short/mid-range forecast signals.
+contribute explicit short/mid-range temporal representations at the same fusion
+stage instead of influencing TFT internally.
+
+## Fusion Realignment Follow-up
+
+After the earlier fused-model cleanup, a second follow-up pass aligned the
+actual implementation more closely with `docs/FusedModel_architecture.png`.
+
+The key architectural shifts were:
+
+- `src/models/fused_model.py`
+  Removed the old TCN-to-TFT auxiliary future bridge from the default fused
+  path by binding `num_aux_future_features=0` in the runtime TFT config.
+- `src/models/fused_model.py`
+  Reworked the fused forward pass so:
+  TCN branches read only encoder-history observed+target signals,
+  TFT reads only its own proper grouped static / historical / future-known
+  inputs,
+  and the two branches meet only at the late fusion stage.
+- `src/models/tft.py`
+  Added `forward_with_features(...)` and `forward_features(...)` so the fused
+  model can consume the decoder representation before the final quantile
+  projection.
+- `src/models/tcn.py`
+  Added `summarize(...)` and `forward_features(...)` so each branch can produce
+  a horizon-aligned latent feature tensor for fusion, while still preserving a
+  standard forecast-producing `forward(...)`.
+- `src/models/fused_model.py`
+  Updated the post-branch fusion width calculation to reflect:
+  one TFT hidden stream plus three TCN branch hidden streams, followed by the
+  fusion GRN and the final `NNHead`.
+
+This changed the fused architecture from a late reconciliation layer over
+already-decoded TFT outputs into a true latent-space fusion path where TCN and
+TFT meet before final prediction.
 
 ## GRN Encapsulation Follow-up
 
@@ -222,6 +264,24 @@ An additional TCN-specific diagram was added:
 This keeps implementation files and design/reference assets more clearly
 separated.
 
+## Documentation Standardization
+
+The model files also received a documentation/style cleanup so the top-of-file
+provenance and AI-assistance notes follow a pattern closer to the existing
+`src/models/tft.py` style:
+
+- provenance / adaptation notes live at the top of the file as comment blocks
+- class docstrings focus on architecture role, tensor contracts, and behavior
+- inline `#` comments explain implementation logic locally where it matters
+
+This was applied across the active model files:
+
+- `src/models/fused_model.py`
+- `src/models/grn.py`
+- `src/models/nn_head.py`
+- `src/models/tcn.py`
+- `src/models/tft.py`
+
 ## Documentation Work Inside `tcn.py`
 
 The new `tcn.py` also received a full provenance and architectural comment pass.
@@ -236,11 +296,34 @@ That file now documents:
 - key implementation choices such as causal padding, residual blocks, receptive
   field scaling, and horizon projection
 
+## NNHead Follow-up
+
+The final `NNHead` also received a targeted architecture and documentation pass.
+
+That follow-up changed the head from a minimal two-layer MLP into a stronger
+position-wise predictor that now:
+
+- projects fused hidden features into a dedicated readout space
+- refines them through residual feed-forward blocks
+- uses GELU activations, LayerNorm, and dropout for a deeper but still stable
+  final-stage predictor
+- keeps the head's responsibility narrow:
+  `GRN` performs branch fusion, while `NNHead` performs final prediction
+
+The file was also expanded with comments that explain:
+
+- the purpose of the residual feed-forward blocks
+- why the head remains position-wise across the horizon
+- how the readout stack relates to the upstream fusion GRN
+- the default sizing logic for hidden and feed-forward widths
+
 ## Verification Notes
 
 Verification completed during this refactor:
 
 - `python -m py_compile` passed for the modified model files
+- `python -m py_compile src/models/*.py` passed after the later fusion
+  realignment and model-comment cleanup
 - `python -m py_compile` also passed for the repaired shared config and new
   config test file
 - static inspection confirmed the new code paths match the structured batch
@@ -262,5 +345,5 @@ Verification still pending in a runtime environment with `torch` installed:
 
 - one end-to-end synthetic forward pass through `FusedModel`
 - one integration pass using actual `AZT1DDataModule` batches
-- shape checks for the TCN-to-TFT auxiliary future feature bridge
+- shape checks for the new latent-space TCN/TFT fusion path
 - full pytest execution once the test environment includes `pytest`

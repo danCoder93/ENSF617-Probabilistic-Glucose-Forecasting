@@ -1,22 +1,21 @@
 from __future__ import annotations
 
-"""
-AI-assisted maintenance note:
-This existing module was refined with AI assistance on April 1, 2026 under
-direct user guidance. The changes here are intended to clarify, harden, and
-better encapsulate the project's current GRN implementation for reuse across
-the TFT internals and the fused forecast head while preserving the established
-architecture.
-
-The refactor intentionally kept per-call structural dimensions explicit
-(`input_size`, `output_size`, and `context_hidden_size`) because those vary by
-use site, but centralized shared defaults such as `hidden_size`, `dropout`,
-and layer-norm epsilon through the TFT config path via `GRN.from_tft_config`.
-
-The goal of these changes is not to present new model ideas, but to improve the
-robustness, consistency, and maintainability of the existing GRN math block and
-its config-driven construction path.
-"""
+# AI-assisted maintenance note (April 1, 2026):
+# This existing module was refined with AI assistance under direct user
+# guidance. The changes here are intended to clarify, harden, and better
+# encapsulate the project's current GRN implementation for reuse across the TFT
+# internals and the fused forecast head while preserving the established
+# architecture.
+#
+# The refactor intentionally kept per-call structural dimensions explicit
+# (`input_size`, `output_size`, and `context_hidden_size`) because those vary
+# by use site, but centralized shared defaults such as `hidden_size`,
+# `dropout`, and layer-norm epsilon through the TFT config path via
+# `GRN.from_tft_config`.
+#
+# The goal of these changes is not to present new model ideas, but to improve
+# the robustness, consistency, and maintainability of the existing GRN math
+# block and its config-driven construction path.
 
 from typing import Optional
 
@@ -28,6 +27,13 @@ from torch.nn.functional import elu, glu
 from utils.config import TFTConfig
 
 class MaybeLayerNorm(Module):
+    """
+    Apply layer norm unless the output collapses to a single scalar channel.
+
+    A size-1 output is a special case because normalizing a single scalar per
+    position is not very meaningful and can introduce avoidable instability.
+    """
+
     def __init__(self, output_size, hidden_size, eps):
         super().__init__()
         if output_size and output_size == 1:
@@ -39,6 +45,14 @@ class MaybeLayerNorm(Module):
         return self.ln(x)
 
 class GLU(Module):
+    """
+    Gated linear unit used inside the GRN blocks.
+
+    Conceptually this learns:
+    - a candidate transformed signal
+    - a gate deciding how much of that signal should pass through
+    """
+
     def __init__(self, hidden_size, output_size):
         super().__init__()
         self.lin = nn.Linear(hidden_size, output_size * 2)
@@ -49,6 +63,25 @@ class GLU(Module):
         return x
 
 class GRN(Module):
+    """
+    Gated Residual Network block used throughout TFT and the fused head.
+
+    High-level behavior:
+    - project the input into a hidden space
+    - optionally inject a context vector
+    - apply a nonlinear transformation
+    - gate the transformed signal
+    - add a residual shortcut
+    - normalize the result
+
+    Why this is useful in this codebase:
+    - TFT relies on GRNs repeatedly as its standard nonlinear processing block
+    - the fused model also uses a GRN to mix branch features before the final
+      readout head
+    - sharing the same block keeps the fused architecture stylistically and
+      numerically aligned with the TFT internals
+    """
+
     def __init__(self,
                  input_size,
                  hidden_size,
@@ -112,6 +145,12 @@ class GRN(Module):
         )
 
     def forward(self, a: Tensor, c: Optional[Tensor] = None):
+        # `a` is the main feature tensor. Depending on the caller it may be:
+        # - rank 2: [batch, features]
+        # - rank 3: [batch, time, features]
+        #
+        # `c` is an optional context tensor, typically a static context vector
+        # produced by TFT's static encoder.
         x = self.lin_a(a)
         if c is not None:
             context = self.lin_c(c)
@@ -129,10 +168,14 @@ class GRN(Module):
                     "Context tensor rank must match the input rank or be broadcastable "
                     "across a single temporal dimension."
                 )
+        # The nonlinear path learns a transformed view of the input, while the
+        # residual path below preserves a direct route for the original signal.
         x = elu(x)
         x = self.lin_i(x)
         x = self.dropout(x)
         x = self.glu(x)
+        # If the output dimensionality changes, the shortcut must be projected
+        # so the residual addition stays shape-compatible.
         y = a if self.out_proj is None else self.out_proj(a)
         x = x + y
         return self.layer_norm(x) 

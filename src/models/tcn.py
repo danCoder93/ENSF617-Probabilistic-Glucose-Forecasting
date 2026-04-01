@@ -1,53 +1,21 @@
-"""
-Temporal Convolution Network branch for the fused glucose forecasting pipeline.
-
-High-level role in the model:
-- This TCN branch is the "short / medium range pattern specialist" inside the
-  fused architecture.
-- It reads only encoder-side history and learns local temporal structure such
-  as short-lived glucose moves, post-meal changes, and insulin-driven dynamics.
-- In the full fused model, three instances of this class are created with
-  kernel sizes 3, 5, and 7 so the system can look at the same history through
-  multiple temporal scales before handing those branch forecasts to the TFT.
-
-Why this file is intentionally narrow:
-- The repository does not need a general-purpose TCN library.
-- It needs one readable, project-specific temporal forecaster that matches the
-  batch contract produced by the data pipeline and the fusion contract expected
-  by the TCN-TFT model.
-- That is why this file keeps only the causal residual Conv1d backbone and a
-  small horizon projection head.
-
-Code provenance / disclaimer:
-- This file is influenced by the original TCN paper and by the open-source
-  `pytorch-tcn` project by Paul Krug:
-  https://github.com/paul-krug/pytorch-tcn
-- Within this repository, the main project-specific TCN implementation is most
-  closely based on mcheema88's work on the `MarleyTCNClean` branch:
-  https://github.com/danCoder93/ENSF617-Probabilistic-Glucose-Forecasting/blob/MarleyTCNClean/src/models/tcn.py
-- The current file preserves that lineage at the architectural level:
-  causal convolutions, residual temporal blocks, and the project-specific
-  multiscale TCN direction.
-- This version further simplifies and adapts that earlier implementation for
-  the fused TCN-TFT forecasting pipeline used in this project.
-
-How this repository's version differs from the upstream reference:
-- keeps only the causal residual Conv1d path needed by this project
-- removes generic library features that are not part of the current use case,
-  such as streaming buffer management, transposed-convolution decoding,
-  compatibility shims, and multiple operating modes
-- standardizes on the dataset/model contract used in this repo:
-  `[batch, encoder_length, features] -> [batch, prediction_length, outputs]`
-- uses a lightweight horizon projection head so each TCN branch acts as a base
-  forecaster inside the fused TCN-TFT architecture
-
-Generative AI assistance disclaimer:
-- Generative AI tools contributed to parts of the earlier repository TCN work
-  and were also used here to help summarize provenance, document
-  project-specific modifications, and draft explanatory comments.
-- Final responsibility for integration, editing, and technical intent in this
-  repository remains with the project authors listed above.
-"""
+# This file is adapted from the open-source `pytorch-tcn` project by Paul
+# Krug:
+# https://github.com/paul-krug/pytorch-tcn
+#
+# Within this repository, the implementation is also informed by prior
+# project-specific TCN work on the `MarleyTCNClean` branch:
+# https://github.com/danCoder93/ENSF617-Probabilistic-Glucose-Forecasting/blob/MarleyTCNClean/src/models/tcn.py
+#
+# The current version narrows and adapts that lineage for the fused glucose
+# forecasting architecture used in this project. It keeps the core causal
+# residual temporal-block structure while removing broader library-style
+# surfaces that are not part of the current use case.
+#
+# AI-assisted maintenance note (April 1, 2026):
+# AI assistance was used under direct user guidance to help document
+# provenance, explain the project-specific architecture, and clarify the role
+# of this TCN branch inside the fused model. Final responsibility for
+# integration, editing, and technical intent remains with the project authors.
 
 from __future__ import annotations
 
@@ -108,6 +76,8 @@ class ChannelLayerNorm(nn.Module):
         self.norm = nn.LayerNorm(num_channels)
 
     def forward(self, x: Tensor) -> Tensor:
+        # Temporarily move channels to the last dimension so standard LayerNorm
+        # can normalize feature channels at each timestep independently.
         return self.norm(x.transpose(1, 2)).transpose(1, 2)
 
 
@@ -153,6 +123,9 @@ class CausalConv1d(nn.Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
+        # Left padding ensures the convolution output stays length-preserving
+        # without letting the filter see timesteps to the right of the current
+        # position.
         x = F.pad(x, (self.left_padding, 0))
         return self.conv(x)
 
@@ -261,7 +234,8 @@ class TCN(nn.Module):
     - `[batch, encoder_length, num_inputs]`
 
     Output:
-    - `[batch, prediction_length, output_size]`
+    - `forward_features(...) -> [batch, prediction_length, branch_hidden_size]`
+    - `forward(...) -> [batch, prediction_length, output_size]`
     """
 
     def __init__(self, config: TCNConfig) -> None:
@@ -305,22 +279,23 @@ class TCN(nn.Module):
             in_channels = int(out_channels)
         self.network = nn.Sequential(*blocks)
 
-        # The forecast head is the project-specific "decoder" we kept:
-        # instead of a large generic decoder stack, we summarize the final
-        # encoded history state and project it directly to the forecast horizon.
+        # The branch now exposes a horizon-aligned latent representation for the
+        # fused model's final fusion stage, while still keeping a small local
+        # forecast projection for standalone branch outputs.
         #
         # This is enough for our use case because:
         # - the TCN branch is a base forecaster, not the whole forecasting
         #   system
-        # - TFT is the branch that later refines future-aware behavior using
-        #   known decoder inputs and richer fusion logic
+        # - the fused head is now where branch-to-branch interaction happens
         last_channels = int(config.num_channels[-1])
-        self.forecast_head = nn.Sequential(
+        self.branch_hidden_size = last_channels
+        self.feature_head = nn.Sequential(
             nn.Linear(last_channels, last_channels),
             _build_activation(config.activation),
             nn.Dropout(config.dropout),
-            nn.Linear(last_channels, config.prediction_length * config.output_size),
+            nn.Linear(last_channels, config.prediction_length * last_channels),
         )
+        self.output_proj = nn.Linear(last_channels, config.output_size)
 
     def encode(self, x: Tensor) -> Tensor:
         if x.ndim != 3:
@@ -343,7 +318,7 @@ class TCN(nn.Module):
         x = self.network(x)
         return x.transpose(1, 2)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def summarize(self, x: Tensor) -> Tensor:
         encoded = self.encode(x)
 
         # We summarize the final encoded timestep because it has the widest
@@ -353,12 +328,24 @@ class TCN(nn.Module):
         # branch has seen the full available history up to the forecast origin.
         # That makes it a natural compact summary for mapping history into the
         # next `prediction_length` steps.
-        summary = encoded[:, -1, :]
-        forecast = self.forecast_head(summary)
-        # The head emits one flat vector per batch item, which we reshape back
-        # into the standard forecasting layout expected by the fused pipeline.
-        return forecast.view(
+        return encoded[:, -1, :]
+
+    def forward_features(self, x: Tensor) -> Tensor:
+        # This is the interface the fused model uses. It expands one compact
+        # branch summary into one hidden feature vector per forecast step so the
+        # TCN can participate in late fusion as a representation branch rather
+        # than only as a scalar base forecaster.
+        summary = self.summarize(x)
+        branch_features = self.feature_head(summary)
+        return branch_features.view(
             x.shape[0],
             self.config.prediction_length,
-            self.config.output_size,
+            self.branch_hidden_size,
         )
+
+    def forward(self, x: Tensor) -> Tensor:
+        # Keep a branch-local forecast path available so the TCN still behaves
+        # like a normal forecaster when called directly. The fused model now
+        # uses `forward_features(...)` instead.
+        branch_features = self.forward_features(x)
+        return self.output_proj(branch_features)
