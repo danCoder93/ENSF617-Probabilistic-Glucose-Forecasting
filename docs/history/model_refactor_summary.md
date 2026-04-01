@@ -164,7 +164,7 @@ stage instead of influencing TFT internally.
 ## Fusion Realignment Follow-up
 
 After the earlier fused-model cleanup, a second follow-up pass aligned the
-actual implementation more closely with `docs/FusedModel_architecture.png`.
+actual implementation more closely with `docs/assets/FusedModel_architecture.png`.
 
 The key architectural shifts were:
 
@@ -260,13 +260,13 @@ needs GRN-specific behavior that diverges from the current TFT-level defaults.
 
 Model diagrams were moved out of `src/models/` and into `docs/`:
 
-- `docs/FusedModel_architecture.png`
-- `docs/TFT_architecture.PNG`
-- `docs/Time_Series.jpg`
+- `docs/assets/FusedModel_architecture.png`
+- `docs/assets/TFT_architecture.PNG`
+- `docs/assets/Time_Series.jpg`
 
 An additional TCN-specific diagram was added:
 
-- `docs/TCN_architecture.png`
+- `docs/assets/TCN_architecture.png`
 
 This keeps implementation files and design/reference assets more clearly
 separated.

@@ -4,25 +4,15 @@ Hybrid TCN–Transformer (TFT) model for probabilistic blood glucose forecasting
 
 ## Refactor Notes
 
-The AZT1D data-layer refactor is summarized in
-[docs/data_refactor_summary.md](docs/data_refactor_summary.md).
+The recommended top-level project guides are:
 
-The model-folder refactor is summarized in
-[docs/model_refactor_summary.md](docs/model_refactor_summary.md).
+- [docs/codebase_evolution.md](docs/codebase_evolution.md)
+- [docs/current_architecture.md](docs/current_architecture.md)
 
-The LightningModule integration work in `FusedModel` is summarized in
-[docs/lightning_model_integration_summary.md](docs/lightning_model_integration_summary.md).
+Archived milestone summaries and earlier refactor notes now live under
+[docs/history/](docs/history/).
 
-The reusable Lightning training-wrapper layer in `src/train.py` is summarized in
-[docs/train_wrapper_summary.md](docs/train_wrapper_summary.md).
-
-The new top-level script/notebook entrypoint and shared defaults layer are
-summarized in
-[docs/entrypoint_defaults_summary.md](docs/entrypoint_defaults_summary.md).
-
-The structured detailed evaluation package and held-out evaluation flow are
-summarized in
-[docs/evaluation_package_summary.md](docs/evaluation_package_summary.md).
+Architecture diagrams now live under [docs/assets/](docs/assets/).
 
 ## Testing
 

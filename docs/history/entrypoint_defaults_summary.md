@@ -39,7 +39,7 @@ Files added:
 - `main.ipynb`
 - `defaults.py`
 - `tests/test_main.py`
-- `docs/entrypoint_defaults_summary.md`
+- `docs/history/entrypoint_defaults_summary.md`
 
 Files updated:
 

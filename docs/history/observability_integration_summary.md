@@ -63,7 +63,7 @@ than by collapsing responsibilities into one file.
 Files added:
 
 - `src/observability/`
-- `docs/observability_integration_summary.md`
+- `docs/history/observability_integration_summary.md`
 
 Files updated:
 
