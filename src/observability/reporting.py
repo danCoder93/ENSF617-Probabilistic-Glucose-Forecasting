@@ -17,17 +17,30 @@ from __future__ import annotations
 # exist only after prediction generation completes.
 
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Protocol, Sequence
 
 import pandas as pd
 import torch
 from torch import Tensor
 
 from config import PathInput
-from data.datamodule import AZT1DDataModule
 from evaluation import EvaluationResult, select_point_prediction
 from observability.tensors import _as_metadata_lists
 from observability.utils import _has_module
+
+
+class TestDataloaderProvider(Protocol):
+    """
+    Minimal contract needed by post-run prediction export.
+
+    Context:
+    the reporting/export path only needs access to the held-out test batches,
+    not the full concrete `AZT1DDataModule` API. Keeping the type boundary this
+    small makes the helper easier to test and more accurate about what it
+    truly depends on.
+    """
+
+    def test_dataloader(self) -> Any: ...
 
 
 # ============================================================================
@@ -37,7 +50,7 @@ from observability.utils import _has_module
 # produced. They turn raw tensors into analysis-friendly artifacts.
 def export_prediction_table(
     *,
-    datamodule: AZT1DDataModule,
+    datamodule: TestDataloaderProvider,
     predictions: Sequence[Tensor],
     quantiles: Sequence[float],
     output_path: PathInput | None,
