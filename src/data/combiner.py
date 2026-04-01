@@ -79,7 +79,7 @@ class DatasetCombiner:
                             {
                                 "subject_id": subject_id,
                                 "timestamp": self._text(row, "EventDateTime"),
-                                "glucose_mg_dl": self._text(row, glucose_column),
+                                "glucose_mg_dl": self._text(row, glucose_column) if glucose_column else "",
                                 "basal_insulin_u": self._text(row, "Basal"),
                                 "bolus_insulin_u": self._text(row, "TotalBolusInsulinDelivered"),
                                 "correction_insulin_u": self._text(row, "CorrectionDelivered"),
