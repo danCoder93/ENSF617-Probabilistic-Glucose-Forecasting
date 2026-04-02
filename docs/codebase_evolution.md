@@ -572,6 +572,56 @@ That separation matters for future work too. New backend checks, profile
 policies, or preflight diagnostics now have an obvious home that does not blur
 the config layer or the training wrapper.
 
+### Later April 1, 2026 Follow-Up: Runtime Tuning, Robustness, And Editor Cleanup
+
+After the initial `src/environment/` milestone, the repository went through a
+smaller but still important follow-up wave.
+
+#### What changed
+
+The newer follow-up added:
+
+- `src/environment/tuning.py` as the backend-knob companion to detection,
+  profiles, and diagnostics
+- backend-aware defaults for TF32, cuDNN benchmark, thread counts, BF16, and
+  optional `torch.compile(...)`
+- a benchmark-only top-level workflow for comparing environments more quickly
+- compile fallback and workflow-level robustness fixes
+- Pyright/Pylance cleanup for the newer runtime and notebook surfaces
+- a final consistency pass over the lighter facade/helper modules so their
+  comments matched the denser documentation style already used in the more
+  complex model/runtime files
+
+#### Why it changed
+
+The earlier environment milestone answered:
+
+- "what machine am I on?"
+- "which profile should I use?"
+- "does this requested setup look valid?"
+
+The follow-up answered the next set of questions:
+
+- "how do those policy choices actually reach Torch backend knobs?"
+- "how can we compare environments without running the full evaluation stack?"
+- "how do we keep newer runtime/editor surfaces from becoming a static-analysis
+  weak spot?"
+
+#### Lasting impact
+
+This follow-up completed the runtime story more fully:
+
+- config declares policy
+- environment resolves policy
+- tuning applies policy
+- diagnostics validate policy
+- entry surfaces can benchmark and report policy
+
+It also reinforced another recurring theme in the repository's evolution:
+once a subsystem becomes first-class, documentation, typing, and editor
+correctness eventually have to catch up so that future work is easier rather
+than harder.
+
 ## Cross-Cutting Design Decisions
 
 Several design decisions repeat throughout the codebase's evolution. These are

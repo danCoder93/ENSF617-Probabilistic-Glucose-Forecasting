@@ -66,6 +66,9 @@ def collect_runtime_diagnostics(
 
     # Dependency presence is checked first because many later diagnostics only
     # make sense once the core training stack exists.
+    #
+    # In other words, these are "can the repository even launch the intended
+    # runtime stack?" checks, not backend-policy checks yet.
     if not environment.torch_available:
         diagnostics.append(
             RuntimeDiagnostic(
@@ -92,6 +95,9 @@ def collect_runtime_diagnostics(
 
     # Backend compatibility checks answer the question:
     # "does the requested runtime policy make sense on this machine?"
+    #
+    # These are treated as hard errors when the mismatch is strong enough that
+    # the run is very likely to fail or behave incorrectly.
     if accelerator == "gpu" and not environment.cuda_available:
         diagnostics.append(
             RuntimeDiagnostic(
@@ -127,16 +133,43 @@ def collect_runtime_diagnostics(
                 ),
             )
         )
-    if accelerator == "cpu" and str(train_config.precision).endswith("-mixed"):
+    if (
+        accelerator == "cpu"
+        and str(train_config.precision).endswith("-mixed")
+        and not (
+            str(train_config.precision) == "bf16-mixed"
+            and environment.cpu_supports_bf16
+        )
+    ):
+        # Generic CPU mixed precision is not something we want to "maybe let
+        # slide." The repository only blesses the BF16 CPU path when the host
+        # reports support for it; otherwise plain FP32 is the clear baseline.
         diagnostics.append(
             RuntimeDiagnostic(
                 severity="error",
                 code="cpu_mixed_precision",
-                message="Mixed precision was requested for a CPU run.",
-                suggestion="Use precision `32` for CPU execution.",
+                message="The requested mixed-precision mode is not supported for this CPU run.",
+                suggestion="Use precision `32`, or `bf16-mixed` on CPUs that support BF16.",
+            )
+        )
+    if (
+        accelerator == "cpu"
+        and str(train_config.precision) == "bf16-mixed"
+        and not environment.cpu_supports_bf16
+    ):
+        diagnostics.append(
+            RuntimeDiagnostic(
+                severity="error",
+                code="cpu_bf16_unavailable",
+                message="BF16 mixed precision was requested, but the active CPU does not report BF16 support.",
+                suggestion="Use precision `32` on this CPU.",
             )
         )
     if accelerator == "mps" and str(train_config.precision).endswith("-mixed"):
+        # MPS stays intentionally conservative here. Even if some mixed-
+        # precision combinations can work in certain versions, the repo's
+        # profile policy is to keep Apple Silicon defaults simpler and easier
+        # to reason about.
         diagnostics.append(
             RuntimeDiagnostic(
                 severity="error",
@@ -145,16 +178,35 @@ def collect_runtime_diagnostics(
                 suggestion="Use precision `32` for Apple Silicon runs.",
             )
         )
+    if (
+        accelerator == "gpu"
+        and str(train_config.precision) == "bf16-mixed"
+        and not environment.cuda_supports_bf16
+    ):
+        diagnostics.append(
+            RuntimeDiagnostic(
+                severity="error",
+                code="cuda_bf16_unavailable",
+                message=(
+                    "BF16 mixed precision was requested, but the active CUDA setup "
+                    "does not report BF16 support."
+                ),
+                suggestion="Use precision `16-mixed` or `32` for this GPU.",
+            )
+        )
 
     # Environment-shape warnings answer the slightly different question:
     # "even if this might run, does the selected profile match the current
     # environment well?"
-    if resolved_profile == "apple-silicon" and environment.system != "Darwin":
+    #
+    # These are warnings rather than errors when the situation is "plausibly
+    # runnable but probably the wrong shape of defaults."
+    if resolved_profile == "apple-silicon" and not environment.is_apple_silicon:
         diagnostics.append(
             RuntimeDiagnostic(
                 severity="error",
-                code="apple_profile_non_darwin",
-                message="The Apple Silicon profile was selected outside macOS.",
+                code="apple_profile_without_apple_silicon",
+                message="The Apple Silicon profile was selected on a non-Apple-Silicon host.",
                 suggestion="Use `local-cpu`, `local-cuda`, or a Slurm profile instead.",
             )
         )
@@ -185,6 +237,42 @@ def collect_runtime_diagnostics(
                 suggestion="Keep `num_workers` at 0-2 in Colab unless you have verified stability.",
             )
         )
+    if data_config.persistent_workers and data_config.num_workers == 0:
+        # The DataLoader path already guards this at construction time, so this
+        # warning is less about preventing a crash and more about surfacing an
+        # internally contradictory config.
+        diagnostics.append(
+            RuntimeDiagnostic(
+                severity="warning",
+                code="persistent_workers_without_workers",
+                message="Persistent workers were enabled with `num_workers=0`.",
+                suggestion="Disable persistent workers or raise `num_workers` above zero.",
+            )
+        )
+    if data_config.prefetch_factor is not None and data_config.num_workers == 0:
+        # `prefetch_factor` silently does nothing without worker processes. A
+        # warning keeps the run summary honest about which knobs are actually
+        # meaningful for the selected loader shape.
+        diagnostics.append(
+            RuntimeDiagnostic(
+                severity="warning",
+                code="prefetch_without_workers",
+                message="A DataLoader prefetch factor was set while `num_workers=0`.",
+                suggestion="Unset `prefetch_factor` or raise `num_workers` above zero.",
+            )
+        )
+    if environment.is_apple_silicon and data_config.num_workers > 2:
+        # This remains a heuristic warning rather than an error because some
+        # Apple Silicon machines may benchmark well above this. The point is to
+        # document the repo's "start small, benchmark upward" stance.
+        diagnostics.append(
+            RuntimeDiagnostic(
+                severity="warning",
+                code="apple_worker_count_high",
+                message="Apple Silicon runs often work best with only a small number of DataLoader workers.",
+                suggestion="Keep `num_workers` around 0-2 on Apple Silicon unless benchmarking proves otherwise.",
+            )
+        )
     if environment.mps_available and data_config.pin_memory:
         diagnostics.append(
             RuntimeDiagnostic(
@@ -192,6 +280,30 @@ def collect_runtime_diagnostics(
                 code="mps_pin_memory",
                 message="Pinned host memory is usually not helpful for MPS runs.",
                 suggestion="Set `pin_memory=False` on Apple Silicon unless benchmarking proves otherwise.",
+            )
+        )
+    if train_config.deterministic and train_config.cudnn_benchmark:
+        # This warning exists because the two settings express different goals:
+        # deterministic mode asks for repeatability, while cuDNN benchmark asks
+        # for fastest kernel selection based on runtime shape probing.
+        diagnostics.append(
+            RuntimeDiagnostic(
+                severity="warning",
+                code="deterministic_with_cudnn_benchmark",
+                message="Deterministic mode was requested together with cuDNN benchmark mode.",
+                suggestion="Disable `cudnn_benchmark` when reproducibility matters more than throughput.",
+            )
+        )
+    if accelerator == "mps" and train_config.compile_model:
+        # Compile on MPS is not forbidden, but it is called out because this is
+        # still one of the more likely "advanced optimization" knobs to cause
+        # surprise regressions or unsupported-operator paths on Apple Silicon.
+        diagnostics.append(
+            RuntimeDiagnostic(
+                severity="warning",
+                code="mps_compile_experimental",
+                message="`torch.compile` remains more experimental on MPS than on CPU/CUDA.",
+                suggestion="Disable compile on Apple Silicon if you see regressions or unsupported-operator failures.",
             )
         )
     if environment.is_slurm and train_config.enable_progress_bar:

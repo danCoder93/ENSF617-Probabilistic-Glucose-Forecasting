@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 
 pytest.importorskip("pytorch_lightning")
+import train as train_module
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import (
     DeviceStatsMonitor,
@@ -199,3 +200,112 @@ def test_fit_test_predict_falls_back_to_in_memory_weights_without_best_checkpoin
 
     assert observed_ckpt_paths == [None, None]
     assert artifacts.test_metrics == [{"test_loss": 0.5}]
+
+
+def test_build_trainer_passes_runtime_tuning_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_kwargs: dict[str, object] = {}
+
+    class FakeTrainer:
+        def __init__(self, **kwargs: object) -> None:
+            observed_kwargs.update(kwargs)
+
+    monkeypatch.setattr(train_module, "Trainer", FakeTrainer)
+
+    trainer = FusedModelTrainer(
+        _build_base_config(
+            DataConfig(
+                dataset_url=None,
+                num_workers=2,
+                pin_memory=True,
+                persistent_workers=True,
+                prefetch_factor=4,
+            )
+        ),
+        trainer_config=TrainConfig(
+            accelerator="gpu",
+            devices=1,
+            precision="16-mixed",
+            gradient_clip_val=1.0,
+            accumulate_grad_batches=2,
+            strategy="auto",
+            sync_batchnorm=False,
+            matmul_precision="high",
+            allow_tf32=True,
+            cudnn_benchmark=True,
+        ),
+    )
+
+    trainer.build_trainer(has_validation_data=True)
+
+    assert observed_kwargs["gradient_clip_val"] == 1.0
+    assert observed_kwargs["accumulate_grad_batches"] == 2
+    assert observed_kwargs["strategy"] == "auto"
+    assert observed_kwargs["sync_batchnorm"] is False
+
+
+def test_datamodule_includes_prefetch_factor_only_when_workers_are_enabled(
+    write_processed_csv,
+    build_data_config,
+) -> None:
+    csv_path = write_processed_csv()
+    data_config = build_data_config(
+        csv_path,
+        num_workers=2,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=4,
+    )
+    datamodule = AZT1DDataModule(data_config)
+    datamodule.setup()
+
+    train_loader = datamodule.train_dataloader()
+
+    assert train_loader.prefetch_factor == 4
+
+
+def test_fit_falls_back_to_eager_model_when_compile_raises(
+    write_processed_csv,
+    build_data_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    csv_path = write_processed_csv()
+    data_config = build_data_config(csv_path)
+    datamodule = AZT1DDataModule(data_config)
+    trainer = FusedModelTrainer(
+        _build_base_config(data_config),
+        trainer_config=TrainConfig(compile_model=True),
+    )
+
+    class FakeTrainer:
+        num_training_batches = 1
+
+        def fit(
+            self,
+            *,
+            model: object,
+            datamodule: object,
+            ckpt_path: str | None = None,
+        ) -> None:
+            del datamodule, ckpt_path
+            observed_models.append(model)
+
+    observed_models: list[object] = []
+
+    def fake_compile_model(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise RuntimeError("compile exploded")
+
+    monkeypatch.setattr(train_module, "maybe_compile_model", fake_compile_model)
+    monkeypatch.setattr(
+        trainer,
+        "build_trainer",
+        lambda has_validation_data: cast(Trainer, FakeTrainer()),
+    )
+
+    artifacts = trainer.fit(datamodule)
+
+    assert observed_models == [trainer.model]
+    assert "compile_model" in trainer.runtime_tuning_report.skipped
+    assert artifacts.train_batches_processed == 1

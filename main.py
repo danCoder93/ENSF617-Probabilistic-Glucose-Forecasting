@@ -22,10 +22,12 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import datetime
 from pathlib import Path
+import platform
 import sys
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from defaults import (
@@ -49,12 +51,12 @@ from environment import (
     DEVICE_PROFILE_CHOICES,
     RuntimeDiagnostic,
     RuntimeEnvironment,
+    apply_runtime_environment_overrides,
     analyze_runtime_failure,
     collect_runtime_diagnostics,
     detect_runtime_environment,
     format_runtime_diagnostics,
     has_error_diagnostics,
-    infer_device_profile,
     resolve_device_profile,
 )
 
@@ -115,6 +117,16 @@ class MainRunArtifacts:
     applied_profile_defaults: dict[str, Any]
     runtime_environment: RuntimeEnvironment
     preflight_diagnostics: tuple[RuntimeDiagnostic, ...]
+
+
+@dataclass(frozen=True)
+class EnvironmentBenchmarkArtifacts:
+    """
+    Summary of one short environment-focused benchmark run.
+    """
+
+    summary: dict[str, Any]
+    summary_path: Path | None
 
 
 def _json_ready(value: Any) -> Any:
@@ -196,6 +208,42 @@ def _normalize_optional_string(value: str | None) -> str | None:
     return cleaned
 
 
+def _apply_early_apple_silicon_environment_defaults(
+    *,
+    requested_device_profile: str,
+    train_config: TrainConfig,
+) -> None:
+    # MPS allocator/fallback environment variables need to be present before
+    # torch is imported. The full profile resolver runs after runtime detection,
+    # so Apple Silicon needs one early pass here when the profile is explicit
+    # or when `auto` is likely to resolve to the Apple path.
+    if requested_device_profile not in {"auto", "apple-silicon"}:
+        return
+    if platform.system() != "Darwin" or platform.machine() not in {"arm64", "arm64e"}:
+        return
+
+    apply_runtime_environment_overrides(
+        train_config=replace(
+            train_config,
+            mps_high_watermark_ratio=(
+                1.3
+                if train_config.mps_high_watermark_ratio is None
+                else train_config.mps_high_watermark_ratio
+            ),
+            mps_low_watermark_ratio=(
+                1.0
+                if train_config.mps_low_watermark_ratio is None
+                else train_config.mps_low_watermark_ratio
+            ),
+            enable_mps_fallback=(
+                True
+                if train_config.enable_mps_fallback is None
+                else train_config.enable_mps_fallback
+            ),
+        )
+    )
+
+
 def _collect_explicit_cli_overrides(
     parser: argparse.ArgumentParser,
     argv: Sequence[str],
@@ -262,6 +310,7 @@ def _build_run_summary(
     logger_dir: Path | None,
     text_log_path: Path | None,
     telemetry_path: Path | None,
+    runtime_tuning: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     # The summary is intentionally lightweight and human-readable:
     # enough to reproduce the broad run setup and locate the major artifacts,
@@ -290,6 +339,7 @@ def _build_run_summary(
         "environment": {
             "runtime": _json_ready(runtime_environment),
             "preflight_diagnostics": _json_ready(tuple(preflight_diagnostics)),
+            "runtime_tuning": _json_ready(dict(runtime_tuning or {})),
         },
         "fit": {
             "has_validation_data": fit_artifacts.has_validation_data,
@@ -327,6 +377,223 @@ def _build_run_summary(
             "report_paths": {name: str(path) for name, path in report_paths.items()},
         },
     }
+
+
+def _reset_environment_benchmark_state(environment: RuntimeEnvironment) -> None:
+    # Benchmark mode tries to measure the short run itself rather than stale
+    # memory from earlier activity in the same Python process. The reset is
+    # best-effort because different backends expose different levels of memory
+    # introspection and cache control.
+    try:
+        import torch
+    except ImportError:
+        return
+
+    if environment.cuda_available and torch.cuda.is_available():
+        try:
+            torch.cuda.reset_peak_memory_stats()
+        except Exception:
+            pass
+    if environment.mps_available:
+        mps_runtime = getattr(torch, "mps", None)
+        if mps_runtime is not None and hasattr(mps_runtime, "empty_cache"):
+            try:
+                mps_runtime.empty_cache()
+            except Exception:
+                pass
+
+
+def _collect_environment_benchmark_memory(
+    environment: RuntimeEnvironment,
+) -> dict[str, float | None]:
+    # The benchmark summary intentionally reports a small cross-backend memory
+    # shape rather than backend-specific raw counters. That keeps CPU, CUDA,
+    # and MPS results comparable in one compact JSON surface.
+    metrics: dict[str, float | None] = {
+        "device_peak_memory_mb": None,
+        "device_reserved_memory_mb": None,
+        "process_rss_mb": None,
+    }
+
+    if environment.cuda_available:
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                metrics["device_peak_memory_mb"] = (
+                    torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+                )
+                metrics["device_reserved_memory_mb"] = (
+                    torch.cuda.max_memory_reserved() / (1024.0 * 1024.0)
+                )
+        except Exception:
+            pass
+    elif environment.mps_available:
+        try:
+            import torch
+
+            mps_runtime = getattr(torch, "mps", None)
+            if mps_runtime is not None:
+                metrics["device_peak_memory_mb"] = (
+                    float(
+                        getattr(mps_runtime, "current_allocated_memory", lambda: 0)()
+                    )
+                    / (1024.0 * 1024.0)
+                )
+                metrics["device_reserved_memory_mb"] = (
+                    float(
+                        getattr(mps_runtime, "driver_allocated_memory", lambda: 0)()
+                    )
+                    / (1024.0 * 1024.0)
+                )
+        except Exception:
+            pass
+
+    try:
+        import psutil
+
+        metrics["process_rss_mb"] = (
+            psutil.Process().memory_info().rss / (1024.0 * 1024.0)
+        )
+    except Exception:
+        pass
+
+    return metrics
+
+
+def run_environment_benchmark_workflow(
+    config: Config,
+    *,
+    train_config: TrainConfig,
+    snapshot_config: SnapshotConfig,
+    observability_config: ObservabilityConfig,
+    requested_device_profile: str,
+    resolved_device_profile: str,
+    applied_profile_defaults: Mapping[str, Any],
+    runtime_environment: RuntimeEnvironment,
+    preflight_diagnostics: Sequence[RuntimeDiagnostic],
+    output_dir: Path | None,
+    benchmark_train_batches: int = 10,
+    learning_rate: float = 1e-3,
+    weight_decay: float = 0.0,
+    optimizer_name: str = "adam",
+    trainer_class: type[Any] | None = None,
+) -> EnvironmentBenchmarkArtifacts:
+    """
+    Run a short training-only benchmark tuned for environment comparison.
+    """
+
+    if benchmark_train_batches <= 0:
+        raise ValueError("benchmark_train_batches must be > 0")
+
+    # Benchmark mode reuses the real training workflow on purpose. The goal is
+    # not to invent a second "micro-benchmark only" codepath, but to run the
+    # same environment resolution, backend tuning, and Trainer assembly while
+    # trimming away the heavier reporting/evaluation stages.
+    benchmark_train_config = replace(
+        train_config,
+        max_epochs=1,
+        num_sanity_val_steps=0,
+        limit_train_batches=benchmark_train_batches,
+        limit_val_batches=1,
+        limit_test_batches=1,
+        enable_progress_bar=False,
+    )
+    benchmark_snapshot_config = replace(snapshot_config, enabled=False)
+    # Benchmark runs intentionally disable most observability extras so the
+    # timing reflects training throughput more than artifact generation.
+    benchmark_observability_config = replace(
+        observability_config,
+        enable_tensorboard=False,
+        enable_text_logging=False,
+        enable_csv_fallback_logger=False,
+        enable_learning_rate_monitor=False,
+        enable_device_stats=False,
+        enable_rich_progress_bar=False,
+        enable_system_telemetry=False,
+        enable_parameter_histograms=False,
+        enable_parameter_scalars=False,
+        enable_prediction_figures=False,
+        enable_model_graph=False,
+        enable_model_text=False,
+        enable_torchview=False,
+        enable_profiler=False,
+        enable_batch_audit=False,
+        enable_prediction_exports=False,
+        enable_plot_reports=False,
+    )
+
+    _reset_environment_benchmark_state(runtime_environment)
+    start_time = perf_counter()
+    artifacts = run_training_workflow(
+        config,
+        train_config=benchmark_train_config,
+        snapshot_config=benchmark_snapshot_config,
+        observability_config=benchmark_observability_config,
+        requested_device_profile=requested_device_profile,
+        resolved_device_profile=resolved_device_profile,
+        applied_profile_defaults=applied_profile_defaults,
+        runtime_environment=runtime_environment,
+        preflight_diagnostics=preflight_diagnostics,
+        fail_on_preflight_errors=True,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        optimizer_name=optimizer_name,
+        output_dir=output_dir,
+        skip_test=True,
+        skip_predict=True,
+        save_predictions=False,
+        trainer_class=trainer_class,
+    )
+    duration_seconds = perf_counter() - start_time
+    benchmark_memory = _collect_environment_benchmark_memory(runtime_environment)
+    actual_train_batches = (
+        artifacts.fit.train_batches_processed
+        if artifacts.fit.train_batches_processed is not None
+        else benchmark_train_batches
+    )
+    # This is an estimate rather than a promise of exact sample count. It is
+    # still useful for quick environment comparison, but it should not be read
+    # as a full profiler-grade accounting metric.
+    samples_processed = actual_train_batches * config.data.batch_size
+
+    summary = {
+        "timestamp": datetime.now().astimezone().isoformat(),
+        "requested_device_profile": requested_device_profile,
+        "resolved_device_profile": resolved_device_profile,
+        "applied_profile_defaults": _json_ready(dict(applied_profile_defaults)),
+        "environment": _json_ready(runtime_environment),
+        "preflight_diagnostics": _json_ready(tuple(preflight_diagnostics)),
+        "runtime_tuning": _json_ready(
+            artifacts.summary.get("environment", {}).get("runtime_tuning", {})
+        ),
+        "train_config": _json_ready(benchmark_train_config),
+        "benchmark": {
+            "requested_train_batches": benchmark_train_batches,
+            "actual_train_batches": actual_train_batches,
+            "batch_size": config.data.batch_size,
+            "samples_processed_estimate": samples_processed,
+            "duration_seconds": duration_seconds,
+            "batches_per_second": actual_train_batches / duration_seconds
+            if duration_seconds > 0.0
+            else None,
+            "samples_per_second": samples_processed / duration_seconds
+            if duration_seconds > 0.0
+            else None,
+        },
+        "memory": benchmark_memory,
+        "run_summary_path": (
+            str(artifacts.summary_path) if artifacts.summary_path is not None else None
+        ),
+    }
+
+    summary_path: Path | None = None
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = output_dir / "benchmark_summary.json"
+        summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+    return EnvironmentBenchmarkArtifacts(summary=summary, summary_path=summary_path)
 
 
 def run_training_workflow(
@@ -382,17 +649,51 @@ def run_training_workflow(
     effective_train_config = train_config or build_default_train_config(
         default_root_dir=output_dir,
     )
+    # Apple Silicon is the one place where some useful runtime controls need to
+    # be exported extremely early so the later Torch import/runtime init sees
+    # them. The full profile resolver still runs below; this is only the
+    # bootstrap bridge that lets those profile defaults take effect in time.
+    _apply_early_apple_silicon_environment_defaults(
+        requested_device_profile=requested_device_profile,
+        train_config=effective_train_config,
+    )
     effective_snapshot_config = snapshot_config or build_default_snapshot_config(
         output_dir=output_dir,
     )
     effective_observability_config = observability_config or build_default_observability_config(
         output_dir=output_dir,
     )
+    apply_runtime_environment_overrides(train_config=effective_train_config)
     effective_runtime_environment = runtime_environment or detect_runtime_environment()
-    effective_resolved_device_profile = resolved_device_profile or infer_device_profile(
-        requested_device_profile,
-        effective_runtime_environment,
+    effective_config = config
+    effective_applied_profile_defaults = (
+        dict(applied_profile_defaults) if applied_profile_defaults is not None else {}
     )
+    if resolved_device_profile is None:
+        # Direct Python callers should receive the same environment-aware
+        # defaults as the CLI path. Resolving profiles here keeps the reusable
+        # workflow honest instead of making environment tuning "CLI only."
+        profile_resolution = resolve_device_profile(
+            requested_profile=requested_device_profile,
+            environment=effective_runtime_environment,
+            train_config=effective_train_config,
+            data_config=effective_config.data,
+            observability_config=effective_observability_config,
+        )
+        effective_resolved_device_profile = profile_resolution.resolved_profile
+        effective_config = Config(
+            data=profile_resolution.data_config,
+            tft=effective_config.tft,
+            tcn=effective_config.tcn,
+        )
+        effective_train_config = profile_resolution.train_config
+        effective_observability_config = profile_resolution.observability_config
+        effective_applied_profile_defaults = dict(profile_resolution.applied_defaults)
+        apply_runtime_environment_overrides(train_config=effective_train_config)
+    else:
+        # If the caller already resolved the profile externally, this workflow
+        # trusts that result and avoids second-guessing it.
+        effective_resolved_device_profile = resolved_device_profile
     effective_preflight_diagnostics = tuple(
         preflight_diagnostics
         if preflight_diagnostics is not None
@@ -401,7 +702,7 @@ def run_training_workflow(
             resolved_profile=effective_resolved_device_profile,
             environment=effective_runtime_environment,
             train_config=effective_train_config,
-            data_config=config.data,
+            data_config=effective_config.data,
             observability_config=effective_observability_config,
         )
     )
@@ -431,12 +732,12 @@ def run_training_workflow(
     if trainer_class is None:
         trainer_class = DefaultFusedModelTrainer
 
-    datamodule = AZT1DDataModule(config.data)
+    datamodule = AZT1DDataModule(effective_config.data)
     # The training wrapper deliberately sits between the top-level workflow and
     # Lightning. That keeps `main.py` focused on orchestration while
     # `src/train.py` owns fit/test/predict policy.
     trainer = trainer_class(
-        config,
+        effective_config,
         learning_rate=learning_rate,
         weight_decay=weight_decay,
         optimizer_name=optimizer_name,
@@ -522,6 +823,8 @@ def run_training_workflow(
         # than the `trainer.test(...)` path because the richer evaluator needs
         # raw forecast tensors plus the aligned source batches, not just
         # Lightning's already-reduced scalar metrics.
+        if test_predictions is None:
+            raise RuntimeError("predict_test returned no prediction batches.")
         quantiles = getattr(fit_artifacts.model, "quantiles", (0.1, 0.5, 0.9))
         test_evaluation = evaluate_prediction_batches(
             predictions=test_predictions,
@@ -547,7 +850,7 @@ def run_training_workflow(
                 predictions=test_predictions,
                 quantiles=quantiles,
                 output_path=effective_observability_config.prediction_table_path,
-                sampling_interval_minutes=config.data.sampling_interval_minutes,
+                sampling_interval_minutes=effective_config.data.sampling_interval_minutes,
             )
         if effective_observability_config.enable_plot_reports:
             # Plotly reports are generated from the flat prediction table so the
@@ -560,14 +863,30 @@ def run_training_workflow(
                 evaluation_result=test_evaluation,
             )
 
+    runtime_tuning_report = getattr(trainer, "runtime_tuning_report", None)
+    runtime_tuning_applied = (
+        dict(getattr(runtime_tuning_report, "applied", {}))
+        if runtime_tuning_report is not None
+        else {}
+    )
+    runtime_tuning_skipped = (
+        dict(getattr(runtime_tuning_report, "skipped", {}))
+        if runtime_tuning_report is not None
+        else {}
+    )
+    runtime_tuning_summary = {
+        "applied": runtime_tuning_applied,
+        "skipped": runtime_tuning_skipped,
+    }
+
     summary = _build_run_summary(
-        config=config,
+        config=effective_config,
         train_config=effective_train_config,
         snapshot_config=effective_snapshot_config,
         observability_config=effective_observability_config,
         requested_device_profile=requested_device_profile,
         resolved_device_profile=effective_resolved_device_profile,
-        applied_profile_defaults=applied_profile_defaults or {},
+        applied_profile_defaults=effective_applied_profile_defaults,
         runtime_environment=effective_runtime_environment,
         preflight_diagnostics=effective_preflight_diagnostics,
         fit_artifacts=fit_artifacts,
@@ -585,6 +904,7 @@ def run_training_workflow(
         logger_dir=getattr(trainer_observability, "logger_dir", None),
         text_log_path=getattr(trainer_observability, "text_log_path", None),
         telemetry_path=getattr(trainer_observability, "telemetry_path", None),
+        runtime_tuning=runtime_tuning_summary,
     )
 
     summary_path: Path | None = None
@@ -609,7 +929,7 @@ def run_training_workflow(
         text_log_path=getattr(trainer_observability, "text_log_path", None),
         requested_device_profile=requested_device_profile,
         resolved_device_profile=effective_resolved_device_profile,
-        applied_profile_defaults=dict(applied_profile_defaults or {}),
+        applied_profile_defaults=effective_applied_profile_defaults,
         runtime_environment=effective_runtime_environment,
         preflight_diagnostics=effective_preflight_diagnostics,
     )
@@ -639,6 +959,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prediction-length", type=int, default=12)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--prefetch-factor", type=int, default=None)
     parser.add_argument(
         "--pin-memory",
         dest="pin_memory",
@@ -661,6 +982,46 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--accelerator", default="auto")
     parser.add_argument("--devices", default="auto")
     parser.add_argument("--precision", default="32")
+    parser.add_argument("--gradient-clip-val", type=float, default=None)
+    parser.add_argument("--accumulate-grad-batches", type=int, default=1)
+    parser.add_argument("--strategy", default="auto")
+    parser.add_argument(
+        "--sync-batchnorm",
+        dest="sync_batchnorm",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument("--matmul-precision", default=None)
+    parser.add_argument(
+        "--allow-tf32",
+        dest="allow_tf32",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
+        "--cudnn-benchmark",
+        dest="cudnn_benchmark",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument("--intraop-threads", type=int, default=None)
+    parser.add_argument("--interop-threads", type=int, default=None)
+    parser.add_argument("--mps-high-watermark-ratio", type=float, default=None)
+    parser.add_argument("--mps-low-watermark-ratio", type=float, default=None)
+    parser.add_argument(
+        "--enable-mps-fallback",
+        dest="enable_mps_fallback",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
+        "--compile-model",
+        dest="compile_model",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument("--compile-mode", default=None)
+    parser.add_argument("--compile-fullgraph", action="store_true")
     # Optimizer controls.
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=0.0)
@@ -710,6 +1071,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=None,
     )
+    parser.add_argument("--run-benchmark-only", action="store_true")
+    parser.add_argument("--benchmark-train-batches", type=int, default=10)
     parser.add_argument("--run-diagnostics-only", action="store_true")
     parser.add_argument("--skip-test", action="store_true")
     parser.add_argument("--skip-predict", action="store_true")
@@ -737,7 +1100,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> MainRunArtifacts | None:
+def main(argv: Sequence[str] | None = None) -> MainRunArtifacts | EnvironmentBenchmarkArtifacts | None:
     # `main(...)` keeps argument parsing separate from the reusable workflow
     # function above. That split makes the same training flow callable from
     # tests and notebooks without forcing everything through `argparse`.
@@ -761,6 +1124,7 @@ def main(argv: Sequence[str] | None = None) -> MainRunArtifacts | None:
         prediction_length=args.prediction_length,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
+        prefetch_factor=args.prefetch_factor,
         pin_memory=False if args.pin_memory is None else args.pin_memory,
         persistent_workers=(
             False if args.persistent_workers is None else args.persistent_workers
@@ -784,6 +1148,21 @@ def main(argv: Sequence[str] | None = None) -> MainRunArtifacts | None:
         accelerator=args.accelerator,
         devices=_parse_devices(args.devices),
         precision=precision_value,
+        gradient_clip_val=args.gradient_clip_val,
+        accumulate_grad_batches=args.accumulate_grad_batches,
+        strategy=args.strategy,
+        sync_batchnorm=False if args.sync_batchnorm is None else args.sync_batchnorm,
+        matmul_precision=args.matmul_precision,
+        allow_tf32=args.allow_tf32,
+        cudnn_benchmark=args.cudnn_benchmark,
+        intraop_threads=args.intraop_threads,
+        interop_threads=args.interop_threads,
+        mps_high_watermark_ratio=args.mps_high_watermark_ratio,
+        mps_low_watermark_ratio=args.mps_low_watermark_ratio,
+        enable_mps_fallback=args.enable_mps_fallback,
+        compile_model=False if args.compile_model is None else args.compile_model,
+        compile_mode=_normalize_optional_string(args.compile_mode),
+        compile_fullgraph=args.compile_fullgraph,
         deterministic=args.deterministic,
         fast_dev_run=args.fast_dev_run,
         limit_train_batches=_parse_limit(args.limit_train_batches),
@@ -794,6 +1173,10 @@ def main(argv: Sequence[str] | None = None) -> MainRunArtifacts | None:
         ),
         default_root_dir=output_dir,
         early_stopping_patience=args.early_stopping_patience,
+    )
+    _apply_early_apple_silicon_environment_defaults(
+        requested_device_profile=args.device_profile,
+        train_config=train_config,
     )
     snapshot_config = build_default_snapshot_config(
         enabled=not args.disable_checkpoints,
@@ -868,6 +1251,29 @@ def main(argv: Sequence[str] | None = None) -> MainRunArtifacts | None:
     if args.run_diagnostics_only:
         print("Diagnostics-only mode enabled; training was not started.")
         return None
+
+    if args.run_benchmark_only:
+        benchmark_artifacts = run_environment_benchmark_workflow(
+            config,
+            train_config=train_config,
+            snapshot_config=snapshot_config,
+            observability_config=observability_config,
+            requested_device_profile=profile_resolution.requested_profile,
+            resolved_device_profile=profile_resolution.resolved_profile,
+            applied_profile_defaults=profile_resolution.applied_defaults,
+            runtime_environment=runtime_environment,
+            preflight_diagnostics=preflight_diagnostics,
+            output_dir=output_dir,
+            benchmark_train_batches=args.benchmark_train_batches,
+            learning_rate=args.learning_rate,
+            weight_decay=args.weight_decay,
+            optimizer_name=args.optimizer,
+        )
+        print("Environment benchmark summary:")
+        print(json.dumps(_json_ready(benchmark_artifacts.summary), indent=2))
+        if benchmark_artifacts.summary_path is not None:
+            print(f"Saved benchmark summary to: {benchmark_artifacts.summary_path}")
+        return benchmark_artifacts
 
     try:
         artifacts = run_training_workflow(

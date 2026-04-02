@@ -24,6 +24,11 @@ preflight diagnostics, and notebook/script alignment around one shared
 environment-aware execution flow. That later work is summarized in
 [`environment_runtime_profiles_summary.md`](environment_runtime_profiles_summary.md).
 
+Another later follow-up tightened the newer entry surfaces further by adding a
+benchmark-only execution mode, backend-tuning integration, notebook import
+cleanup, and workspace/editor hints so notebook analysis follows the same
+package facades as the script and test paths.
+
 ## Goals
 
 - Make the repository runnable from a single script entrypoint.
@@ -166,7 +171,18 @@ Today, `main.py` also:
   Silicon
 - applies explicit runtime overrides on top of that profile
 - runs preflight diagnostics before constructing the deeper training stack
+- applies backend-level tuning such as thread settings, TF32 policy, MPS
+  environment overrides, and optional model compilation
 - records runtime-environment metadata in the run summary
+
+Later follow-up work also added:
+
+- a short benchmark-only workflow for comparing CPU, CUDA, and Apple Silicon
+  environments without running the full reporting path
+- more robust behavior for direct `run_training_workflow(...)` callers so they
+  receive the same resolved device-profile defaults as the CLI
+- safer compile handling so optional `torch.compile(...)` behavior can fall
+  back cleanly rather than aborting the entire run setup
 
 That work did not replace the original entrypoint design. It extended it while
 preserving the same public script/notebook surfaces.
@@ -214,6 +230,10 @@ That thin-notebook principle still holds after the later environment-aware
 runtime additions. The notebook now exposes more runtime-control variables, but
 it still goes through the same shared workflow as `main.py`.
 
+One later maintenance follow-up also corrected the notebook bootstrap imports
+so runtime helpers come from `environment` rather than `config`, matching the
+repository's newer public package boundaries.
+
 ## `src/train.py` follow-up change
 
 One small but important follow-up was made in `src/train.py`.
@@ -256,7 +276,28 @@ The new main-entrypoint test coverage checks that:
 The training-wrapper tests now also protect the new fallback behavior in
 `fit_test_predict(...)`.
 
+Later follow-up tests also covered:
+
+- runtime-environment profile handling in top-level workflow tests
+- benchmark-only execution summary behavior
+- compile-fallback handling in the training wrapper
+
 ## Typing / Tooling Update
+
+The original entrypoint pass also needed a later tooling follow-up once the
+repository gained more public package facades and notebook/runtime helpers.
+
+That follow-up included:
+
+- `pyrightconfig.json` updates so local missing-package noise does not hide
+  real project typing issues
+- `.vscode/settings.json` workspace hints so notebook analysis sees both the
+  repo root and `src/` as import roots
+- notebook import-cell cleanup so Pylance resolves runtime helpers from the
+  same public surfaces used elsewhere in the repository
+
+The practical result is that the entry surfaces are now documented,
+environment-aware, and better aligned with editor/static-analysis expectations.
 
 The new root-level files surfaced a tooling issue:
 

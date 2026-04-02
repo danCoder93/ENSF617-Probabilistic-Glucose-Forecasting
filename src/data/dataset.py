@@ -11,9 +11,9 @@
 
 from __future__ import annotations
 
-from typing import Sequence, TypedDict
+from typing import Any, Sequence, TypedDict, TypeAlias
 
-import numpy as np
+import numpy as _np
 import pandas as pd
 import torch
 from torch import Tensor
@@ -21,6 +21,10 @@ from torch.utils.data import Dataset
 
 from data.indexing import SampleIndexEntry
 from data.schema import FeatureGroups
+
+
+np: Any = _np
+NDArray: TypeAlias = Any
 
 
 # ============================================================
@@ -166,7 +170,7 @@ class AZT1DSequenceDataset(Dataset[BatchItem]):
             },
         }
 
-    def _row_continuous(self, row_index: int, columns: Sequence[str]) -> np.ndarray:
+    def _row_continuous(self, row_index: int, columns: Sequence[str]) -> NDArray:
         # Static continuous features are read from a single anchor row because
         # they should not vary across timesteps within one sequence.
         if not columns:
@@ -179,7 +183,7 @@ class AZT1DSequenceDataset(Dataset[BatchItem]):
             dtype=np.float32,
         )
 
-    def _row_categorical(self, row_index: int, columns: Sequence[str]) -> np.ndarray:
+    def _row_categorical(self, row_index: int, columns: Sequence[str]) -> NDArray:
         # Static categorical features follow the same rule: one row anchors the
         # identity of the whole sequence.
         if not columns:
@@ -189,7 +193,7 @@ class AZT1DSequenceDataset(Dataset[BatchItem]):
             dtype=np.int64,
         )
 
-    def _slice_continuous(self, row_slice: slice, columns: Sequence[str]) -> np.ndarray:
+    def _slice_continuous(self, row_slice: slice, columns: Sequence[str]) -> NDArray:
         # Temporal continuous features are returned as [time, feature] so that
         # default DataLoader collation naturally yields [batch, time, feature].
         if not columns:
@@ -199,7 +203,7 @@ class AZT1DSequenceDataset(Dataset[BatchItem]):
         stacked = [self.continuous_arrays[column][row_slice] for column in columns]
         return np.stack(stacked, axis=-1).astype(np.float32, copy=False)
 
-    def _slice_categorical(self, row_slice: slice, columns: Sequence[str]) -> np.ndarray:
+    def _slice_categorical(self, row_slice: slice, columns: Sequence[str]) -> NDArray:
         # Temporal categorical features mirror the continuous layout, but remain
         # integer encoded for later embedding layers.
         if not columns:
@@ -209,7 +213,7 @@ class AZT1DSequenceDataset(Dataset[BatchItem]):
         stacked = [self.categorical_arrays[column][row_slice] for column in columns]
         return np.stack(stacked, axis=-1).astype(np.int64, copy=False)
 
-    def _encode_categorical_column(self, column: str) -> np.ndarray:
+    def _encode_categorical_column(self, column: str) -> NDArray:
         # The Dataset applies a frozen category map fitted by the DataModule.
         # This keeps train/val/test integer IDs perfectly aligned.
         categories = self.category_maps.get(column)

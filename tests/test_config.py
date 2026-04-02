@@ -68,7 +68,13 @@ def _runtime_environment(**overrides: Any) -> RuntimeEnvironment:
         system="Linux",
         release="test-release",
         machine="x86_64",
+        is_apple_silicon=False,
         python_version="3.12.0",
+        cpu_count_logical=8,
+        cpu_count_physical=4,
+        system_memory_gb=16.0,
+        cpu_capability="AVX2",
+        cpu_supports_bf16=False,
         is_colab=False,
         is_slurm=False,
         torch_available=True,
@@ -83,6 +89,8 @@ def _runtime_environment(**overrides: Any) -> RuntimeEnvironment:
         cuda_available=False,
         cuda_device_count=0,
         cuda_device_name=None,
+        cuda_capability=None,
+        cuda_supports_bf16=False,
         cuda_visible_devices=None,
         mps_built=False,
         mps_available=False,
@@ -129,6 +137,9 @@ def test_data_config_normalizes_paths_and_preserves_processed_file_contract(
         FeatureSpec("subject_id", InputTypes.STATIC, DataTypes.CATEGORICAL),
     )
     assert config.processed_file_path == tmp_path / "processed" / "dataset.csv"
+
+    with pytest.raises(ValueError, match="prefetch_factor"):
+        DataConfig(prefetch_factor=0)
 
 
 def test_tcn_config_accepts_sequence_inputs_used_by_older_call_sites() -> None:
@@ -260,6 +271,7 @@ def test_top_level_config_round_trips_through_checkpoint_friendly_dict() -> None
             raw_dir=Path("custom/raw"),
             processed_dir=Path("custom/processed"),
             num_workers=0,
+            prefetch_factor=3,
             pin_memory=False,
             persistent_workers=False,
         ),
@@ -280,6 +292,7 @@ def test_top_level_config_round_trips_through_checkpoint_friendly_dict() -> None
     restored = config_from_dict(payload)
 
     assert payload["data"]["raw_dir"] == "custom/raw"
+    assert payload["data"]["prefetch_factor"] == 3
     assert payload["tft"]["features"][0]["feature_type"] == "STATIC"
     assert restored == original
 
@@ -310,6 +323,14 @@ def test_observability_config_normalizes_paths_and_validates_mode(
         ObservabilityConfig(mode="nope")
 
 
+def test_train_config_validates_runtime_tuning_contract() -> None:
+    with pytest.raises(ValueError, match="compile_mode requires compile_model"):
+        TrainConfig(compile_model=False, compile_mode="default")
+
+    with pytest.raises(ValueError, match="matmul_precision"):
+        TrainConfig(matmul_precision="fast")
+
+
 def test_infer_device_profile_auto_prefers_colab_slurm_mps_and_cuda() -> None:
     assert infer_device_profile(
         "auto",
@@ -321,7 +342,12 @@ def test_infer_device_profile_auto_prefers_colab_slurm_mps_and_cuda() -> None:
     ) == "slurm-cpu"
     assert infer_device_profile(
         "auto",
-        _runtime_environment(system="Darwin", machine="arm64", mps_available=True),
+        _runtime_environment(
+            system="Darwin",
+            machine="arm64",
+            is_apple_silicon=True,
+            mps_available=True,
+        ),
     ) == "apple-silicon"
     assert infer_device_profile(
         "auto",
@@ -332,6 +358,31 @@ def test_infer_device_profile_auto_prefers_colab_slurm_mps_and_cuda() -> None:
         _runtime_environment(cuda_available=True, cuda_device_count=1),
     ) == "local-cuda"
     assert infer_device_profile("auto", _runtime_environment()) == "local-cpu"
+
+
+def test_resolve_device_profile_prefers_cpu_bf16_and_compile_for_supported_local_cpu() -> None:
+    resolution = resolve_device_profile(
+        requested_profile="local-cpu",
+        environment=_runtime_environment(
+            cpu_capability="AVX512_BF16",
+            cpu_supports_bf16=True,
+            cpu_count_physical=8,
+        ),
+        train_config=TrainConfig(accelerator="auto", devices="auto", precision=32),
+        data_config=DataConfig(
+            dataset_url=None,
+            num_workers=0,
+            pin_memory=False,
+            persistent_workers=False,
+        ),
+        observability_config=ObservabilityConfig(),
+    )
+
+    assert resolution.train_config.precision == "bf16-mixed"
+    assert resolution.train_config.compile_model is True
+    assert resolution.train_config.compile_mode == "reduce-overhead"
+    assert resolution.train_config.intraop_threads == 8
+    assert resolution.train_config.interop_threads == 4
 
 
 def test_resolve_device_profile_applies_cuda_defaults_but_respects_explicit_overrides() -> None:
@@ -346,7 +397,12 @@ def test_resolve_device_profile_applies_cuda_defaults_but_respects_explicit_over
 
     resolution = resolve_device_profile(
         requested_profile="local-cuda",
-        environment=_runtime_environment(cuda_available=True, cuda_device_count=1),
+        environment=_runtime_environment(
+            cuda_available=True,
+            cuda_device_count=1,
+            cuda_supports_bf16=True,
+            cpu_count_physical=8,
+        ),
         train_config=train_config,
         data_config=data_config,
         observability_config=observability_config,
@@ -357,12 +413,80 @@ def test_resolve_device_profile_applies_cuda_defaults_but_respects_explicit_over
     assert resolution.train_config.accelerator == "gpu"
     assert resolution.train_config.devices == 1
     assert resolution.train_config.precision == 32
+    assert resolution.train_config.matmul_precision == "high"
+    assert resolution.train_config.allow_tf32 is True
+    assert resolution.train_config.cudnn_benchmark is True
+    assert resolution.train_config.compile_model is True
+    assert resolution.train_config.compile_mode == "default"
     assert resolution.data_config.num_workers == 4
     assert resolution.data_config.pin_memory is True
     assert resolution.data_config.persistent_workers is True
+    assert resolution.data_config.prefetch_factor == 4
     assert resolution.applied_defaults["accelerator"] == "gpu"
     assert resolution.applied_defaults["devices"] == 1
     assert resolution.applied_defaults["num_workers"] == 4
+
+
+def test_resolve_device_profile_prefers_bf16_and_small_worker_pool_for_apple_silicon() -> None:
+    resolution = resolve_device_profile(
+        requested_profile="auto",
+        environment=_runtime_environment(
+            system="Darwin",
+            machine="arm64",
+            is_apple_silicon=True,
+            mps_available=True,
+            cpu_count_physical=8,
+            cpu_count_logical=8,
+        ),
+        train_config=TrainConfig(accelerator="auto", devices="auto", precision=32),
+        data_config=DataConfig(
+            dataset_url=None,
+            num_workers=0,
+            pin_memory=False,
+            persistent_workers=False,
+        ),
+        observability_config=ObservabilityConfig(enable_device_stats=True),
+    )
+
+    assert resolution.resolved_profile == "apple-silicon"
+    assert resolution.train_config.accelerator == "mps"
+    assert resolution.train_config.devices == 1
+    assert resolution.train_config.precision == 32
+    assert resolution.train_config.matmul_precision == "high"
+    assert resolution.train_config.intraop_threads == 8
+    assert resolution.train_config.interop_threads == 4
+    assert resolution.train_config.mps_high_watermark_ratio == 1.3
+    assert resolution.train_config.mps_low_watermark_ratio == 1.0
+    assert resolution.train_config.enable_mps_fallback is True
+    assert resolution.data_config.num_workers == 2
+    assert resolution.data_config.pin_memory is False
+    assert resolution.data_config.persistent_workers is True
+    assert resolution.data_config.prefetch_factor == 2
+    assert resolution.observability_config.enable_device_stats is False
+
+
+def test_resolve_device_profile_prefers_bf16_when_cuda_reports_support() -> None:
+    resolution = resolve_device_profile(
+        requested_profile="local-cuda",
+        environment=_runtime_environment(
+            cuda_available=True,
+            cuda_device_count=1,
+            cuda_supports_bf16=True,
+            cpu_count_physical=6,
+        ),
+        train_config=TrainConfig(accelerator="auto", devices="auto", precision=32),
+        data_config=DataConfig(
+            dataset_url=None,
+            num_workers=0,
+            pin_memory=False,
+            persistent_workers=False,
+        ),
+        observability_config=ObservabilityConfig(),
+    )
+
+    assert resolution.train_config.precision == "bf16-mixed"
+    assert resolution.data_config.num_workers == 3
+    assert resolution.data_config.prefetch_factor == 4
 
 
 def test_collect_runtime_diagnostics_flags_backend_mismatch_and_missing_packages() -> None:
@@ -390,6 +514,53 @@ def test_collect_runtime_diagnostics_flags_backend_mismatch_and_missing_packages
     assert "missing_torch" in codes
     assert "missing_lightning" in codes
     assert "cuda_unavailable" in codes
+
+
+def test_collect_runtime_diagnostics_flags_bf16_and_invalid_worker_persistence() -> None:
+    diagnostics = collect_runtime_diagnostics(
+        requested_profile="local-cuda",
+        resolved_profile="local-cuda",
+        environment=_runtime_environment(
+            cuda_available=True,
+            cuda_device_count=1,
+            cuda_supports_bf16=False,
+            is_apple_silicon=True,
+            cpu_capability="AVX2",
+        ),
+        train_config=TrainConfig(accelerator="gpu", devices=1, precision="bf16-mixed"),
+        data_config=DataConfig(
+            dataset_url=None,
+            num_workers=0,
+            pin_memory=False,
+            persistent_workers=True,
+            prefetch_factor=4,
+        ),
+        observability_config=ObservabilityConfig(),
+    )
+
+    codes = {diagnostic.code for diagnostic in diagnostics}
+    assert "cuda_bf16_unavailable" in codes
+    assert "persistent_workers_without_workers" in codes
+    assert "prefetch_without_workers" in codes
+
+
+def test_collect_runtime_diagnostics_flags_unsupported_cpu_bf16() -> None:
+    diagnostics = collect_runtime_diagnostics(
+        requested_profile="local-cpu",
+        resolved_profile="local-cpu",
+        environment=_runtime_environment(cpu_supports_bf16=False),
+        train_config=TrainConfig(accelerator="cpu", devices=1, precision="bf16-mixed"),
+        data_config=DataConfig(
+            dataset_url=None,
+            num_workers=0,
+            pin_memory=False,
+            persistent_workers=False,
+        ),
+        observability_config=ObservabilityConfig(),
+    )
+
+    codes = {diagnostic.code for diagnostic in diagnostics}
+    assert "cpu_bf16_unavailable" in codes
 
 
 def test_format_runtime_diagnostics_includes_severity_code_and_suggestion() -> None:

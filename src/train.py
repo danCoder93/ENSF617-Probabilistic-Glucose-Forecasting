@@ -26,6 +26,12 @@ from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from torch import Tensor
 
 from data.datamodule import AZT1DDataModule
+from environment import (
+    apply_runtime_environment_overrides,
+    apply_runtime_tuning,
+    detect_runtime_environment,
+    maybe_compile_model,
+)
 from models.fused_model import FusedModel
 from observability import (
     ObservabilityArtifacts,
@@ -44,6 +50,7 @@ from config import (
 
 CheckpointAlias = Literal["best", "last"]
 CheckpointSelection = CheckpointAlias | str | Path | None
+
 
 @dataclass(frozen=True)
 class FitArtifacts:
@@ -67,6 +74,7 @@ class FitArtifacts:
     has_validation_data: bool
     has_test_data: bool
     best_checkpoint_path: str
+    train_batches_processed: int | None = None
 
 
 @dataclass(frozen=True)
@@ -170,12 +178,38 @@ class FusedModelTrainer:
         self.observability_artifacts: ObservabilityArtifacts = setup_observability(
             self.observability_config
         )
+        # Runtime tuning is deliberately split into two phases:
+        # 1. environment-variable overrides that may matter before deeper
+        #    backend initialization
+        # 2. Torch runtime setters that can be applied once torch is importable
+        #
+        # The wrapper merges both reports so the outer workflow sees one
+        # coherent "what happened to the runtime?" summary.
+        env_override_report = apply_runtime_environment_overrides(
+            train_config=self.trainer_config
+        )
+        self.runtime_environment = detect_runtime_environment()
+        runtime_tuning_report = apply_runtime_tuning(
+            environment=self.runtime_environment,
+            train_config=self.trainer_config,
+        )
+        self.runtime_tuning_report = type(runtime_tuning_report)(
+            applied={
+                **dict(env_override_report.applied),
+                **dict(runtime_tuning_report.applied),
+            },
+            skipped={
+                **dict(env_override_report.skipped),
+                **dict(runtime_tuning_report.skipped),
+            },
+        )
 
         # The fields below are populated lazily as the wrapper progresses
         # through `fit(...)`. Keeping them on the instance allows later calls to
         # `test(...)` or `predict_test(...)` to reuse the same in-memory run
         # state when appropriate.
         self.model: FusedModel | None = None
+        self.training_model: Any = None
         self.runtime_config: Config | None = None
         self.trainer: Trainer | None = None
         self.best_checkpoint_path: str = ""
@@ -338,10 +372,19 @@ class FusedModelTrainer:
         #    arguments visually obvious
         # 2. it makes the one conditional field (`default_root_dir`) easier to
         #    inject without duplicating the entire constructor call
+        #
+        # This section intentionally reads almost like a contract table:
+        # repo runtime config on the left, Lightning Trainer kwargs on the
+        # right. That makes later maintenance much easier when new runtime
+        # options are added.
         trainer_kwargs: dict[str, Any] = {
             "accelerator": config.accelerator,
             "devices": config.devices,
             "precision": config.precision,
+            "gradient_clip_val": config.gradient_clip_val,
+            "accumulate_grad_batches": config.accumulate_grad_batches,
+            "strategy": config.strategy,
+            "sync_batchnorm": config.sync_batchnorm,
             "max_epochs": config.max_epochs,
             "deterministic": config.deterministic,
             "log_every_n_steps": config.log_every_n_steps,
@@ -398,6 +441,38 @@ class FusedModelTrainer:
         # 3. build the Lightning Trainer with the right callback policy
         # 4. hand control of the epoch loop to Lightning
         model = self.build_model(datamodule)
+        try:
+            # Compilation is treated as an optimization layer on top of the
+            # already-valid eager model, not as part of model construction
+            # itself. That separation is what makes the fallback path clean.
+            training_model = maybe_compile_model(
+                model,
+                train_config=self.trainer_config,
+                environment=self.runtime_environment,
+            )
+        except Exception as exc:
+            # A compile failure should not destroy an otherwise valid training
+            # run. The repo's policy is to keep the eager model as the source of
+            # truth and downgrade compilation failures into an observable skip.
+            training_model = model
+            self.runtime_tuning_report = type(self.runtime_tuning_report)(
+                applied=dict(self.runtime_tuning_report.applied),
+                skipped={
+                    **dict(self.runtime_tuning_report.skipped),
+                    "compile_model": (
+                        f"torch.compile failed and the run fell back to the eager model: "
+                        f"{type(exc).__name__}: {exc}"
+                    ),
+                },
+            )
+        self.training_model = training_model
+        # We keep both `self.model` and `self.training_model` on purpose:
+        # - `self.model` is the canonical eager model created by this wrapper
+        # - `self.training_model` is the actual object handed to Lightning,
+        #   which may be a compiled wrapper around the eager model
+        #
+        # Evaluation helpers still operate from the eager-model viewpoint so
+        # checkpoint loading and in-memory fallback semantics stay predictable.
         has_validation_data = _dataset_size(datamodule.val_dataset) > 0
         has_test_data = _dataset_size(datamodule.test_dataset) > 0
         trainer = self.build_trainer(has_validation_data=has_validation_data)
@@ -416,11 +491,15 @@ class FusedModelTrainer:
                 "train_config": dict(self.trainer_config.__dict__),
                 "snapshot_config": dict(self.snapshot_config.__dict__),
                 "observability_config": dict(self.observability_config.__dict__),
+                "runtime_tuning": {
+                    "applied": dict(self.runtime_tuning_report.applied),
+                    "skipped": dict(self.runtime_tuning_report.skipped),
+                },
             },
         )
 
         trainer.fit(
-            model=model,
+            model=training_model,
             datamodule=datamodule,
             ckpt_path=str(ckpt_path) if ckpt_path is not None else None,
         )
@@ -438,7 +517,7 @@ class FusedModelTrainer:
         # call `fit(...)` in one cell and `test(...)` in another.
         checkpoint_callback = getattr(trainer, "checkpoint_callback", None)
         self.best_checkpoint_path = (
-            checkpoint_callback.best_model_path
+            getattr(checkpoint_callback, "best_model_path", "")
             if isinstance(checkpoint_callback, ModelCheckpoint)
             else ""
         )
@@ -450,6 +529,11 @@ class FusedModelTrainer:
             has_validation_data=has_validation_data,
             has_test_data=has_test_data,
             best_checkpoint_path=self.best_checkpoint_path,
+            train_batches_processed=(
+                int(trainer.num_training_batches)
+                if isinstance(getattr(trainer, "num_training_batches", None), int)
+                else None
+            ),
         )
 
     def _require_fit_state(self) -> tuple[FusedModel, Trainer]:

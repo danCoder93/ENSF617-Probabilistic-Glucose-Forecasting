@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pytorch_lightning")
+
+if TYPE_CHECKING:
+    from torch import Tensor
+else:
+    Tensor = Any
 
 from config import ObservabilityConfig
 from observability.callbacks import (
@@ -67,11 +73,23 @@ class RecordingLogger:
 
 
 @dataclass
-class RecordingTextLogger:
+class RecordingTextLogger(logging.Logger):
     messages: list[str]
 
-    def info(self, message: str, *args: object) -> None:
-        rendered = message % args if args else message
+    def __post_init__(self) -> None:
+        super().__init__("recording-text-logger")
+
+    def info(
+        self,
+        msg: object,
+        *args: object,
+        exc_info: object | None = None,
+        stack_info: bool = False,
+        stacklevel: int = 1,
+        extra: object | None = None,
+    ) -> None:
+        del exc_info, stack_info, stacklevel, extra
+        rendered = str(msg) % args if args else str(msg)
         self.messages.append(rendered)
 
 
@@ -111,7 +129,7 @@ class ModelVisualizationModule(torch.nn.Module):
         self.device = torch.device("cpu")
         self.quantiles = (0.1, 0.5, 0.9)
 
-    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(self, batch: dict[str, Tensor]) -> Tensor:
         return self.linear(batch["encoder_cont"])
 
 
@@ -129,14 +147,14 @@ class PredictionModule(torch.nn.Module):
         self.device = torch.device("cpu")
         self.quantiles = (0.1, 0.5, 0.9)
 
-    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(self, batch: dict[str, Tensor]) -> Tensor:
         del batch
         return torch.tensor(
             [[[95.0, 100.0, 105.0], [96.0, 101.0, 106.0]]],
             dtype=torch.float32,
         )
 
-    def _target_tensor(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
+    def _target_tensor(self, batch: dict[str, Tensor]) -> Tensor:
         return batch["target"]
 
 

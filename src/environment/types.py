@@ -67,7 +67,13 @@ class RuntimeEnvironment:
     system: str
     release: str
     machine: str
+    is_apple_silicon: bool
     python_version: str
+    cpu_count_logical: int | None
+    cpu_count_physical: int | None
+    system_memory_gb: float | None
+    cpu_capability: str | None
+    cpu_supports_bf16: bool
     is_colab: bool
     is_slurm: bool
     torch_available: bool
@@ -82,6 +88,8 @@ class RuntimeEnvironment:
     cuda_available: bool
     cuda_device_count: int
     cuda_device_name: str | None
+    cuda_capability: str | None
+    cuda_supports_bf16: bool
     cuda_visible_devices: str | None
     mps_built: bool
     mps_available: bool

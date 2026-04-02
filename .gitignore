@@ -1,9 +1,26 @@
-# Ignore Data Folder
-data/
-!/src/data
-Datasets/
+# Local datasets and generated run outputs.
+/data/
+/Datasets/
+/artifacts/
 
-.DS_Store
-__pycache__
+# Python cache and compiled artifacts.
+__pycache__/
+*.py[cod]
+*$py.class
 
+# Test, type-check, and notebook caches.
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Virtual environments.
 .venv/
+venv/
+env/
+
+# Editor and OS noise.
+.DS_Store
+.vscode/
+.idea/

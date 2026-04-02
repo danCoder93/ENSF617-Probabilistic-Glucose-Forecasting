@@ -18,6 +18,12 @@ follow-up kept the spirit of this cleanup wave intact by preserving
 interpretation. See
 [`environment_runtime_profiles_summary.md`](environment_runtime_profiles_summary.md).
 
+Another later follow-up focused specifically on static-analysis cleanup in the
+newer environment and notebook surfaces. That pass did not change forecasting
+behavior, but it tightened Pyright/Pylance correctness and aligned notebook
+imports, workspace settings, and test doubles with the repository's newer
+package structure.
+
 This document focuses on the changes that were made after the repository had
 already become functionally richer:
 
@@ -107,6 +113,7 @@ especially around:
 - fake/test doubles that no longer matched real method signatures
 - broad placeholder objects in typed fields
 - Torch/Pylance export warnings in the TFT code
+- notebook/editor import resolution after the repo gained more package facades
 
 ### Path-like config inputs
 
@@ -151,6 +158,32 @@ including:
 These changes were not architectural; they were about keeping the editor and
 the runtime contract aligned.
 
+### Later Pyright and notebook follow-up
+
+The later environment/tuning work introduced a few additional places where
+editor-facing typing had to be tightened:
+
+- optional prediction and runtime-tuning values in `main.py`
+- compile fallback behavior in `src/train.py`
+- NumPy attribute access in `src/data/dataset.py`
+- test doubles used by observability and top-level workflow tests
+- notebook bootstrap imports after `environment` became the canonical home for
+  runtime helpers
+
+That follow-up also added:
+
+- a small `pyrightconfig.json` refinement so missing third-party packages in a
+  thin local environment do not drown out real type issues
+- `.vscode/settings.json` workspace hints so notebook analysis sees the same
+  repo-root and `src/` import paths as the rest of the codebase
+
+The practical outcome was:
+
+- `npx pyright` could be run meaningfully against the repository
+- notebook import cells aligned with the real public package facades
+- editor diagnostics were more likely to reflect actual code issues rather than
+  local-path confusion
+
 ## Source Documentation Standardization
 
 Another major part of this work was a full pass over `src/` to standardize the
@@ -186,6 +219,15 @@ implementation paths:
 - `src/models/tft.py`
 - `src/train.py`
 - `src/observability/`
+
+Later follow-up work extended that style-normalization into the lighter facade
+and helper modules as well, especially:
+
+- `src/config/__init__.py`
+- `src/environment/__init__.py`
+- `src/environment/tuning.py`
+- `src/observability/__init__.py`
+- `src/observability/utils.py`
 
 Those files now carry more detailed explanations around:
 
@@ -230,6 +272,8 @@ The most affected implementation files were:
 - `src/config/observability.py`
 - `src/config/serde.py`
 - `src/config/types.py`
+- `src/environment/__init__.py`
+- `src/environment/tuning.py`
 - `src/models/fused_model.py`
 - `src/models/tft.py`
 - `src/models/tcn.py`

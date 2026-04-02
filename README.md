@@ -24,6 +24,26 @@ Local:
 pip install -r requirements.txt
 ```
 
+For environment-specific PyTorch installs, it is usually better to install the
+right Torch build first and then install the rest of the project dependencies:
+
+CUDA:
+
+```bash
+pip install -r requirements.txt
+```
+
+Then replace the default CPU-only Torch install with the CUDA-enabled wheel
+that matches your local CUDA runtime by following the official PyTorch install
+selector.
+
+Apple Silicon:
+
+```bash
+pip install torch torchvision torchaudio
+pip install -r requirements.txt
+```
+
 ### Run focused automated tests
 
 Run the full pytest suite that is currently tracked in the repository:
@@ -91,6 +111,8 @@ This entrypoint will:
   run summary
 - run preflight diagnostics so likely environment issues are surfaced before
   training starts when possible
+- choose environment-aware defaults for precision and DataLoader workers, while
+  still letting explicit CLI flags override them
 
 ### Runtime Diagnostics
 
@@ -136,6 +158,23 @@ Useful controls include:
 - `--rich-progress-bar` / `--no-rich-progress-bar`
 - `--device-stats` / `--no-device-stats`
 - `--fail-on-preflight-errors` / `--no-fail-on-preflight-errors`
+
+Profile defaults now adapt a bit more aggressively to the host:
+
+- CUDA profiles prefer `bf16-mixed` automatically when the detected GPU
+  reports BF16 support, otherwise they fall back to `16-mixed`
+- CPU profiles can now prefer `bf16-mixed` automatically on CPUs that report
+  BF16-capable instruction support
+- local CPU and local CUDA profiles derive `num_workers` from available CPU
+  cores instead of always using one static value
+- Apple Silicon keeps the worker pool intentionally small and disables pinned
+  memory by default
+- CUDA profiles also enable throughput-oriented defaults such as TF32,
+  cuDNN benchmark mode, and deeper DataLoader prefetching
+- local CUDA and local CPU profiles can enable backend-aware `torch.compile`
+  defaults, while Apple Silicon stays more conservative
+- CPU and Apple Silicon profiles set Torch thread counts and float32 matmul
+  precision more deliberately for local training
 
 Open the notebook:
 
@@ -220,3 +259,37 @@ python main.py --device-profile apple-silicon
 
 The runtime diagnostics layer will warn if the chosen settings look mismatched
 for MPS, such as pinned host memory or unsupported mixed-precision requests.
+Telemetry logs also record MPS memory usage now, so Apple Silicon runs leave
+behind more useful device-level artifacts.
+The Apple Silicon profile also exposes MPS allocator/fallback controls through
+the runtime flags below.
+
+Additional runtime tuning flags are available when you want to push training
+performance further:
+
+- `--prefetch-factor`
+- `--gradient-clip-val`
+- `--accumulate-grad-batches`
+- `--strategy`
+- `--sync-batchnorm` / `--no-sync-batchnorm`
+- `--matmul-precision`
+- `--allow-tf32` / `--no-allow-tf32`
+- `--cudnn-benchmark` / `--no-cudnn-benchmark`
+- `--intraop-threads`
+- `--interop-threads`
+- `--mps-high-watermark-ratio`
+- `--mps-low-watermark-ratio`
+- `--enable-mps-fallback` / `--no-enable-mps-fallback`
+- `--compile-model` / `--no-compile-model`
+- `--compile-mode`
+- `--compile-fullgraph`
+
+For a short environment-only throughput check, you can run a benchmark mode
+that performs a tiny training run with test/prediction/reporting disabled:
+
+```bash
+python main.py --device-profile auto --run-benchmark-only --benchmark-train-batches 10
+```
+
+That writes a compact `benchmark_summary.json` with throughput and memory
+figures for the active environment.

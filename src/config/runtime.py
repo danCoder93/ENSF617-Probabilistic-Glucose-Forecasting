@@ -110,6 +110,34 @@ class TrainConfig:
     # both integer styles like `32` and string styles like `"16-mixed"`.
     precision: int | str = 32
 
+    # Optional gradient clipping threshold passed to Lightning.
+    gradient_clip_val: float | None = None
+
+    # Number of gradient accumulation steps before each optimizer update.
+    accumulate_grad_batches: int = 1
+
+    # Distributed/runtime strategy passed through to Lightning.
+    strategy: str = "auto"
+
+    # Whether to enable sync batch norm when running across multiple devices.
+    sync_batchnorm: bool = False
+
+    # Optional PyTorch backend/runtime tuning knobs.
+    matmul_precision: str | None = None
+    allow_tf32: bool | None = None
+    cudnn_benchmark: bool | None = None
+    intraop_threads: int | None = None
+    interop_threads: int | None = None
+    mps_high_watermark_ratio: float | None = None
+    mps_low_watermark_ratio: float | None = None
+    enable_mps_fallback: bool | None = None
+
+    # Optional model compilation controls. Kept off by default because compile
+    # support can vary across model architectures and debugging workflows.
+    compile_model: bool = False
+    compile_mode: str | None = None
+    compile_fullgraph: bool = False
+
     # Hard upper bound on epochs for the run. Early stopping may still end the
     # run sooner if validation monitoring is enabled.
     max_epochs: int = 20
@@ -165,6 +193,26 @@ class TrainConfig:
             raise ValueError("log_every_n_steps must be > 0")
         if self.num_sanity_val_steps < 0:
             raise ValueError("num_sanity_val_steps must be >= 0")
+        if self.gradient_clip_val is not None and self.gradient_clip_val < 0.0:
+            raise ValueError("gradient_clip_val must be >= 0.0 or None")
+        if self.accumulate_grad_batches <= 0:
+            raise ValueError("accumulate_grad_batches must be > 0")
+        if self.matmul_precision is not None and self.matmul_precision not in {
+            "highest",
+            "high",
+            "medium",
+        }:
+            raise ValueError("matmul_precision must be one of 'highest', 'high', or 'medium'")
+        if self.intraop_threads is not None and self.intraop_threads <= 0:
+            raise ValueError("intraop_threads must be > 0 or None")
+        if self.interop_threads is not None and self.interop_threads <= 0:
+            raise ValueError("interop_threads must be > 0 or None")
+        if self.mps_high_watermark_ratio is not None and self.mps_high_watermark_ratio <= 0.0:
+            raise ValueError("mps_high_watermark_ratio must be > 0.0 or None")
+        if self.mps_low_watermark_ratio is not None and self.mps_low_watermark_ratio <= 0.0:
+            raise ValueError("mps_low_watermark_ratio must be > 0.0 or None")
+        if self.compile_mode is not None and not self.compile_model:
+            raise ValueError("compile_mode requires compile_model=True")
 
         # Lightning treats integer batch limits and fractional batch limits
         # differently, so we accept both types explicitly and validate each on
@@ -186,4 +234,3 @@ class TrainConfig:
         # Negative patience would not make semantic sense for early stopping.
         if self.early_stopping_patience is not None and self.early_stopping_patience < 0:
             raise ValueError("early_stopping_patience must be >= 0 or None")
-

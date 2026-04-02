@@ -217,6 +217,25 @@ class SystemTelemetryCallback(Callback):
         # utilization percentage depends on optional NVML bindings. We return a
         # consistent metric dictionary either way so downstream logging stays
         # stable.
+        mps_backend = getattr(getattr(torch, "backends", None), "mps", None)
+        mps_runtime = getattr(torch, "mps", None)
+        if (
+            mps_backend is not None
+            and bool(getattr(mps_backend, "is_available", lambda: False)())
+            and mps_runtime is not None
+        ):
+            allocated = float(
+                getattr(mps_runtime, "current_allocated_memory", lambda: 0)()
+            )
+            reserved = float(
+                getattr(mps_runtime, "driver_allocated_memory", lambda: 0)()
+            )
+            return {
+                "telemetry/gpu_memory_allocated_mb": allocated / (1024.0 * 1024.0),
+                "telemetry/gpu_memory_reserved_mb": reserved / (1024.0 * 1024.0),
+                "telemetry/gpu_utilization_percent": 0.0,
+            }
+
         if not torch.cuda.is_available():
             return {
                 "telemetry/gpu_memory_allocated_mb": 0.0,

@@ -120,6 +120,7 @@ class DataConfig:
     num_workers: int = 4
     pin_memory: bool = True
     persistent_workers: bool = False
+    prefetch_factor: int | None = None
     drop_last_train: bool = False
 
     # --------------------------------------------------------
@@ -180,6 +181,8 @@ class DataConfig:
             raise ValueError("batch_size must be > 0")
         if self.num_workers < 0:
             raise ValueError("num_workers must be >= 0")
+        if self.prefetch_factor is not None and self.prefetch_factor <= 0:
+            raise ValueError("prefetch_factor must be > 0 or None")
 
         ratio_sum = self.train_ratio + self.val_ratio + self.test_ratio
         if not isclose(ratio_sum, 1.0, rel_tol=1e-9, abs_tol=1e-9):
@@ -191,4 +194,3 @@ class DataConfig:
             raise ValueError(
                 "split_by_subject and split_within_subject cannot both be True"
             )
-

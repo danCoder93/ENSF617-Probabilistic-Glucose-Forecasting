@@ -100,6 +100,7 @@ Look at:
 - `src/environment/detection.py`
 - `src/environment/profiles.py`
 - `src/environment/diagnostics.py`
+- `src/environment/tuning.py`
 - `main.py`
 - `main.ipynb`
 - `tests/test_config.py`
@@ -152,24 +153,27 @@ The normal run path through the repository is:
    requested device profile into effective runtime defaults.
 4. `src/environment/diagnostics.py` runs preflight validation so likely
    backend or dependency issues can fail early and be summarized cleanly.
-5. `main.py` constructs `AZT1DDataModule` from `config.data`.
-6. `main.py` constructs `FusedModelTrainer` from the top-level config plus
+5. `src/environment/tuning.py` applies environment-variable overrides and
+   backend-level runtime knobs such as TF32, thread counts, and optional model
+   compilation.
+6. `main.py` constructs `AZT1DDataModule` from `config.data`.
+7. `main.py` constructs `FusedModelTrainer` from the top-level config plus
    runtime policy configs.
-7. `FusedModelTrainer` calls `datamodule.prepare_data()` and `datamodule.setup()`
+8. `FusedModelTrainer` calls `datamodule.prepare_data()` and `datamodule.setup()`
    before model construction.
-8. `AZT1DDataModule` discovers runtime categorical cardinalities and final
+9. `AZT1DDataModule` discovers runtime categorical cardinalities and final
    sequence-aligned feature details, then binds them into a new runtime config.
-9. `FusedModelTrainer` builds `FusedModel` from that runtime-bound config.
-10. `FusedModelTrainer` assembles callbacks, loggers, checkpoint policy, and the
+10. `FusedModelTrainer` builds `FusedModel` from that runtime-bound config.
+11. `FusedModelTrainer` assembles callbacks, loggers, checkpoint policy, and the
    Lightning `Trainer`.
-11. Lightning executes `fit(...)`.
-12. If test windows exist, the wrapper can run `test(...)` and `predict(...)`
+12. Lightning executes `fit(...)`.
+13. If test windows exist, the wrapper can run `test(...)` and `predict(...)`
     against the resolved checkpoint or the current in-memory weights.
-13. `main.py` uses raw predictions plus aligned test batches to compute
+14. `main.py` uses raw predictions plus aligned test batches to compute
     structured held-out evaluation through `src/evaluation/`.
-14. `src/observability/` exports prediction tables, reports, and runtime
+15. `src/observability/` exports prediction tables, reports, and runtime
     artifacts.
-15. `main.py` writes a compact `run_summary.json` describing the run,
+16. `main.py` writes a compact `run_summary.json` describing the run,
     including resolved runtime-environment metadata.
 
 That same underlying workflow is shared by the notebook path. `main.ipynb`
@@ -289,6 +293,11 @@ The script now also coordinates the runtime-environment layer by:
 - running preflight diagnostics before training
 - recording environment metadata in `run_summary.json`
 
+It can also run a short benchmark-only workflow that focuses on environment
+comparison rather than full held-out evaluation. That path keeps most of the
+same runtime resolution/tuning logic but trims the later test/predict/report
+steps down to a compact throughput and memory summary.
+
 ### `main.ipynb`
 
 The notebook is a convenience surface for interactive work, not a second
@@ -375,6 +384,8 @@ For the milestone that introduced this layer, see
 - `diagnostics.py`
   preflight validation, diagnostic formatting, and best-effort runtime failure
   analysis
+- `tuning.py`
+  low-level backend tuning and optional model compilation helpers
 - `__init__.py`
   convenience facade for the public environment API
 
@@ -390,9 +401,26 @@ The environment layer now owns:
 - profile default resolution
 - compatibility and preflight checks
 - environment-sensitive failure explanation
+- backend-level tuning actions that sit below profile selection
 
 This keeps `src/config/` focused on typed contracts while still keeping
 environment-aware runtime logic explicit and reusable.
+
+### Runtime tuning follow-up
+
+The environment layer now also contains a narrower "last-mile tuning" step.
+
+That step exists because profile selection alone is not enough. Once a profile
+chooses a policy, something still has to apply:
+
+- MPS allocator/fallback environment variables
+- float32 matmul precision
+- CUDA TF32 and cuDNN benchmark settings
+- Torch thread-count tuning
+- optional `torch.compile(...)`
+
+This keeps backend knobs centralized rather than sprinkling Torch-specific
+setters across `main.py` and `src/train.py`.
 
 ### Current profile philosophy
 

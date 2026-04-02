@@ -198,14 +198,13 @@ class AZT1DDataModule(_LightningDataModuleBase):
 
         # Loader methods should stay boring on purpose: batching, shuffling, and
         # worker settings only. All preprocessing belongs earlier in the stack.
+        dataloader_kwargs = self._shared_dataloader_kwargs()
         return DataLoader(
             self.train_dataset,
             batch_size=self.config.batch_size,
             shuffle=len(self.train_dataset) > 0,
-            num_workers=self.config.num_workers,
-            pin_memory=self.config.pin_memory,
-            persistent_workers=self.config.persistent_workers and self.config.num_workers > 0,
             drop_last=self.config.drop_last_train,
+            **dataloader_kwargs,
         )
 
     def val_dataloader(self) -> DataLoader[BatchItem]:
@@ -215,9 +214,7 @@ class AZT1DDataModule(_LightningDataModuleBase):
             self.val_dataset,
             batch_size=self.config.batch_size,
             shuffle=False,
-            num_workers=self.config.num_workers,
-            pin_memory=self.config.pin_memory,
-            persistent_workers=self.config.persistent_workers and self.config.num_workers > 0,
+            **self._shared_dataloader_kwargs(),
         )
 
     def test_dataloader(self) -> DataLoader[BatchItem]:
@@ -227,10 +224,30 @@ class AZT1DDataModule(_LightningDataModuleBase):
             self.test_dataset,
             batch_size=self.config.batch_size,
             shuffle=False,
-            num_workers=self.config.num_workers,
-            pin_memory=self.config.pin_memory,
-            persistent_workers=self.config.persistent_workers and self.config.num_workers > 0,
+            **self._shared_dataloader_kwargs(),
         )
+
+    def _shared_dataloader_kwargs(self) -> dict[str, Any]:
+        # The DataLoader policy is intentionally centralized here so train/val/
+        # test loaders stay aligned on worker semantics.
+        #
+        # Two subtle rules matter:
+        # - `persistent_workers` is only meaningful when worker processes exist
+        # - `prefetch_factor` should only be passed when multiprocessing is in
+        #   play, otherwise the repo would expose a knob that has no effect
+        kwargs: dict[str, Any] = {
+            "num_workers": self.config.num_workers,
+            "pin_memory": self.config.pin_memory,
+            "persistent_workers": (
+                self.config.persistent_workers and self.config.num_workers > 0
+            ),
+        }
+        if self.config.num_workers > 0 and self.config.prefetch_factor is not None:
+            # Passing this conditionally keeps the runtime summary and the real
+            # DataLoader behavior aligned. If workers are disabled, prefetching
+            # is effectively a non-concept for this loader.
+            kwargs["prefetch_factor"] = self.config.prefetch_factor
+        return kwargs
 
     def get_tft_categorical_cardinalities(self) -> dict[str, list[int]]:
         """

@@ -8,14 +8,23 @@ signatures of `FusedModelTrainer` closely so the tests stay compatible with the
 real orchestration contract and do not trigger static-analysis override errors.
 """
 
+import os
 from pathlib import Path
-from typing import Mapping, cast
+from typing import Any, Mapping, cast
 
 import pandas as pd
 import pytest
 import torch
 
-from main import build_default_config, run_training_workflow
+from main import (
+    _apply_early_apple_silicon_environment_defaults,
+    build_default_config,
+    build_default_observability_config,
+    build_default_snapshot_config,
+    build_default_train_config,
+    run_environment_benchmark_workflow,
+    run_training_workflow,
+)
 from models.fused_model import FusedModel
 from train import CheckpointSelection, FitArtifacts, FusedModelTrainer
 from config import Config
@@ -31,7 +40,7 @@ class FakeTrainer(FusedModelTrainer):
 
     def __init__(self, config: Config, **kwargs: object) -> None:
         self.config = config
-        self.kwargs = kwargs
+        self.kwargs: dict[str, Any] = dict(kwargs)
         self.test_ckpt_path: object = None
         self.predict_ckpt_path: object = None
         FakeTrainer.last_instance = self
@@ -53,6 +62,7 @@ class FakeTrainer(FusedModelTrainer):
             has_validation_data=False,
             has_test_data=True,
             best_checkpoint_path="",
+            train_batches_processed=2,
         )
 
     def test(
@@ -99,7 +109,13 @@ def test_run_training_workflow_falls_back_to_in_memory_eval_and_writes_artifacts
         system="Linux",
         release="test-release",
         machine="x86_64",
+        is_apple_silicon=False,
         python_version="3.12.0",
+        cpu_count_logical=8,
+        cpu_count_physical=4,
+        system_memory_gb=16.0,
+        cpu_capability="AVX2",
+        cpu_supports_bf16=False,
         is_colab=False,
         is_slurm=False,
         torch_available=True,
@@ -114,6 +130,8 @@ def test_run_training_workflow_falls_back_to_in_memory_eval_and_writes_artifacts
         cuda_available=False,
         cuda_device_count=0,
         cuda_device_name=None,
+        cuda_capability=None,
+        cuda_supports_bf16=False,
         cuda_visible_devices=None,
         mps_built=False,
         mps_available=False,
@@ -166,3 +184,179 @@ def test_run_training_workflow_falls_back_to_in_memory_eval_and_writes_artifacts
     assert artifacts.test_evaluation is not None
     assert artifacts.test_evaluation.summary.count == 4
     assert artifacts.report_paths == {}
+
+
+def test_run_training_workflow_applies_profile_defaults_when_unresolved(
+    tmp_path,
+    write_processed_csv,
+) -> None:
+    csv_path = write_processed_csv(steps_per_subject=12)
+    config = build_default_config(
+        dataset_url=None,
+        processed_dir=csv_path.parent,
+        processed_file_name=csv_path.name,
+        raw_dir=tmp_path / "raw",
+        cache_dir=tmp_path / "cache",
+        extracted_dir=tmp_path / "extracted",
+        encoder_length=4,
+        prediction_length=2,
+        num_workers=0,
+    )
+    runtime_environment = RuntimeEnvironment(
+        platform="test-platform",
+        system="Linux",
+        release="test-release",
+        machine="x86_64",
+        is_apple_silicon=False,
+        python_version="3.12.0",
+        cpu_count_logical=8,
+        cpu_count_physical=4,
+        system_memory_gb=16.0,
+        cpu_capability="AVX2",
+        cpu_supports_bf16=False,
+        is_colab=False,
+        is_slurm=False,
+        torch_available=True,
+        pytorch_lightning_available=True,
+        tensorboard_available=True,
+        torchview_available=True,
+        torch_version="2.0.0",
+        accelerator_api_available=False,
+        accelerator_available=False,
+        accelerator_type=None,
+        accelerator_device_count=0,
+        cuda_available=False,
+        cuda_device_count=0,
+        cuda_device_name=None,
+        cuda_capability=None,
+        cuda_supports_bf16=False,
+        cuda_visible_devices=None,
+        mps_built=False,
+        mps_available=False,
+        slurm_job_id=None,
+        slurm_cpus_per_task=None,
+        slurm_gpus=None,
+        slurm_detected_by_lightning=False,
+    )
+
+    artifacts = run_training_workflow(
+        config,
+        output_dir=tmp_path / "artifacts",
+        trainer_class=FakeTrainer,
+        requested_device_profile="auto",
+        runtime_environment=runtime_environment,
+        skip_test=True,
+        skip_predict=True,
+        save_predictions=False,
+    )
+
+    fake_trainer = FakeTrainer.last_instance
+    assert fake_trainer is not None
+    assert artifacts.resolved_device_profile == "local-cpu"
+    trainer_config = cast(Any, fake_trainer.kwargs["trainer_config"])
+    assert trainer_config.accelerator == "cpu"
+    assert trainer_config.compile_model is True
+    assert fake_trainer.config.data.num_workers == 1
+
+
+def test_run_environment_benchmark_workflow_writes_summary(
+    tmp_path,
+    write_processed_csv,
+) -> None:
+    csv_path = write_processed_csv(steps_per_subject=12)
+    config = build_default_config(
+        dataset_url=None,
+        processed_dir=csv_path.parent,
+        processed_file_name=csv_path.name,
+        raw_dir=tmp_path / "raw",
+        cache_dir=tmp_path / "cache",
+        extracted_dir=tmp_path / "extracted",
+        encoder_length=4,
+        prediction_length=2,
+        num_workers=0,
+    )
+    runtime_environment = RuntimeEnvironment(
+        platform="test-platform",
+        system="Linux",
+        release="test-release",
+        machine="x86_64",
+        is_apple_silicon=False,
+        python_version="3.12.0",
+        cpu_count_logical=8,
+        cpu_count_physical=4,
+        system_memory_gb=16.0,
+        cpu_capability="AVX2",
+        cpu_supports_bf16=False,
+        is_colab=False,
+        is_slurm=False,
+        torch_available=True,
+        pytorch_lightning_available=True,
+        tensorboard_available=True,
+        torchview_available=True,
+        torch_version="2.0.0",
+        accelerator_api_available=False,
+        accelerator_available=False,
+        accelerator_type=None,
+        accelerator_device_count=0,
+        cuda_available=False,
+        cuda_device_count=0,
+        cuda_device_name=None,
+        cuda_capability=None,
+        cuda_supports_bf16=False,
+        cuda_visible_devices=None,
+        mps_built=False,
+        mps_available=False,
+        slurm_job_id=None,
+        slurm_cpus_per_task=None,
+        slurm_gpus=None,
+        slurm_detected_by_lightning=False,
+    )
+    preflight_diagnostics = (
+        RuntimeDiagnostic(
+            severity="info",
+            code="auto_profile_resolved",
+            message="`auto` resolved to `local-cpu` for this environment.",
+        ),
+    )
+
+    artifacts = run_environment_benchmark_workflow(
+        config,
+        train_config=build_default_train_config(),
+        snapshot_config=build_default_snapshot_config(output_dir=tmp_path / "artifacts"),
+        observability_config=build_default_observability_config(
+            output_dir=tmp_path / "artifacts"
+        ),
+        requested_device_profile="auto",
+        resolved_device_profile="local-cpu",
+        applied_profile_defaults={"accelerator": "cpu", "devices": 1},
+        runtime_environment=runtime_environment,
+        preflight_diagnostics=preflight_diagnostics,
+        output_dir=tmp_path / "artifacts",
+        benchmark_train_batches=2,
+        trainer_class=FakeTrainer,
+    )
+
+    assert artifacts.summary["benchmark"]["requested_train_batches"] == 2
+    assert artifacts.summary["benchmark"]["actual_train_batches"] == 2
+    assert artifacts.summary["benchmark"]["batch_size"] == 64
+    assert artifacts.summary_path is not None
+    assert artifacts.summary_path.exists()
+
+
+def test_apply_early_apple_silicon_environment_defaults_sets_mps_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("main.platform.system", lambda: "Darwin")
+    monkeypatch.setattr("main.platform.machine", lambda: "arm64")
+    monkeypatch.delenv("PYTORCH_MPS_HIGH_WATERMARK_RATIO", raising=False)
+    monkeypatch.delenv("PYTORCH_MPS_LOW_WATERMARK_RATIO", raising=False)
+    monkeypatch.delenv("PYTORCH_ENABLE_MPS_FALLBACK", raising=False)
+
+    _apply_early_apple_silicon_environment_defaults(
+        requested_device_profile="auto",
+        train_config=build_default_train_config(),
+    )
+
+    assert os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] == "1.3"
+    assert os.environ["PYTORCH_MPS_LOW_WATERMARK_RATIO"] == "1.0"
+    assert os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] == "1"

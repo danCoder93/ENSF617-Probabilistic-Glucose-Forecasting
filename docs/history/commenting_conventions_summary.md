@@ -6,6 +6,12 @@ project. It documents the in-code commenting and docstring conventions used in
 the recently updated implementation files and the later source-wide cleanup
 pass.
 
+Later follow-up note:
+after the first convention pass, a second consistency pass revisited the
+lighter facade/helper modules and the newer runtime-tuning code so they read
+more like the repository's denser reference files rather than remaining thin
+re-export surfaces with minimal context.
+
 ## Goal
 
 The goal of this documentation pass was not to add comments for their own sake.
@@ -148,6 +154,11 @@ The updated comments and docstrings intentionally focus on:
   construction
 - why the fused model owns optimizer/loss behavior while the trainer wrapper
   owns orchestration
+- why package-level facades such as `config`, `environment`, and
+  `observability` exist as stable import surfaces rather than as direct
+  implementation homes
+- why the runtime-tuning layer is separate from environment detection and
+  profile selection
 - how tensor-heavy paths move grouped feature streams, latent branch features,
   and quantile outputs through the model stack
 
@@ -180,6 +191,27 @@ The later cleanup pass also standardized the source tree structurally:
 - every top-level function in `src/` now has a docstring
 - dense `#` walkthrough comments are still used freely in the complex
   tensor-heavy files
+
+The later consistency pass also made an important nuance more explicit:
+
+- the simplest helper files do not need line-by-line comments
+- but they should still explain their architectural role, responsibility
+  boundary, and what they intentionally do not own
+
+That is why the second pass focused especially on:
+
+- `src/config/__init__.py`
+- `src/environment/__init__.py`
+- `src/environment/tuning.py`
+- `src/observability/__init__.py`
+- `src/observability/utils.py`
+
+Those files are still small, but they now explain:
+
+- why the package-level facade exists
+- what internal modules sit behind it
+- which concerns belong elsewhere
+- why the helper abstractions are intentionally tiny
 
 ## Important Nuance
 

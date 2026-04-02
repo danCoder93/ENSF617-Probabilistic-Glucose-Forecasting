@@ -19,9 +19,27 @@ from __future__ import annotations
 # - `callbacks.py` contains the Lightning callbacks plus callback assembly
 # - `reporting.py` owns post-run exports and HTML report generation
 #
+# Responsibility boundary:
+# - expose the repository's public observability surface in one place
+# - let orchestration code import logging/profiler/callback/reporting helpers
+#   without caring about the internal package split
+# - keep the internal modules free to evolve without forcing widespread import
+#   churn elsewhere in the codebase
+#
+# What does *not* live here:
+# - the implementation details of callbacks, logging, profiling, or reporting
+# - training orchestration
+# - runtime environment policy
+#
 # The goal is not to hide the split; it is to make each part easier to inspect
-# without forcing the rest of the repository to care about the new file
-# boundaries.
+# without forcing the rest of the repository to care about the file boundaries.
+
+
+# ============================================================================
+# Public Observability Surface
+# ============================================================================
+# Re-export the commonly used runtime helpers, callbacks, and reporting tools
+# so the rest of the repository can continue using short package-level imports.
 
 from observability.callbacks import (
     ActivationStatsCallback,
@@ -50,6 +68,9 @@ from observability.runtime import (
     setup_text_logger,
 )
 
+
+# `__all__` is the stable import contract for package-level callers like
+# `train.py`, `main.py`, and the observability-focused tests.
 __all__ = [
     "ActivationStatsCallback",
     "BatchAuditCallback",

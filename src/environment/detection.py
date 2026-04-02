@@ -24,7 +24,7 @@ import importlib.util
 import os
 import platform
 import sys
-from typing import Mapping
+from typing import Any, Mapping
 
 from environment.types import RuntimeEnvironment
 
@@ -48,6 +48,46 @@ def _optional_int(value: str | None) -> int | None:
         return None
 
 
+def _is_apple_silicon(system: str, machine: str) -> bool:
+    return system == "Darwin" and machine in {"arm64", "arm64e"}
+
+
+def _optional_bool_probe(namespace: Any, attribute_name: str) -> bool | None:
+    probe = getattr(namespace, attribute_name, None)
+    if not callable(probe):
+        return None
+    try:
+        return bool(probe())
+    except Exception:
+        return None
+
+
+def _cpu_supports_bf16(
+    cpu_capability: str | None,
+    *,
+    torch_module: Any | None = None,
+) -> bool:
+    if torch_module is not None:
+        cpu_namespace = getattr(torch_module, "cpu", None)
+        c_namespace = getattr(torch_module, "_C", None)
+        for namespace, attribute_name in (
+            (cpu_namespace, "_is_avx512_bf16_supported"),
+            (cpu_namespace, "_is_amx_tile_supported"),
+            (c_namespace, "_cpu_supports_avx512_bf16"),
+            (c_namespace, "_cpu_supports_amx_tile"),
+        ):
+            if namespace is None:
+                continue
+            probed = _optional_bool_probe(namespace, attribute_name)
+            if probed is not None:
+                return probed
+
+    if cpu_capability is None:
+        return False
+    normalized = cpu_capability.upper()
+    return "BF16" in normalized or "AMX" in normalized
+
+
 def detect_runtime_environment(
     environ: Mapping[str, str] | None = None,
 ) -> RuntimeEnvironment:
@@ -62,11 +102,19 @@ def detect_runtime_environment(
     """
 
     env = os.environ if environ is None else environ
+    system = platform.system()
+    machine = platform.machine()
 
     torch_available = _module_available("torch")
     pytorch_lightning_available = _module_available("pytorch_lightning")
     tensorboard_available = _module_available("tensorboard")
     torchview_available = _module_available("torchview")
+    is_apple_silicon = _is_apple_silicon(system, machine)
+    cpu_count_logical = os.cpu_count()
+    cpu_count_physical: int | None = None
+    system_memory_gb: float | None = None
+    cpu_capability: str | None = None
+    cpu_supports_bf16 = False
 
     torch_version: str | None = None
     accelerator_api_available = False
@@ -76,9 +124,25 @@ def detect_runtime_environment(
     cuda_available = False
     cuda_device_count = 0
     cuda_device_name: str | None = None
+    cuda_capability: str | None = None
+    cuda_supports_bf16 = False
     mps_built = False
     mps_available = False
     slurm_detected_by_lightning = False
+
+    if _module_available("psutil"):
+        try:
+            import psutil
+
+            cpu_count_physical = psutil.cpu_count(logical=False)
+            if cpu_count_logical is None:
+                cpu_count_logical = psutil.cpu_count(logical=True)
+            system_memory_gb = round(
+                psutil.virtual_memory().total / (1024.0**3),
+                2,
+            )
+        except Exception:
+            pass
 
     # PyTorch probing is kept behind the import check so diagnostics-only flows
     # remain usable in environments where the training stack is not yet
@@ -88,6 +152,13 @@ def detect_runtime_environment(
             import torch
 
             torch_version = getattr(torch, "__version__", None)
+            cpu_backend = getattr(getattr(torch, "backends", None), "cpu", None)
+            if cpu_backend is not None and hasattr(cpu_backend, "get_cpu_capability"):
+                cpu_capability = str(cpu_backend.get_cpu_capability())
+                cpu_supports_bf16 = _cpu_supports_bf16(
+                    cpu_capability,
+                    torch_module=torch,
+                )
             accelerator_module = getattr(torch, "accelerator", None)
             if accelerator_module is not None and all(
                 hasattr(accelerator_module, attribute_name)
@@ -113,8 +184,14 @@ def detect_runtime_environment(
             cuda_available = bool(torch.cuda.is_available())
             cuda_device_count = int(torch.cuda.device_count())
             if cuda_available and cuda_device_count > 0:
+                current_device = int(torch.cuda.current_device())
                 cuda_device_name = str(
-                    torch.cuda.get_device_name(torch.cuda.current_device())
+                    torch.cuda.get_device_name(current_device)
+                )
+                capability = torch.cuda.get_device_capability(current_device)
+                cuda_capability = f"{capability[0]}.{capability[1]}"
+                cuda_supports_bf16 = bool(
+                    getattr(torch.cuda, "is_bf16_supported", lambda: False)()
                 )
 
             mps_backend = getattr(getattr(torch, "backends", None), "mps", None)
@@ -158,10 +235,16 @@ def detect_runtime_environment(
 
     return RuntimeEnvironment(
         platform=platform.platform(),
-        system=platform.system(),
+        system=system,
         release=platform.release(),
-        machine=platform.machine(),
+        machine=machine,
+        is_apple_silicon=is_apple_silicon,
         python_version=platform.python_version(),
+        cpu_count_logical=cpu_count_logical,
+        cpu_count_physical=cpu_count_physical,
+        system_memory_gb=system_memory_gb,
+        cpu_capability=cpu_capability,
+        cpu_supports_bf16=cpu_supports_bf16,
         is_colab=(
             "google.colab" in sys.modules
             or "COLAB_GPU" in env
@@ -184,6 +267,8 @@ def detect_runtime_environment(
         cuda_available=cuda_available,
         cuda_device_count=cuda_device_count,
         cuda_device_name=cuda_device_name,
+        cuda_capability=cuda_capability,
+        cuda_supports_bf16=cuda_supports_bf16,
         cuda_visible_devices=env.get("CUDA_VISIBLE_DEVICES"),
         mps_built=mps_built,
         mps_available=mps_available,
