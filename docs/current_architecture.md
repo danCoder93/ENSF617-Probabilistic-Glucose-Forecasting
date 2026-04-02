@@ -37,6 +37,7 @@ docs/
 src/
   config/
   data/
+  environment/
   evaluation/
   models/
   observability/
@@ -85,10 +86,24 @@ Look at:
 
 - `defaults.py`
 - `main.py`
+- `src/environment/`
 - `src/config/runtime.py`
 - `src/train.py`
 - `tests/test_main.py`
 - `tests/test_train.py`
+
+### If you are working on environment detection, device profiles, or
+preflight diagnostics
+
+Look at:
+
+- `src/environment/detection.py`
+- `src/environment/profiles.py`
+- `src/environment/diagnostics.py`
+- `main.py`
+- `main.ipynb`
+- `tests/test_config.py`
+- `tests/test_main.py`
 
 ### If you are working on observability, exports, or reports
 
@@ -120,7 +135,8 @@ The current architecture is built around a few stable principles:
 - semantic data contracts are preferred over raw positional tensors
 - model behavior, data lifecycle, runtime orchestration, evaluation, and
   observability are separate concerns
-- runtime policy is expressed through typed config objects
+- runtime policy is expressed through typed config objects plus an explicit
+  environment-aware resolution layer
 - root-level entrypoints should stay thin and user-facing
 - documentation should explain intent and boundaries, not only APIs
 
@@ -130,26 +146,31 @@ The normal run path through the repository is:
 
 1. `defaults.py` builds baseline config objects for data, model, training,
    snapshots, and observability.
-2. `main.py` parses CLI arguments and converts them into those typed config
-   objects.
-3. `main.py` constructs `AZT1DDataModule` from `config.data`.
-4. `main.py` constructs `FusedModelTrainer` from the top-level config plus
+2. `main.py` or `main.ipynb` parses user-supplied overrides and converts them
+   into typed config objects plus entry-surface runtime options.
+3. `src/environment/` detects the current runtime context and resolves the
+   requested device profile into effective runtime defaults.
+4. `src/environment/diagnostics.py` runs preflight validation so likely
+   backend or dependency issues can fail early and be summarized cleanly.
+5. `main.py` constructs `AZT1DDataModule` from `config.data`.
+6. `main.py` constructs `FusedModelTrainer` from the top-level config plus
    runtime policy configs.
-5. `FusedModelTrainer` calls `datamodule.prepare_data()` and `datamodule.setup()`
+7. `FusedModelTrainer` calls `datamodule.prepare_data()` and `datamodule.setup()`
    before model construction.
-6. `AZT1DDataModule` discovers runtime categorical cardinalities and final
+8. `AZT1DDataModule` discovers runtime categorical cardinalities and final
    sequence-aligned feature details, then binds them into a new runtime config.
-7. `FusedModelTrainer` builds `FusedModel` from that runtime-bound config.
-8. `FusedModelTrainer` assembles callbacks, loggers, checkpoint policy, and the
+9. `FusedModelTrainer` builds `FusedModel` from that runtime-bound config.
+10. `FusedModelTrainer` assembles callbacks, loggers, checkpoint policy, and the
    Lightning `Trainer`.
-9. Lightning executes `fit(...)`.
-10. If test windows exist, the wrapper can run `test(...)` and `predict(...)`
+11. Lightning executes `fit(...)`.
+12. If test windows exist, the wrapper can run `test(...)` and `predict(...)`
     against the resolved checkpoint or the current in-memory weights.
-11. `main.py` uses raw predictions plus aligned test batches to compute
+13. `main.py` uses raw predictions plus aligned test batches to compute
     structured held-out evaluation through `src/evaluation/`.
-12. `src/observability/` exports prediction tables, reports, and runtime
+14. `src/observability/` exports prediction tables, reports, and runtime
     artifacts.
-13. `main.py` writes a compact `run_summary.json` describing the run.
+15. `main.py` writes a compact `run_summary.json` describing the run,
+    including resolved runtime-environment metadata.
 
 That same underlying workflow is shared by the notebook path. `main.ipynb`
 reuses the same Python surfaces rather than keeping its own independent
@@ -261,11 +282,22 @@ It is intentionally not the place where:
 That separation is what keeps the script readable even as the rest of the
 system grows.
 
+The script now also coordinates the runtime-environment layer by:
+
+- selecting or inferring a device profile
+- applying explicit runtime overrides
+- running preflight diagnostics before training
+- recording environment metadata in `run_summary.json`
+
 ### `main.ipynb`
 
 The notebook is a convenience surface for interactive work, not a second
 architecture. It exists so teammates can explore or debug runs interactively
 without having to fork the actual pipeline into notebook-only logic.
+
+It now mirrors the same environment-aware workflow as `main.py`, including
+profile resolution and preflight diagnostics, while exposing those controls as
+editable notebook variables instead of CLI flags.
 
 ## Configuration Layer: `src/config/`
 
@@ -322,6 +354,63 @@ When reading or modifying the repo, the main config classes to know are:
   checkpoint policy
 - `ObservabilityConfig`
   logging, telemetry, and reporting policy
+
+## Environment Layer: `src/environment/`
+
+The environment package is the runtime interpretation layer that sits between
+entry-surface user intent and the lower-level training stack.
+
+For the milestone that introduced this layer, see
+[`history/environment_runtime_profiles_summary.md`](history/environment_runtime_profiles_summary.md).
+
+### Main modules
+
+- `types.py`
+  shared runtime-environment dataclasses and device-profile constants
+- `detection.py`
+  backend, platform, notebook, and cluster detection
+- `profiles.py`
+  high-level device-profile inference and profile-to-runtime-default
+  resolution
+- `diagnostics.py`
+  preflight validation, diagnostic formatting, and best-effort runtime failure
+  analysis
+- `__init__.py`
+  convenience facade for the public environment API
+
+### Why this package exists
+
+This code used to live closer to the config layer, but it grew beyond pure
+config shaping.
+
+The environment layer now owns:
+
+- runtime-environment detection
+- high-level profile selection such as local, Colab, Slurm, or Apple Silicon
+- profile default resolution
+- compatibility and preflight checks
+- environment-sensitive failure explanation
+
+This keeps `src/config/` focused on typed contracts while still keeping
+environment-aware runtime logic explicit and reusable.
+
+### Current profile philosophy
+
+The repository now supports both:
+
+- high-level device profiles such as `auto`, `colab-cuda`, and
+  `apple-silicon`
+- lower-level explicit overrides such as accelerator, precision, worker, and
+  progress-bar settings
+
+The precedence rule is intentionally simple:
+
+- explicit user override wins
+- otherwise profile default applies
+- otherwise repository baseline default applies
+
+That rule is what makes `auto` useful without making explicit reproducible
+workflows harder.
 
 ## Data Layer: `src/data/`
 
@@ -723,6 +812,9 @@ The documentation structure under `docs/` now has three roles:
 The diagrams under `docs/assets/` support the model-side architecture story
 without mixing binary assets into the source package.
 
+The newest runtime-portability milestone is documented in
+[`history/environment_runtime_profiles_summary.md`](history/environment_runtime_profiles_summary.md).
+
 ## How To Extend The Codebase Safely
 
 When adding new work, start by placing it in the right subsystem.
@@ -753,9 +845,23 @@ Usually touch:
 
 - `defaults.py`
 - `main.py`
+- `src/environment/profiles.py`
+- `src/environment/diagnostics.py`
 - `src/config/runtime.py`
 - `src/train.py`
 - `tests/test_main.py` and/or `tests/test_train.py`
+
+### Add a new environment profile, detection rule, or preflight diagnostic
+
+Usually touch:
+
+- `src/environment/detection.py`
+- `src/environment/profiles.py`
+- `src/environment/diagnostics.py`
+- `main.py`
+- `main.ipynb`
+- `tests/test_config.py`
+- `tests/test_main.py`
 
 ### Add a new metric or grouped evaluation summary
 
@@ -783,6 +889,8 @@ For common team tasks, here is where to start:
   Start in `defaults.py`
 - "I want to add a CLI flag"
   Start in `main.py`
+- "I want to add a new device profile or preflight diagnostic"
+  Start in `src/environment/`
 - "I want to change how test predictions are saved"
   Start in `main.py` and `src/observability/reporting.py`
 - "I want to change the grouped batch contract"
@@ -801,6 +909,8 @@ The following boundaries are deliberate and should be preserved unless there is
 a clear reason to change them:
 
 - the DataModule discovers runtime metadata; the model consumes it
+- the environment layer interprets runtime context; it does not define model
+  or data semantics
 - `FusedModel` owns forecasting and supervision semantics
 - `FusedModelTrainer` owns Lightning orchestration, not model math
 - `main.py` stays thin and user-facing

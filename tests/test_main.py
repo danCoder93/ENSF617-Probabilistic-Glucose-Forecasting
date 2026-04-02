@@ -19,6 +19,7 @@ from main import build_default_config, run_training_workflow
 from models.fused_model import FusedModel
 from train import CheckpointSelection, FitArtifacts, FusedModelTrainer
 from config import Config
+from environment import RuntimeDiagnostic, RuntimeEnvironment
 
 
 pytest.importorskip("pytorch_lightning")
@@ -93,11 +94,51 @@ def test_run_training_workflow_falls_back_to_in_memory_eval_and_writes_artifacts
         prediction_length=2,
         num_workers=0,
     )
+    runtime_environment = RuntimeEnvironment(
+        platform="test-platform",
+        system="Linux",
+        release="test-release",
+        machine="x86_64",
+        python_version="3.12.0",
+        is_colab=False,
+        is_slurm=False,
+        torch_available=True,
+        pytorch_lightning_available=True,
+        tensorboard_available=True,
+        torchview_available=True,
+        torch_version="2.0.0",
+        accelerator_api_available=False,
+        accelerator_available=False,
+        accelerator_type=None,
+        accelerator_device_count=0,
+        cuda_available=False,
+        cuda_device_count=0,
+        cuda_device_name=None,
+        cuda_visible_devices=None,
+        mps_built=False,
+        mps_available=False,
+        slurm_job_id=None,
+        slurm_cpus_per_task=None,
+        slurm_gpus=None,
+        slurm_detected_by_lightning=False,
+    )
+    preflight_diagnostics = (
+        RuntimeDiagnostic(
+            severity="info",
+            code="auto_profile_resolved",
+            message="`auto` resolved to `local-cpu` for this environment.",
+        ),
+    )
 
     artifacts = run_training_workflow(
         config,
         output_dir=tmp_path / "artifacts",
         trainer_class=FakeTrainer,
+        requested_device_profile="auto",
+        resolved_device_profile="local-cpu",
+        applied_profile_defaults={"accelerator": "cpu", "devices": 1},
+        runtime_environment=runtime_environment,
+        preflight_diagnostics=preflight_diagnostics,
     )
 
     fake_trainer = FakeTrainer.last_instance
@@ -111,6 +152,11 @@ def test_run_training_workflow_falls_back_to_in_memory_eval_and_writes_artifacts
     assert artifacts.prediction_table_path.exists()
     assert artifacts.summary_path is not None
     assert artifacts.summary_path.exists()
+    assert artifacts.requested_device_profile == "auto"
+    assert artifacts.resolved_device_profile == "local-cpu"
+    assert artifacts.applied_profile_defaults == {"accelerator": "cpu", "devices": 1}
+    assert artifacts.summary["device_profile"]["resolved"] == "local-cpu"
+    assert artifacts.summary["device_profile"]["applied_defaults"]["accelerator"] == "cpu"
     loaded_predictions = torch.load(artifacts.predictions_path)
     assert len(loaded_predictions) == 1
     assert tuple(loaded_predictions[0].shape) == (2, 2, 3)

@@ -22,6 +22,7 @@ ensuring that:
 ## Files Covered By This Convention Pass
 
 - `src/config/`
+- `src/environment/`
 - `defaults.py`
 - `src/observability/`
 - `src/train.py`
@@ -68,6 +69,7 @@ API documentation.
 Examples include:
 
 - repository-level design notes in `defaults.py`
+- environment-scope notes in `src/environment/`
 - observability-scope notes in `src/observability/`
 - entrypoint disclaimers in `main.py`
 
@@ -137,6 +139,8 @@ This gives the comments a more natural tone without making them vague.
 The updated comments and docstrings intentionally focus on:
 
 - responsibility boundaries between model, data, trainer, and entrypoint code
+- responsibility boundaries between typed config, environment detection, and
+  runtime diagnostics
 - the difference between semantic model config and runtime observability policy
 - how TensorBoard, torchview, telemetry, prediction export, and reports fit
   together
@@ -166,8 +170,8 @@ documentation style:
 - detailed enough for onboarding and later maintenance
 - structured enough to scan quickly
 - explicit about design intent and runtime behavior
-- consistent across config, observability, training, model, and entrypoint
-  surfaces
+- consistent across config, environment, observability, training, model, and
+  entrypoint surfaces
 
 The later cleanup pass also standardized the source tree structurally:
 
@@ -197,6 +201,7 @@ That is why files like:
 - `src/models/fused_model.py`
 - `src/train.py`
 - `src/observability/`
+- `src/environment/`
 
 remain more heavily annotated than the simpler modules.
 

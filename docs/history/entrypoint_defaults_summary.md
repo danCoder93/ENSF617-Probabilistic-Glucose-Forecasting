@@ -19,6 +19,11 @@ the current top-level workflow has since grown richer post-run observability
 and structured evaluation outputs. This document has been updated where needed
 so its artifact descriptions reflect the current `main.py` behavior.
 
+An additional later follow-up introduced runtime environment profiles,
+preflight diagnostics, and notebook/script alignment around one shared
+environment-aware execution flow. That later work is summarized in
+[`environment_runtime_profiles_summary.md`](environment_runtime_profiles_summary.md).
+
 ## Goals
 
 - Make the repository runnable from a single script entrypoint.
@@ -150,6 +155,22 @@ That function is reusable from:
 This makes the script and notebook meaningfully share code rather than only
 share concepts.
 
+### Later runtime-environment expansion
+
+The top-level workflow later gained a second layer of responsibility around
+runtime portability and diagnostics.
+
+Today, `main.py` also:
+
+- resolves a high-level device profile such as local, Colab, Slurm, or Apple
+  Silicon
+- applies explicit runtime overrides on top of that profile
+- runs preflight diagnostics before constructing the deeper training stack
+- records runtime-environment metadata in the run summary
+
+That work did not replace the original entrypoint design. It extended it while
+preserving the same public script/notebook surfaces.
+
 ### Artifact outputs
 
 The top-level workflow can now produce:
@@ -164,6 +185,7 @@ The summary is intentionally lightweight. It records:
 
 - the declared config
 - trainer and snapshot config
+- runtime-environment profile and diagnostic metadata
 - optimizer settings
 - fit/test availability information
 - checkpoint selection information
@@ -187,6 +209,10 @@ The notebook is intentionally thin:
 This is important because it avoids the common failure mode where notebooks
 quietly fork the real project workflow into a second, partially maintained
 training path.
+
+That thin-notebook principle still holds after the later environment-aware
+runtime additions. The notebook now exposes more runtime-control variables, but
+it still goes through the same shared workflow as `main.py`.
 
 ## `src/train.py` follow-up change
 

@@ -25,9 +25,8 @@ import json
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
-
-import torch
+import sys
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from defaults import (
     DEFAULT_AZT1D_URL,
@@ -39,10 +38,6 @@ from defaults import (
     build_default_train_config,
 )
 
-from data.datamodule import AZT1DDataModule
-from evaluation import EvaluationResult, evaluate_prediction_batches
-from observability import export_prediction_table, generate_plotly_reports
-from train import CheckpointSelection, FitArtifacts, FusedModelTrainer
 from config import (
     Config,
     ObservabilityConfig,
@@ -50,6 +45,29 @@ from config import (
     TrainConfig,
     config_to_dict,
 )
+from environment import (
+    DEVICE_PROFILE_CHOICES,
+    RuntimeDiagnostic,
+    RuntimeEnvironment,
+    analyze_runtime_failure,
+    collect_runtime_diagnostics,
+    detect_runtime_environment,
+    format_runtime_diagnostics,
+    has_error_diagnostics,
+    infer_device_profile,
+    resolve_device_profile,
+)
+
+if TYPE_CHECKING:
+    import torch
+
+    from evaluation import EvaluationResult
+    from train import CheckpointSelection, FitArtifacts, FusedModelTrainer
+else:
+    CheckpointSelection = Any
+    EvaluationResult = Any
+    FitArtifacts = Any
+    FusedModelTrainer = Any
 
 try:
     from pytorch_lightning import seed_everything
@@ -92,6 +110,11 @@ class MainRunArtifacts:
     telemetry_path: Path | None
     logger_dir: Path | None
     text_log_path: Path | None
+    requested_device_profile: str
+    resolved_device_profile: str
+    applied_profile_defaults: dict[str, Any]
+    runtime_environment: RuntimeEnvironment
+    preflight_diagnostics: tuple[RuntimeDiagnostic, ...]
 
 
 def _json_ready(value: Any) -> Any:
@@ -173,6 +196,34 @@ def _normalize_optional_string(value: str | None) -> str | None:
     return cleaned
 
 
+def _collect_explicit_cli_overrides(
+    parser: argparse.ArgumentParser,
+    argv: Sequence[str],
+) -> set[str]:
+    # The profile resolver needs to know which flags were explicitly provided
+    # so it can treat the device profile as a source of defaults rather than an
+    # unconditional override.
+    explicit_overrides: set[str] = set()
+    option_actions = getattr(parser, "_option_string_actions", {})
+    for token in argv:
+        if not token.startswith("--"):
+            continue
+        option = token.split("=", 1)[0]
+        action = option_actions.get(option)
+        if action is not None:
+            explicit_overrides.add(action.dest)
+    return explicit_overrides
+
+
+def _print_runtime_diagnostics(
+    diagnostics: Sequence[RuntimeDiagnostic],
+) -> None:
+    if not diagnostics:
+        return
+    print("Runtime diagnostics:")
+    print(format_runtime_diagnostics(diagnostics))
+
+
 def _resolve_eval_ckpt_path(
     fit_artifacts: FitArtifacts,
     eval_ckpt_path: CheckpointSelection,
@@ -191,6 +242,11 @@ def _build_run_summary(
     train_config: TrainConfig,
     snapshot_config: SnapshotConfig,
     observability_config: ObservabilityConfig,
+    requested_device_profile: str,
+    resolved_device_profile: str,
+    applied_profile_defaults: Mapping[str, Any],
+    runtime_environment: RuntimeEnvironment,
+    preflight_diagnostics: Sequence[RuntimeDiagnostic],
     fit_artifacts: FitArtifacts,
     eval_ckpt_path: CheckpointSelection,
     learning_rate: float,
@@ -226,15 +282,14 @@ def _build_run_summary(
             "weight_decay": weight_decay,
             "optimizer_name": optimizer_name,
         },
+        "device_profile": {
+            "requested": requested_device_profile,
+            "resolved": resolved_device_profile,
+            "applied_defaults": _json_ready(dict(applied_profile_defaults)),
+        },
         "environment": {
-            "torch_version": torch.__version__,
-            "cuda_available": torch.cuda.is_available(),
-            "cuda_device_count": torch.cuda.device_count(),
-            "cuda_device_name": (
-                torch.cuda.get_device_name(torch.cuda.current_device())
-                if torch.cuda.is_available()
-                else None
-            ),
+            "runtime": _json_ready(runtime_environment),
+            "preflight_diagnostics": _json_ready(tuple(preflight_diagnostics)),
         },
         "fit": {
             "has_validation_data": fit_artifacts.has_validation_data,
@@ -280,6 +335,12 @@ def run_training_workflow(
     train_config: TrainConfig | None = None,
     snapshot_config: SnapshotConfig | None = None,
     observability_config: ObservabilityConfig | None = None,
+    requested_device_profile: str = "auto",
+    resolved_device_profile: str | None = None,
+    applied_profile_defaults: Mapping[str, Any] | None = None,
+    runtime_environment: RuntimeEnvironment | None = None,
+    preflight_diagnostics: Sequence[RuntimeDiagnostic] | None = None,
+    fail_on_preflight_errors: bool = True,
     learning_rate: float = 1e-3,
     weight_decay: float = 0.0,
     optimizer_name: str = "adam",
@@ -290,7 +351,7 @@ def run_training_workflow(
     skip_test: bool = False,
     skip_predict: bool = False,
     save_predictions: bool = True,
-    trainer_class: type[FusedModelTrainer] = FusedModelTrainer,
+    trainer_class: type[Any] | None = None,
 ) -> MainRunArtifacts:
     # This function is the shared orchestration surface used by both the CLI
     # script and the notebook. Keeping the workflow in one callable helps avoid
@@ -327,6 +388,23 @@ def run_training_workflow(
     effective_observability_config = observability_config or build_default_observability_config(
         output_dir=output_dir,
     )
+    effective_runtime_environment = runtime_environment or detect_runtime_environment()
+    effective_resolved_device_profile = resolved_device_profile or infer_device_profile(
+        requested_device_profile,
+        effective_runtime_environment,
+    )
+    effective_preflight_diagnostics = tuple(
+        preflight_diagnostics
+        if preflight_diagnostics is not None
+        else collect_runtime_diagnostics(
+            requested_profile=requested_device_profile,
+            resolved_profile=effective_resolved_device_profile,
+            environment=effective_runtime_environment,
+            train_config=effective_train_config,
+            data_config=config.data,
+            observability_config=effective_observability_config,
+        )
+    )
     # If the caller supplied explicit configs we respect them verbatim.
     # Otherwise we derive defaults that are aligned with the chosen output dir.
     #
@@ -334,6 +412,24 @@ def run_training_workflow(
     # - this workflow treats observability as first-class run configuration
     # - the defaults are intentionally visibility-friendly, but callers still
     #   remain free to dial them down for very constrained hardware sessions
+
+    if fail_on_preflight_errors and has_error_diagnostics(effective_preflight_diagnostics):
+        raise RuntimeError(
+            "Runtime preflight checks failed "
+            f"for device profile {requested_device_profile} -> "
+            f"{effective_resolved_device_profile}.\n"
+            f"{format_runtime_diagnostics(effective_preflight_diagnostics)}"
+        )
+
+    import torch
+
+    from data.datamodule import AZT1DDataModule
+    from evaluation import evaluate_prediction_batches
+    from observability import export_prediction_table, generate_plotly_reports
+    from train import FusedModelTrainer as DefaultFusedModelTrainer
+
+    if trainer_class is None:
+        trainer_class = DefaultFusedModelTrainer
 
     datamodule = AZT1DDataModule(config.data)
     # The training wrapper deliberately sits between the top-level workflow and
@@ -353,7 +449,22 @@ def run_training_workflow(
     if text_logger is not None:
         text_logger.info("starting training workflow")
 
-    fit_artifacts = trainer.fit(datamodule, ckpt_path=fit_ckpt_path)
+    try:
+        fit_artifacts = trainer.fit(datamodule, ckpt_path=fit_ckpt_path)
+    except Exception as exc:
+        runtime_failure_diagnostics = analyze_runtime_failure(
+            exc,
+            requested_profile=requested_device_profile,
+            resolved_profile=effective_resolved_device_profile,
+            environment=effective_runtime_environment,
+        )
+        raise RuntimeError(
+            "Training workflow failed during fit() "
+            f"for device profile {requested_device_profile} -> "
+            f"{effective_resolved_device_profile}.\n"
+            f"Preflight diagnostics:\n{format_runtime_diagnostics(effective_preflight_diagnostics)}\n\n"
+            f"Failure analysis:\n{format_runtime_diagnostics(runtime_failure_diagnostics)}"
+        ) from exc
     # Evaluation may target `"best"`, `"last"`, an explicit checkpoint path,
     # or the current in-memory model. We normalize that choice once here so
     # test and prediction stay consistent.
@@ -367,16 +478,46 @@ def run_training_workflow(
     report_paths: dict[str, Path] = {}
 
     if fit_artifacts.has_test_data and not skip_test:
-        test_metrics = trainer.test(datamodule, ckpt_path=resolved_eval_ckpt_path)
+        try:
+            test_metrics = trainer.test(datamodule, ckpt_path=resolved_eval_ckpt_path)
+        except Exception as exc:
+            runtime_failure_diagnostics = analyze_runtime_failure(
+                exc,
+                requested_profile=requested_device_profile,
+                resolved_profile=effective_resolved_device_profile,
+                environment=effective_runtime_environment,
+            )
+            raise RuntimeError(
+                "Training workflow failed during test() "
+                f"for device profile {requested_device_profile} -> "
+                f"{effective_resolved_device_profile}.\n"
+                f"Preflight diagnostics:\n{format_runtime_diagnostics(effective_preflight_diagnostics)}\n\n"
+                f"Failure analysis:\n{format_runtime_diagnostics(runtime_failure_diagnostics)}"
+            ) from exc
     # We intentionally treat test evaluation and raw prediction collection as
     # separate toggles. Some workflows want metrics only, while others want the
     # raw tensors for notebook analysis or custom visualization.
 
     if fit_artifacts.has_test_data and not skip_predict:
-        test_predictions = trainer.predict_test(
-            datamodule,
-            ckpt_path=resolved_eval_ckpt_path,
-        )
+        try:
+            test_predictions = trainer.predict_test(
+                datamodule,
+                ckpt_path=resolved_eval_ckpt_path,
+            )
+        except Exception as exc:
+            runtime_failure_diagnostics = analyze_runtime_failure(
+                exc,
+                requested_profile=requested_device_profile,
+                resolved_profile=effective_resolved_device_profile,
+                environment=effective_runtime_environment,
+            )
+            raise RuntimeError(
+                "Training workflow failed during predict() "
+                f"for device profile {requested_device_profile} -> "
+                f"{effective_resolved_device_profile}.\n"
+                f"Preflight diagnostics:\n{format_runtime_diagnostics(effective_preflight_diagnostics)}\n\n"
+                f"Failure analysis:\n{format_runtime_diagnostics(runtime_failure_diagnostics)}"
+            ) from exc
         # Detailed evaluation currently hangs off the prediction path rather
         # than the `trainer.test(...)` path because the richer evaluator needs
         # raw forecast tensors plus the aligned source batches, not just
@@ -424,6 +565,11 @@ def run_training_workflow(
         train_config=effective_train_config,
         snapshot_config=effective_snapshot_config,
         observability_config=effective_observability_config,
+        requested_device_profile=requested_device_profile,
+        resolved_device_profile=effective_resolved_device_profile,
+        applied_profile_defaults=applied_profile_defaults or {},
+        runtime_environment=effective_runtime_environment,
+        preflight_diagnostics=effective_preflight_diagnostics,
         fit_artifacts=fit_artifacts,
         eval_ckpt_path=resolved_eval_ckpt_path,
         learning_rate=learning_rate,
@@ -461,6 +607,11 @@ def run_training_workflow(
         telemetry_path=getattr(trainer_observability, "telemetry_path", None),
         logger_dir=getattr(trainer_observability, "logger_dir", None),
         text_log_path=getattr(trainer_observability, "text_log_path", None),
+        requested_device_profile=requested_device_profile,
+        resolved_device_profile=effective_resolved_device_profile,
+        applied_profile_defaults=dict(applied_profile_defaults or {}),
+        runtime_environment=effective_runtime_environment,
+        preflight_diagnostics=effective_preflight_diagnostics,
     )
 
 
@@ -488,8 +639,25 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prediction-length", type=int, default=12)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument(
+        "--pin-memory",
+        dest="pin_memory",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
+        "--persistent-workers",
+        dest="persistent_workers",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
     # Trainer/runtime controls.
     parser.add_argument("--max-epochs", type=int, default=20)
+    parser.add_argument(
+        "--device-profile",
+        default="auto",
+        choices=DEVICE_PROFILE_CHOICES,
+    )
     parser.add_argument("--accelerator", default="auto")
     parser.add_argument("--devices", default="auto")
     parser.add_argument("--precision", default="32")
@@ -518,6 +686,31 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--redownload", action="store_true")
     parser.add_argument("--deterministic", action="store_true")
     parser.add_argument("--fast-dev-run", action="store_true")
+    parser.add_argument(
+        "--progress-bar",
+        dest="enable_progress_bar",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
+        "--rich-progress-bar",
+        dest="enable_rich_progress_bar",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
+        "--device-stats",
+        dest="enable_device_stats",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
+        "--fail-on-preflight-errors",
+        dest="fail_on_preflight_errors",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument("--run-diagnostics-only", action="store_true")
     parser.add_argument("--skip-test", action="store_true")
     parser.add_argument("--skip-predict", action="store_true")
     parser.add_argument("--no-save-predictions", action="store_true")
@@ -544,12 +737,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> MainRunArtifacts:
+def main(argv: Sequence[str] | None = None) -> MainRunArtifacts | None:
     # `main(...)` keeps argument parsing separate from the reusable workflow
     # function above. That split makes the same training flow callable from
     # tests and notebooks without forcing everything through `argparse`.
     parser = build_argument_parser()
-    args = parser.parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw_argv)
+    explicit_overrides = _collect_explicit_cli_overrides(parser, raw_argv)
 
     output_dir = Path(args.output_dir)
     # Build the nested project config from CLI primitives. This is the point
@@ -566,6 +761,10 @@ def main(argv: Sequence[str] | None = None) -> MainRunArtifacts:
         prediction_length=args.prediction_length,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
+        pin_memory=False if args.pin_memory is None else args.pin_memory,
+        persistent_workers=(
+            False if args.persistent_workers is None else args.persistent_workers
+        ),
         rebuild_processed=args.rebuild_processed,
         redownload=args.redownload,
         tcn_channels=_parse_csv_ints(args.tcn_channels),
@@ -590,6 +789,9 @@ def main(argv: Sequence[str] | None = None) -> MainRunArtifacts:
         limit_train_batches=_parse_limit(args.limit_train_batches),
         limit_val_batches=_parse_limit(args.limit_val_batches),
         limit_test_batches=_parse_limit(args.limit_test_batches),
+        enable_progress_bar=(
+            True if args.enable_progress_bar is None else args.enable_progress_bar
+        ),
         default_root_dir=output_dir,
         early_stopping_patience=args.early_stopping_patience,
     )
@@ -603,6 +805,14 @@ def main(argv: Sequence[str] | None = None) -> MainRunArtifacts:
         mode=args.observability_mode,
         output_dir=output_dir,
         enable_tensorboard=not args.disable_tensorboard,
+        enable_device_stats=(
+            True if args.enable_device_stats is None else args.enable_device_stats
+        ),
+        enable_rich_progress_bar=(
+            True
+            if args.enable_rich_progress_bar is None
+            else args.enable_rich_progress_bar
+        ),
         enable_system_telemetry=not args.disable_system_telemetry,
         enable_gradient_stats=not args.disable_gradient_stats,
         enable_activation_stats=args.enable_activation_stats,
@@ -617,6 +827,30 @@ def main(argv: Sequence[str] | None = None) -> MainRunArtifacts:
         profiler_type=args.profiler_type,
         torchview_depth=args.torchview_depth,
     )
+    runtime_environment = detect_runtime_environment()
+    profile_resolution = resolve_device_profile(
+        requested_profile=args.device_profile,
+        environment=runtime_environment,
+        train_config=train_config,
+        data_config=config.data,
+        observability_config=observability_config,
+        explicit_overrides=explicit_overrides,
+    )
+    config = Config(
+        data=profile_resolution.data_config,
+        tft=config.tft,
+        tcn=config.tcn,
+    )
+    train_config = profile_resolution.train_config
+    observability_config = profile_resolution.observability_config
+    preflight_diagnostics = collect_runtime_diagnostics(
+        requested_profile=profile_resolution.requested_profile,
+        resolved_profile=profile_resolution.resolved_profile,
+        environment=runtime_environment,
+        train_config=train_config,
+        data_config=config.data,
+        observability_config=observability_config,
+    )
     # At this point we have three layers of structured configuration:
     # - `config` for data/model semantics
     # - `train_config` for Trainer behavior
@@ -624,22 +858,53 @@ def main(argv: Sequence[str] | None = None) -> MainRunArtifacts:
     # - `observability_config` for logging, telemetry, visualization, and
     #   debug/report artifacts
 
-    artifacts = run_training_workflow(
-        config,
-        train_config=train_config,
-        snapshot_config=snapshot_config,
-        observability_config=observability_config,
-        learning_rate=args.learning_rate,
-        weight_decay=args.weight_decay,
-        optimizer_name=args.optimizer,
-        fit_ckpt_path=_normalize_optional_string(args.fit_ckpt_path),
-        eval_ckpt_path=_normalize_optional_string(args.eval_ckpt_path),
-        output_dir=output_dir,
-        seed=args.seed,
-        skip_test=args.skip_test,
-        skip_predict=args.skip_predict,
-        save_predictions=not args.no_save_predictions,
-    )
+    if args.run_diagnostics_only or not has_error_diagnostics(preflight_diagnostics):
+        print(
+            "Device profile: "
+            f"{profile_resolution.requested_profile} -> {profile_resolution.resolved_profile}"
+        )
+        _print_runtime_diagnostics(preflight_diagnostics)
+
+    if args.run_diagnostics_only:
+        print("Diagnostics-only mode enabled; training was not started.")
+        return None
+
+    try:
+        artifacts = run_training_workflow(
+            config,
+            train_config=train_config,
+            snapshot_config=snapshot_config,
+            observability_config=observability_config,
+            requested_device_profile=profile_resolution.requested_profile,
+            resolved_device_profile=profile_resolution.resolved_profile,
+            applied_profile_defaults=profile_resolution.applied_defaults,
+            runtime_environment=runtime_environment,
+            preflight_diagnostics=preflight_diagnostics,
+            fail_on_preflight_errors=(
+                True
+                if args.fail_on_preflight_errors is None
+                else args.fail_on_preflight_errors
+            ),
+            learning_rate=args.learning_rate,
+            weight_decay=args.weight_decay,
+            optimizer_name=args.optimizer,
+            fit_ckpt_path=_normalize_optional_string(args.fit_ckpt_path),
+            eval_ckpt_path=_normalize_optional_string(args.eval_ckpt_path),
+            output_dir=output_dir,
+            seed=args.seed,
+            skip_test=args.skip_test,
+            skip_predict=args.skip_predict,
+            save_predictions=not args.no_save_predictions,
+        )
+    except RuntimeError as exc:
+        message = str(exc)
+        if (
+            "Runtime preflight checks failed " in message
+            or "Training workflow failed during " in message
+        ):
+            print(message, file=sys.stderr)
+            raise SystemExit(1) from None
+        raise
     # The returned artifact bundle is the same shape notebooks and tests
     # receive from `run_training_workflow(...)`, so CLI and non-CLI entrypoints
     # share one result contract.
@@ -647,6 +912,11 @@ def main(argv: Sequence[str] | None = None) -> MainRunArtifacts:
     # The printed summary is intentionally concise. Detailed state is written to
     # the JSON summary file and, when requested, the raw prediction tensor file.
     print(f"Processed data: {config.data.processed_file_path}")
+    print(
+        "Resolved environment: "
+        f"{artifacts.runtime_environment.system} "
+        f"{artifacts.runtime_environment.machine}"
+    )
     print(f"Validation windows available: {artifacts.fit.has_validation_data}")
     print(f"Test windows available: {artifacts.fit.has_test_data}")
     print(

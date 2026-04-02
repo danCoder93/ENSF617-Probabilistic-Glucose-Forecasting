@@ -25,8 +25,18 @@ from config import (
     ObservabilityConfig,
     TCNConfig,
     TFTConfig,
+    TrainConfig,
     config_from_dict,
     config_to_dict,
+)
+from environment import (
+    RuntimeDiagnostic,
+    RuntimeEnvironment,
+    collect_runtime_diagnostics,
+    format_runtime_diagnostics,
+    has_error_diagnostics,
+    infer_device_profile,
+    resolve_device_profile,
 )
 from utils.tft_utils import DataTypes, FeatureSpec, InputTypes
 
@@ -50,6 +60,40 @@ def _feature_specs(*specs: FeatureSpec) -> tuple[FeatureSpec, ...]:
     inline list/tuple expressions.
     """
     return cast(tuple[FeatureSpec, ...], specs)
+
+
+def _runtime_environment(**overrides: Any) -> RuntimeEnvironment:
+    base = RuntimeEnvironment(
+        platform="test-platform",
+        system="Linux",
+        release="test-release",
+        machine="x86_64",
+        python_version="3.12.0",
+        is_colab=False,
+        is_slurm=False,
+        torch_available=True,
+        pytorch_lightning_available=True,
+        tensorboard_available=True,
+        torchview_available=True,
+        torch_version="2.0.0",
+        accelerator_api_available=False,
+        accelerator_available=False,
+        accelerator_type=None,
+        accelerator_device_count=0,
+        cuda_available=False,
+        cuda_device_count=0,
+        cuda_device_name=None,
+        cuda_visible_devices=None,
+        mps_built=False,
+        mps_available=False,
+        slurm_job_id=None,
+        slurm_cpus_per_task=None,
+        slurm_gpus=None,
+        slurm_detected_by_lightning=False,
+    )
+    payload = dict(base.__dict__)
+    payload.update(overrides)
+    return RuntimeEnvironment(**payload)
 
 
 def test_data_config_normalizes_paths_and_preserves_processed_file_contract(
@@ -264,3 +308,101 @@ def test_observability_config_normalizes_paths_and_validates_mode(
 
     with pytest.raises(ValueError, match="mode must be one of"):
         ObservabilityConfig(mode="nope")
+
+
+def test_infer_device_profile_auto_prefers_colab_slurm_mps_and_cuda() -> None:
+    assert infer_device_profile(
+        "auto",
+        _runtime_environment(is_colab=True, cuda_available=True, cuda_device_count=1),
+    ) == "colab-cuda"
+    assert infer_device_profile(
+        "auto",
+        _runtime_environment(is_slurm=True, cuda_available=False),
+    ) == "slurm-cpu"
+    assert infer_device_profile(
+        "auto",
+        _runtime_environment(system="Darwin", machine="arm64", mps_available=True),
+    ) == "apple-silicon"
+    assert infer_device_profile(
+        "auto",
+        _runtime_environment(accelerator_type="cuda"),
+    ) == "local-cuda"
+    assert infer_device_profile(
+        "auto",
+        _runtime_environment(cuda_available=True, cuda_device_count=1),
+    ) == "local-cuda"
+    assert infer_device_profile("auto", _runtime_environment()) == "local-cpu"
+
+
+def test_resolve_device_profile_applies_cuda_defaults_but_respects_explicit_overrides() -> None:
+    data_config = DataConfig(
+        dataset_url=None,
+        num_workers=0,
+        pin_memory=False,
+        persistent_workers=False,
+    )
+    train_config = TrainConfig(accelerator="auto", devices="auto", precision=32)
+    observability_config = ObservabilityConfig()
+
+    resolution = resolve_device_profile(
+        requested_profile="local-cuda",
+        environment=_runtime_environment(cuda_available=True, cuda_device_count=1),
+        train_config=train_config,
+        data_config=data_config,
+        observability_config=observability_config,
+        explicit_overrides={"precision"},
+    )
+
+    assert resolution.resolved_profile == "local-cuda"
+    assert resolution.train_config.accelerator == "gpu"
+    assert resolution.train_config.devices == 1
+    assert resolution.train_config.precision == 32
+    assert resolution.data_config.num_workers == 4
+    assert resolution.data_config.pin_memory is True
+    assert resolution.data_config.persistent_workers is True
+    assert resolution.applied_defaults["accelerator"] == "gpu"
+    assert resolution.applied_defaults["devices"] == 1
+    assert resolution.applied_defaults["num_workers"] == 4
+
+
+def test_collect_runtime_diagnostics_flags_backend_mismatch_and_missing_packages() -> None:
+    diagnostics = collect_runtime_diagnostics(
+        requested_profile="local-cuda",
+        resolved_profile="local-cuda",
+        environment=_runtime_environment(
+            torch_available=False,
+            pytorch_lightning_available=False,
+            cuda_available=False,
+            torchview_available=False,
+        ),
+        train_config=TrainConfig(accelerator="gpu", devices=1, precision="16-mixed"),
+        data_config=DataConfig(
+            dataset_url=None,
+            num_workers=0,
+            pin_memory=True,
+            persistent_workers=False,
+        ),
+        observability_config=ObservabilityConfig(enable_torchview=True),
+    )
+
+    codes = {diagnostic.code for diagnostic in diagnostics}
+    assert has_error_diagnostics(diagnostics) is True
+    assert "missing_torch" in codes
+    assert "missing_lightning" in codes
+    assert "cuda_unavailable" in codes
+
+
+def test_format_runtime_diagnostics_includes_severity_code_and_suggestion() -> None:
+    rendered = format_runtime_diagnostics(
+        (
+            RuntimeDiagnostic(
+                severity="warning",
+                code="example",
+                message="Example issue.",
+                suggestion="Try an example fix.",
+            ),
+        )
+    )
+
+    assert "[WARNING] example: Example issue." in rendered
+    assert "Try an example fix." in rendered

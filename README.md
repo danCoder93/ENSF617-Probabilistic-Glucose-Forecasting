@@ -67,6 +67,18 @@ Run the script:
 python main.py --max-epochs 5 --batch-size 32
 ```
 
+Or select one explicit runtime profile:
+
+```bash
+python main.py --device-profile local-cpu
+python main.py --device-profile local-cuda
+python main.py --device-profile apple-silicon
+python main.py --device-profile slurm-cpu
+python main.py --device-profile slurm-cuda
+python main.py --device-profile colab-cpu
+python main.py --device-profile colab-cuda
+```
+
 This entrypoint will:
 
 - add `src/` to the import path
@@ -75,6 +87,55 @@ This entrypoint will:
 - run held-out test evaluation when test windows exist
 - optionally generate detailed held-out evaluation, prediction exports, and
   report artifacts under `artifacts/main_run/`
+- detect the current environment and record the resolved runtime profile in the
+  run summary
+- run preflight diagnostics so likely environment issues are surfaced before
+  training starts when possible
+
+### Runtime Diagnostics
+
+To inspect environment readiness without starting training, run:
+
+```bash
+python main.py --device-profile auto --run-diagnostics-only
+```
+
+The diagnostics flow reports the detected environment plus likely
+misconfigurations such as:
+
+- missing `torch` or `pytorch-lightning`
+- requesting CUDA when no GPU is visible
+- requesting MPS when Apple Silicon acceleration is unavailable
+- suspicious DataLoader settings for Colab or Apple Silicon
+- Slurm-oriented settings outside a Slurm allocation
+
+Explicit runtime flags still win over profile defaults. For example:
+
+```bash
+python main.py --device-profile slurm-cuda --precision 32 --devices 1
+```
+
+In that case the profile provides the baseline, while `--precision` and
+`--devices` remain authoritative.
+
+Additional runtime-control flags are available when you want to keep the
+profile but tune a few environment-sensitive knobs:
+
+```bash
+python main.py --device-profile colab-cuda --pin-memory --persistent-workers
+python main.py --device-profile apple-silicon --no-pin-memory --no-persistent-workers
+python main.py --device-profile slurm-cuda --no-progress-bar --no-rich-progress-bar
+python main.py --device-profile auto --no-fail-on-preflight-errors
+```
+
+Useful controls include:
+
+- `--pin-memory` / `--no-pin-memory`
+- `--persistent-workers` / `--no-persistent-workers`
+- `--progress-bar` / `--no-progress-bar`
+- `--rich-progress-bar` / `--no-rich-progress-bar`
+- `--device-stats` / `--no-device-stats`
+- `--fail-on-preflight-errors` / `--no-fail-on-preflight-errors`
 
 Open the notebook:
 
@@ -102,6 +163,19 @@ pip install -r requirements.txt
 pytest tests -q
 ```
 
+For a Colab GPU runtime, the new profile-based entrypoint is:
+
+```bash
+python main.py --device-profile colab-cuda
+```
+
+If you only want to verify that the Colab runtime is configured correctly
+before downloading data or starting training, run:
+
+```bash
+python main.py --device-profile colab-cuda --run-diagnostics-only
+```
+
 Model checkpoints can then be loaded directly from notebooks with standard
 Lightning APIs:
 
@@ -117,3 +191,32 @@ root after dependencies are installed:
 ```bash
 python tests/manual_data_smoke.py
 ```
+
+### Slurm Examples
+
+CPU allocation:
+
+```bash
+python main.py --device-profile slurm-cpu --output-dir /path/to/job_artifacts
+```
+
+GPU allocation:
+
+```bash
+python main.py --device-profile slurm-cuda --output-dir /path/to/job_artifacts
+```
+
+These profiles automatically bias the runtime toward batch-job-friendly
+settings such as quieter progress output and worker counts derived from the
+Slurm allocation when available.
+
+### Apple Silicon
+
+On Apple Silicon, prefer the MPS-aware profile:
+
+```bash
+python main.py --device-profile apple-silicon
+```
+
+The runtime diagnostics layer will warn if the chosen settings look mismatched
+for MPS, such as pinned host memory or unsupported mixed-precision requests.

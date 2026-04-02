@@ -11,6 +11,13 @@ structured held-out metrics. This document remains focused on the source-layout,
 typing, and commenting cleanup wave rather than that later evaluation-layer
 addition.
 
+Another later follow-up moved runtime-environment detection, profile
+resolution, and diagnostics into a dedicated `src/environment/` package. That
+follow-up kept the spirit of this cleanup wave intact by preserving
+`src/config/` as the home of typed contracts rather than operational runtime
+interpretation. See
+[`environment_runtime_profiles_summary.md`](environment_runtime_profiles_summary.md).
+
 This document focuses on the changes that were made after the repository had
 already become functionally richer:
 
@@ -70,6 +77,10 @@ clearer:
 - runtime and observability policy now sit in explicit modules
 - serialization logic is separated from the dataclass definitions
 - import paths better reflect architecture
+
+Later work reinforced that same boundary by moving environment-sensitive
+runtime policy and diagnostics out of config-adjacent code and into the newer
+`src/environment/` package.
 
 For example:
 
@@ -258,6 +269,8 @@ The repository now has:
 
 - cleaner config ownership
 - clearer imports
+- a clearer distinction between typed config contracts and operational
+  environment/runtime logic
 - fewer static-analysis surprises
 - more explicit architecture boundaries
 - stronger in-code explanation in the complex files

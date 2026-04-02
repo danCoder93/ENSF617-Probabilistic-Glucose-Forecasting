@@ -518,6 +518,60 @@ This was not as large a structural change as the earlier milestones, but it
 reinforced a healthy pattern in the repo's evolution: once a subsystem becomes
 real, it gets real tests.
 
+### April 1, 2026: Runtime Environment Profiles, Diagnostics, And `src/environment/`
+
+This pass is summarized in
+[`history/environment_runtime_profiles_summary.md`](history/environment_runtime_profiles_summary.md).
+
+#### What changed
+
+The repository gained a dedicated runtime-environment layer:
+
+- `src/environment/detection.py`
+- `src/environment/profiles.py`
+- `src/environment/diagnostics.py`
+
+At the same time:
+
+- `main.py` gained high-level `--device-profile` support
+- `main.py` and `main.ipynb` were aligned around one environment-aware
+  workflow
+- preflight diagnostics and diagnostics-only execution were added
+- runtime environment metadata became part of the run summary
+- the old config-adjacent `src/config/environment.py` surface was replaced by
+  the dedicated `src/environment/` package
+
+#### Why it changed
+
+The repository had become portable enough to be run in several environments,
+but the runtime policy for those environments was still too implicit.
+
+The project needed:
+
+- a better story for repeated Colab, local CUDA, CPU-only, Slurm, and Apple
+  Silicon runs
+- a way to choose sensible runtime defaults without hard-coding one machine's
+  assumptions
+- a more helpful response when failures came from backend or dependency
+  mismatches rather than model logic
+- a cleaner boundary between typed config contracts and environment/runtime
+  interpretation
+
+#### Lasting impact
+
+This milestone made environment interpretation a first-class subsystem rather
+than a side effect of entrypoint code.
+
+It also clarified an important architectural distinction:
+
+- `src/config/` defines runtime contracts
+- `src/environment/` interprets the current runtime context and chooses
+  environment-sensitive defaults
+
+That separation matters for future work too. New backend checks, profile
+policies, or preflight diagnostics now have an obvious home that does not blur
+the config layer or the training wrapper.
+
 ## Cross-Cutting Design Decisions
 
 Several design decisions repeat throughout the codebase's evolution. These are
@@ -546,6 +600,12 @@ This split did not exist fully at the start. It was earned through refactoring.
 The move from `src/utils/config.py` to `src/config/` was not just cleanup. It
 was an explicit decision that configuration contracts are one of the core
 architectural surfaces in the project.
+
+### Environment Policy Became Explicit
+
+The later addition of `src/environment/` extended that same architectural
+thinking into runtime portability and diagnostics. The repo no longer relies
+only on raw low-level flags to express where and how it should run.
 
 ### Observability And Evaluation Are Adjacent, Not The Same
 
@@ -594,6 +654,7 @@ baseline repository at `ffd190c` with the current one.
 - reusable orchestration layer in `src/train.py`
 - root-level runnable entrypoints through `main.py`, `main.ipynb`, and
   `defaults.py`
+- environment-aware runtime layer under `src/environment/`
 - observability package under `src/observability/`
 - evaluation package under `src/evaluation/`
 - broader automated test coverage under `tests/`
@@ -629,6 +690,8 @@ exist because earlier versions made the friction visible:
 - unfinished model input semantics led to the structured batch contract
 - scattered Lightning concerns led to the training wrapper
 - oversized config utilities led to `src/config/`
+- opaque environment failures and multi-platform runtime needs led to
+  `src/environment/`
 - mixed reporting/metric logic led to `src/evaluation/`
 - limited runtime visibility led to the observability package
 
@@ -654,3 +717,4 @@ For deeper detail on any one phase, use the archived summaries:
 - [`history/observability_integration_summary.md`](history/observability_integration_summary.md)
 - [`history/observability_package_refactor_summary.md`](history/observability_package_refactor_summary.md)
 - [`history/evaluation_package_summary.md`](history/evaluation_package_summary.md)
+- [`history/environment_runtime_profiles_summary.md`](history/environment_runtime_profiles_summary.md)
