@@ -293,9 +293,12 @@ def test_system_telemetry_callback_logs_metrics_and_csv(
         text_logger=text_logger,
     )
 
-    monkeypatch.setattr("observability.callbacks.psutil.cpu_percent", lambda interval=None: 12.5)
     monkeypatch.setattr(
-        "observability.callbacks.psutil.virtual_memory",
+        "observability.system_callbacks.psutil.cpu_percent",
+        lambda interval=None: 12.5,
+    )
+    monkeypatch.setattr(
+        "observability.system_callbacks.psutil.virtual_memory",
         lambda: SimpleNamespace(percent=33.0, used=5 * (1024.0 ** 3)),
     )
 

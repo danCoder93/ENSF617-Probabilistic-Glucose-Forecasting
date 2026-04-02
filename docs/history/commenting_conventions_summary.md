@@ -12,6 +12,11 @@ lighter facade/helper modules and the newer runtime-tuning code so they read
 more like the repository's denser reference files rather than remaining thin
 re-export surfaces with minimal context.
 
+Another later follow-up applied that same consistency standard to the newer
+`src/workflows/` package, the split observability callback modules, and the
+root notebook comments so the facade-versus-implementation split is documented
+consistently across script, notebook, and package-level entry surfaces.
+
 ## Goal
 
 The goal of this documentation pass was not to add comments for their own sake.
@@ -31,6 +36,7 @@ ensuring that:
 - `src/environment/`
 - `defaults.py`
 - `src/observability/`
+- `src/workflows/`
 - `src/train.py`
 - `src/models/fused_model.py`
 - `src/models/tft.py`
@@ -40,6 +46,7 @@ ensuring that:
 - `src/data/`
 - `src/utils/tft_utils.py`
 - `main.py`
+- `main.ipynb`
 
 ## Comment Style Standard
 
@@ -212,6 +219,29 @@ Those files are still small, but they now explain:
 - what internal modules sit behind it
 - which concerns belong elsewhere
 - why the helper abstractions are intentionally tiny
+
+The later workflow/comment follow-up applied the same principle to:
+
+- `src/workflows/__init__.py`
+- `src/workflows/helpers.py`
+- `src/workflows/training.py`
+- `src/workflows/cli.py`
+- `src/workflows/types.py`
+- `src/observability/callbacks.py`
+- `src/observability/debug_callbacks.py`
+- `src/observability/system_callbacks.py`
+- `src/observability/parameter_callbacks.py`
+- `src/observability/prediction_callbacks.py`
+- `main.ipynb`
+
+Those follow-up updates emphasized:
+
+- why `main.py` remains a stable facade while `src/workflows/` owns the
+  heavier orchestration
+- why the callback facade remains in `callbacks.py` while implementation lives
+  in smaller callback modules
+- why notebook comments should explain the same workflow boundaries as the
+  script and package code rather than drifting into a notebook-only style
 
 ## Important Nuance
 

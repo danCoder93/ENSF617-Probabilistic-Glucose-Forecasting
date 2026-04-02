@@ -16,7 +16,9 @@ from __future__ import annotations
 # - `logging_utils.py` holds logger/hparameter helper functions shared by
 #   callbacks and training orchestration
 # - `tensors.py` centralizes nested tensor/batch normalization helpers
-# - `callbacks.py` contains the Lightning callbacks plus callback assembly
+# - `callbacks.py` is the stable public facade and callback assembly point
+# - `debug_callbacks.py`, `system_callbacks.py`, `parameter_callbacks.py`, and
+#   `prediction_callbacks.py` hold the split callback implementations
 # - `reporting.py` owns post-run exports and HTML report generation
 #
 # Responsibility boundary:

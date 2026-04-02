@@ -29,6 +29,12 @@ benchmark-only execution mode, backend-tuning integration, notebook import
 cleanup, and workspace/editor hints so notebook analysis follows the same
 package facades as the script and test paths.
 
+Another later follow-up split the heavier top-level orchestration out of the
+root entrypoint and into a dedicated `src/workflows/` package. That change
+kept `main.py` and `main.ipynb` as the stable public entry surfaces while
+making the CLI path, reusable workflow path, helper functions, and artifact
+types easier to navigate independently.
+
 ## Goals
 
 - Make the repository runnable from a single script entrypoint.
@@ -65,10 +71,13 @@ The repository now has a clearer top-level execution stack:
 1. `defaults.py`
    provides shared baseline config builders and entrypoint constants
 2. `main.py`
-   turns CLI arguments into typed config objects and runs the full workflow
+   remains the stable user-facing facade for script callers
 3. `main.ipynb`
    calls the same workflow helpers in a notebook-friendly way
-4. `src/train.py`
+4. `src/workflows/`
+   owns CLI assembly, reusable train/evaluate/predict flows, helper parsing,
+   and workflow artifact types
+5. `src/train.py`
    remains the reusable Lightning orchestration layer beneath both entrypoints
 
 This preserves the intended responsibility split:
@@ -77,6 +86,8 @@ This preserves the intended responsibility split:
 - `AZT1DDataModule` owns data preparation and loaders
 - `FusedModelTrainer` owns Lightning fit/test/predict orchestration
 - `main.py` and `main.ipynb` own user-facing run setup and artifact reporting
+- `src/workflows/` owns the heavier entry-surface orchestration logic behind
+  those public facades
 
 ## `defaults.py`
 
@@ -128,18 +139,29 @@ full training/evaluation workflow.
 - adds the repository import bootstrap it needs through the shared defaults
   module
 - parses common experiment flags from the command line
-- builds typed project config objects
-- constructs the `AZT1DDataModule`
-- constructs the `FusedModelTrainer`
-- runs fit/test/predict through one shared function
-- writes lightweight run artifacts to disk
+- preserves a stable import surface for notebook and test callers
+- delegates the heavier CLI assembly and workflow execution to
+  `src/workflows/`
 
 ### Shared workflow function
 
-The most important implementation detail is that `main.py` does not keep all
-logic trapped inside `argparse` handling.
+The most important implementation detail is that the top-level workflow logic
+is not trapped inside `argparse` handling or one root script anymore.
 
-Instead, it exposes `run_training_workflow(...)`, which:
+Today, the reusable workflow surface lives under `src/workflows/` and is still
+re-exported through `main.py`. In practice that means:
+
+- `src/workflows/cli.py`
+  owns CLI parsing, structured config assembly, and CLI output behavior
+- `src/workflows/training.py`
+  owns `run_training_workflow(...)` and
+  `run_environment_benchmark_workflow(...)`
+- `src/workflows/helpers.py`
+  owns small parsing and normalization helpers used by the CLI/workflow layer
+- `src/workflows/types.py`
+  owns the stable artifact dataclasses returned to callers
+
+`run_training_workflow(...)` still:
 
 1. optionally seeds the run
 2. creates the output directory
@@ -227,12 +249,18 @@ quietly fork the real project workflow into a second, partially maintained
 training path.
 
 That thin-notebook principle still holds after the later environment-aware
-runtime additions. The notebook now exposes more runtime-control variables, but
-it still goes through the same shared workflow as `main.py`.
+runtime additions and the later `src/workflows/` split. The notebook now
+exposes more runtime-control variables, but it still goes through the same
+shared workflow facade as `main.py`.
 
 One later maintenance follow-up also corrected the notebook bootstrap imports
 so runtime helpers come from `environment` rather than `config`, matching the
 repository's newer public package boundaries.
+
+Another later follow-up updated the notebook comments and config-building cell
+so they now describe the facade-versus-implementation split more explicitly and
+include the same early Apple Silicon bootstrap behavior used by the shared
+workflow path.
 
 ## `src/train.py` follow-up change
 

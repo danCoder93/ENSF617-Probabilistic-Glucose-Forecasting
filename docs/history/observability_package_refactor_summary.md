@@ -14,6 +14,18 @@ than replacing it: `src/observability/` still owns runtime diagnostics,
 telemetry, logging, and report generation, while `src/evaluation/` owns the
 metric definitions and grouped held-out evaluation outputs.
 
+Another later follow-up kept the public callback facade in
+`src/observability/callbacks.py` but split the concrete callback
+implementations further into:
+
+- `src/observability/debug_callbacks.py`
+- `src/observability/system_callbacks.py`
+- `src/observability/parameter_callbacks.py`
+- `src/observability/prediction_callbacks.py`
+
+That follow-up preserved the same package-level imports while making the
+callback layer itself easier to navigate.
+
 ## Goal
 
 The goal of this refactor was not to add new observability features.
@@ -40,6 +52,10 @@ That implementation now lives in a package:
 - `src/observability/logging_utils.py`
 - `src/observability/tensors.py`
 - `src/observability/callbacks.py`
+- `src/observability/debug_callbacks.py`
+- `src/observability/system_callbacks.py`
+- `src/observability/parameter_callbacks.py`
+- `src/observability/prediction_callbacks.py`
 - `src/observability/reporting.py`
 - `src/observability/utils.py`
 
@@ -101,10 +117,21 @@ Owns:
 
 Owns:
 
-- runtime observability callbacks
 - callback ordering and assembly
-- model visualization callback behavior
-- telemetry, activation, gradient, histogram, and prediction-figure hooks
+- the stable callback import surface used by the rest of the repository
+
+### Split callback modules
+
+The later follow-up moved concrete callback implementations into smaller files:
+
+- `debug_callbacks.py`
+  batch auditing, gradient-health summaries, and activation-stat sampling
+- `system_callbacks.py`
+  system telemetry and model/TensorBoard visualization hooks
+- `parameter_callbacks.py`
+  parameter scalar and histogram logging
+- `prediction_callbacks.py`
+  qualitative forecast-figure logging
 
 ### `reporting.py`
 
@@ -135,6 +162,8 @@ questions now lead to different modules naturally:
   go to `tensors.py`
 - "Which observability callbacks exist and how are they assembled?"
   go to `callbacks.py`
+- "How does one specific callback behave internally?"
+  go to the relevant split callback module
 - "How are post-run CSV and HTML artifacts generated?"
   go to `reporting.py`
 

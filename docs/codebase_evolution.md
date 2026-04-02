@@ -15,6 +15,12 @@ Use this file when you want to understand:
 For the point-in-time notes written during each major refactor, see the
 archived documents under [`history/`](history/).
 
+Important note:
+this document stays intentionally historical. Some milestones below describe
+the architectural shape at the time they landed, while later follow-up notes
+call out where the current repository moved further without changing the core
+reason those milestones mattered.
+
 ## Reading Guide
 
 This file is intentionally narrative rather than commit-by-commit exhaustive.
@@ -403,6 +409,22 @@ than as a collection of modules that a user had to assemble manually.
 It also established a team-facing usability principle that still matters: the
 script and notebook should share one workflow, not just similar ideas.
 
+#### Later follow-up
+
+The current repository still preserves that same principle, but the heavier
+entry-surface orchestration no longer lives only in the root script.
+
+A later refactor moved the reusable CLI/workflow logic into `src/workflows/`
+while keeping:
+
+- `main.py` as the stable user-facing facade
+- `main.ipynb` as the thin notebook surface over the same workflow
+- the same public import surface available to tests and notebooks
+
+That follow-up did not replace the original entrypoint milestone. It refined
+it by making the public entry surfaces thinner and the shared orchestration
+easier to navigate internally.
+
 ### April 1, 2026, `3f6eb48`: Config Promotion, Source Cleanup, And Observability Integration
 
 This broad pass is covered by:
@@ -457,6 +479,20 @@ package:
 - tensor helpers
 - logging helpers
 - reporting
+
+#### Later follow-up
+
+The current repository kept the stable callback facade in
+`src/observability/callbacks.py`, but later split the concrete callback
+implementations into smaller responsibility-focused modules:
+
+- `debug_callbacks.py`
+- `system_callbacks.py`
+- `parameter_callbacks.py`
+- `prediction_callbacks.py`
+
+That later change preserved the same import story while making the callback
+layer itself less monolithic.
 
 #### Why it changed
 
@@ -704,6 +740,7 @@ baseline repository at `ffd190c` with the current one.
 - reusable orchestration layer in `src/train.py`
 - root-level runnable entrypoints through `main.py`, `main.ipynb`, and
   `defaults.py`
+- reusable entry-surface workflow package under `src/workflows/`
 - environment-aware runtime layer under `src/environment/`
 - observability package under `src/observability/`
 - evaluation package under `src/evaluation/`

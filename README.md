@@ -102,6 +102,8 @@ python main.py --device-profile colab-cuda
 This entrypoint will:
 
 - add `src/` to the import path
+- keep `main.py` as the stable user-facing facade while delegating the heavier
+  orchestration to the smaller modules under `src/workflows/`
 - download and preprocess AZT1D automatically if the processed CSV is missing
 - train the fused model
 - run held-out test evaluation when test windows exist
@@ -184,6 +186,10 @@ jupyter notebook main.ipynb
 
 The notebook uses the same shared workflow helpers from `main.py`, so script
 and notebook runs stay aligned.
+
+Internally, that stable facade now delegates most of the reusable orchestration
+to `src/workflows/`, while the notebook remains a thin interactive surface over
+the same shared path.
 
 ### Google Colab
 

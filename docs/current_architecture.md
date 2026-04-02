@@ -43,6 +43,7 @@ src/
   observability/
   train.py
   utils/
+  workflows/
 tests/
 ```
 
@@ -86,6 +87,7 @@ Look at:
 
 - `defaults.py`
 - `main.py`
+- `src/workflows/`
 - `src/environment/`
 - `src/config/runtime.py`
 - `src/train.py`
@@ -113,6 +115,10 @@ Look at:
 - `src/config/observability.py`
 - `src/observability/runtime.py`
 - `src/observability/callbacks.py`
+- `src/observability/debug_callbacks.py`
+- `src/observability/system_callbacks.py`
+- `src/observability/parameter_callbacks.py`
+- `src/observability/prediction_callbacks.py`
 - `src/observability/reporting.py`
 - `tests/test_observability_package.py`
 - `tests/test_observability_reporting.py`
@@ -149,6 +155,8 @@ The normal run path through the repository is:
    snapshots, and observability.
 2. `main.py` or `main.ipynb` parses user-supplied overrides and converts them
    into typed config objects plus entry-surface runtime options.
+   Under the hood, the heavier orchestration now lives in `src/workflows/`,
+   while `main.py` remains the stable user-facing facade.
 3. `src/environment/` detects the current runtime context and resolves the
    requested device profile into effective runtime defaults.
 4. `src/environment/diagnostics.py` runs preflight validation so likely
@@ -156,9 +164,9 @@ The normal run path through the repository is:
 5. `src/environment/tuning.py` applies environment-variable overrides and
    backend-level runtime knobs such as TF32, thread counts, and optional model
    compilation.
-6. `main.py` constructs `AZT1DDataModule` from `config.data`.
-7. `main.py` constructs `FusedModelTrainer` from the top-level config plus
-   runtime policy configs.
+6. `src/workflows/training.py` constructs `AZT1DDataModule` from `config.data`.
+7. `src/workflows/training.py` constructs `FusedModelTrainer` from the
+   top-level config plus runtime policy configs.
 8. `FusedModelTrainer` calls `datamodule.prepare_data()` and `datamodule.setup()`
    before model construction.
 9. `AZT1DDataModule` discovers runtime categorical cardinalities and final
@@ -169,12 +177,12 @@ The normal run path through the repository is:
 12. Lightning executes `fit(...)`.
 13. If test windows exist, the wrapper can run `test(...)` and `predict(...)`
     against the resolved checkpoint or the current in-memory weights.
-14. `main.py` uses raw predictions plus aligned test batches to compute
-    structured held-out evaluation through `src/evaluation/`.
+14. `src/workflows/training.py` uses raw predictions plus aligned test batches
+    to compute structured held-out evaluation through `src/evaluation/`.
 15. `src/observability/` exports prediction tables, reports, and runtime
     artifacts.
-16. `main.py` writes a compact `run_summary.json` describing the run,
-    including resolved runtime-environment metadata.
+16. `src/workflows/training.py` writes a compact `run_summary.json`
+    describing the run, including resolved runtime-environment metadata.
 
 That same underlying workflow is shared by the notebook path. `main.ipynb`
 reuses the same Python surfaces rather than keeping its own independent
@@ -265,16 +273,16 @@ experiment configuration.
 
 ### `main.py`
 
-`main.py` is the primary script entrypoint and the main top-level workflow
-surface.
+`main.py` is the primary script entrypoint and the stable top-level user-facing
+facade.
 
 Its role is deliberately narrow:
 
 - parse CLI arguments
 - normalize them into typed config
-- construct the DataModule and trainer wrapper
-- call the shared run workflow
-- persist summaries and artifacts
+- delegate CLI assembly and workflow execution to `src/workflows/`
+- preserve a convenient public import surface for scripts, notebooks, and
+  tests
 
 It is intentionally not the place where:
 
@@ -282,21 +290,33 @@ It is intentionally not the place where:
 - model internals live
 - evaluation metrics are defined
 - callback implementations are written
+- the heavier train/evaluate/predict orchestration now lives
 
 That separation is what keeps the script readable even as the rest of the
 system grows.
 
-The script now also coordinates the runtime-environment layer by:
+The entry surface still coordinates the runtime-environment layer conceptually
+by exposing helpers that cover:
 
 - selecting or inferring a device profile
 - applying explicit runtime overrides
 - running preflight diagnostics before training
 - recording environment metadata in `run_summary.json`
 
-It can also run a short benchmark-only workflow that focuses on environment
-comparison rather than full held-out evaluation. That path keeps most of the
-same runtime resolution/tuning logic but trims the later test/predict/report
-steps down to a compact throughput and memory summary.
+In implementation terms, that responsibility is now split across:
+
+- `src/workflows/cli.py`
+  argument parsing, CLI config assembly, and terminal-oriented output
+- `src/workflows/training.py`
+  reusable train/evaluate/predict and benchmark workflows
+- `src/workflows/helpers.py`
+  small parsing, normalization, and workflow-support helpers
+- `src/workflows/types.py`
+  stable workflow artifact dataclasses
+
+The benchmark-only workflow also now lives in `src/workflows/training.py`. It
+focuses on environment comparison rather than full held-out evaluation while
+preserving the same runtime resolution and tuning path.
 
 ### `main.ipynb`
 
@@ -307,6 +327,11 @@ without having to fork the actual pipeline into notebook-only logic.
 It now mirrors the same environment-aware workflow as `main.py`, including
 profile resolution and preflight diagnostics, while exposing those controls as
 editable notebook variables instead of CLI flags.
+
+One recent follow-up also updated the notebook comments and config-building
+cell so they describe the same facade-versus-implementation split as the rest
+of the repository and include the early Apple Silicon bootstrap step used by
+the shared workflow path.
 
 ## Configuration Layer: `src/config/`
 
@@ -648,11 +673,12 @@ The runtime artifact flow is:
 2. `defaults.py` derives default artifact paths under that directory
 3. `src/observability/runtime.py` assembles logger/profiler/text-log objects
 4. Lightning callbacks emit run-time diagnostics during training
-5. `main.py` optionally saves raw prediction tensors after prediction
+5. `src/workflows/training.py` optionally saves raw prediction tensors after
+   prediction
 6. `src/observability/reporting.py` optionally exports a flat prediction CSV
 7. `src/observability/reporting.py` optionally generates Plotly HTML reports
-8. `main.py` writes `run_summary.json` with config, environment, evaluation,
-   and artifact metadata
+8. `src/workflows/training.py` writes `run_summary.json` with config,
+   environment, evaluation, and artifact metadata
 
 This matters because not all artifacts are produced at the same lifecycle
 stage. Some exist during training, while others exist only after prediction has
@@ -677,7 +703,15 @@ Observability is a dedicated subsystem rather than a side effect of training.
 - `runtime.py`
   logger, profiler, and artifact-path setup
 - `callbacks.py`
-  callback-driven telemetry, diagnostics, and visualization hooks
+  stable callback facade and callback assembly
+- `debug_callbacks.py`
+  batch auditing, gradient-health summaries, and activation-stat sampling
+- `system_callbacks.py`
+  system telemetry plus model/TensorBoard visualization hooks
+- `parameter_callbacks.py`
+  parameter scalar and histogram logging
+- `prediction_callbacks.py`
+  qualitative forecast-figure logging
 - `logging_utils.py`
   shared logger-aware helpers
 - `tensors.py`
@@ -873,6 +907,8 @@ Usually touch:
 
 - `defaults.py`
 - `main.py`
+- `src/workflows/cli.py`
+- `src/workflows/training.py`
 - `src/environment/profiles.py`
 - `src/environment/diagnostics.py`
 - `src/config/runtime.py`
@@ -906,7 +942,7 @@ Usually touch:
 
 - `src/config/observability.py`
 - `src/observability/reporting.py`
-- maybe `main.py`
+- maybe `src/workflows/training.py`
 - observability/reporting tests
 
 ## Common Modification Guide
@@ -916,11 +952,11 @@ For common team tasks, here is where to start:
 - "I want to change the default experiment settings"
   Start in `defaults.py`
 - "I want to add a CLI flag"
-  Start in `main.py`
+  Start in `main.py` and `src/workflows/cli.py`
 - "I want to add a new device profile or preflight diagnostic"
   Start in `src/environment/`
 - "I want to change how test predictions are saved"
-  Start in `main.py` and `src/observability/reporting.py`
+  Start in `src/workflows/training.py` and `src/observability/reporting.py`
 - "I want to change the grouped batch contract"
   Start in `src/data/dataset.py`, `src/data/datamodule.py`, and
   `src/models/fused_model.py`
@@ -930,6 +966,8 @@ For common team tasks, here is where to start:
   Start in `src/evaluation/`
 - "I want to add a new callback or runtime diagnostic"
   Start in `src/observability/callbacks.py`
+  Then move into the relevant split callback module if the change is callback-
+  specific
 
 ## Boundaries That Should Stay Stable
 
@@ -942,6 +980,7 @@ a clear reason to change them:
 - `FusedModel` owns forecasting and supervision semantics
 - `FusedModelTrainer` owns Lightning orchestration, not model math
 - `main.py` stays thin and user-facing
+- `src/workflows/` owns the reusable entry-surface orchestration logic
 - observability and evaluation remain separate subsystems
 - typed config remains the canonical runtime contract
 
