@@ -45,6 +45,15 @@ src/
   utils/
   workflows/
 tests/
+  config/
+  data/
+  environment/
+  evaluation/
+  manual/
+  models/
+  observability/
+  training/
+  workflows/
 ```
 
 Each of those areas exists for a specific reason.
@@ -78,8 +87,8 @@ Look at:
 - `src/models/tft.py`
 - `src/models/grn.py`
 - `src/models/nn_head.py`
-- `tests/test_fused_model.py`
-- `tests/test_grn.py`
+- `tests/models/test_fused_model.py`
+- `tests/models/test_grn.py`
 
 ### If you are working on run orchestration or checkpoint behavior
 
@@ -91,8 +100,8 @@ Look at:
 - `src/environment/`
 - `src/config/runtime.py`
 - `src/train.py`
-- `tests/test_main.py`
-- `tests/test_train.py`
+- `tests/workflows/`
+- `tests/training/`
 
 ### If you are working on environment detection, device profiles, or
 preflight diagnostics
@@ -105,8 +114,8 @@ Look at:
 - `src/environment/tuning.py`
 - `main.py`
 - `main.ipynb`
-- `tests/test_config.py`
-- `tests/test_main.py`
+- `tests/config/`
+- `tests/workflows/`
 
 ### If you are working on observability, exports, or reports
 
@@ -120,9 +129,7 @@ Look at:
 - `src/observability/parameter_callbacks.py`
 - `src/observability/prediction_callbacks.py`
 - `src/observability/reporting.py`
-- `tests/test_observability_package.py`
-- `tests/test_observability_reporting.py`
-- `tests/test_observability_runtime_and_callbacks.py`
+- `tests/observability/`
 
 ### If you are working on canonical metric computation
 
@@ -132,8 +139,7 @@ Look at:
 - `src/evaluation/metrics.py`
 - `src/evaluation/grouping.py`
 - `src/evaluation/evaluator.py`
-- `tests/test_evaluation_metrics.py`
-- `tests/test_evaluation_evaluator.py`
+- `tests/evaluation/`
 
 ## Architectural Principles
 
@@ -162,8 +168,8 @@ The normal run path through the repository is:
 4. `src/environment/diagnostics.py` runs preflight validation so likely
    backend or dependency issues can fail early and be summarized cleanly.
 5. `src/environment/tuning.py` applies environment-variable overrides and
-   backend-level runtime knobs such as TF32, thread counts, and optional model
-   compilation.
+   backend-level runtime knobs such as TF32, thread counts, benchmark boundary
+   device synchronization, and optional model compilation.
 6. `src/workflows/training.py` constructs `AZT1DDataModule` from `config.data`.
 7. `src/workflows/training.py` constructs `FusedModelTrainer` from the
    top-level config plus runtime policy configs.
@@ -317,6 +323,8 @@ In implementation terms, that responsibility is now split across:
 The benchmark-only workflow also now lives in `src/workflows/training.py`. It
 focuses on environment comparison rather than full held-out evaluation while
 preserving the same runtime resolution and tuning path.
+It also owns the CUDA synchronization boundaries used to keep benchmark timing
+closer to completed device work rather than queued asynchronous kernels.
 
 ### `main.ipynb`
 
@@ -446,6 +454,14 @@ chooses a policy, something still has to apply:
 
 This keeps backend knobs centralized rather than sprinkling Torch-specific
 setters across `main.py` and `src/train.py`.
+
+The current acceleration philosophy is:
+
+- model code stays eager by default
+- runtime policy can opt into `torch.compile(...)`
+- benchmark-only synchronization lives at workflow/runtime boundaries
+- deprecated TorchScript-specific optimization paths are no longer the primary
+  performance mechanism
 
 ### Current profile philosophy
 
@@ -852,6 +868,7 @@ The test suite now protects multiple architectural layers, not just the model.
 It covers:
 
 - config validation and serialization
+- environment detection, profile resolution, diagnostics, and tuning helpers
 - fused-model behavior
 - training-wrapper behavior
 - entrypoint behavior
@@ -874,8 +891,8 @@ The documentation structure under `docs/` now has three roles:
 The diagrams under `docs/assets/` support the model-side architecture story
 without mixing binary assets into the source package.
 
-The newest runtime-portability milestone is documented in
-[`history/environment_runtime_profiles_summary.md`](history/environment_runtime_profiles_summary.md).
+The newest test-layout and runtime-modernization milestone is documented in
+[`history/test_layout_and_runtime_modernization_summary.md`](history/test_layout_and_runtime_modernization_summary.md).
 
 ## How To Extend The Codebase Safely
 
@@ -899,7 +916,7 @@ Usually touch:
 - `src/config/model.py`
 - `src/models/fused_model.py`
 - one or more branch modules in `src/models/`
-- model tests
+- `tests/models/`
 
 ### Add a new runtime flag or Trainer behavior
 
@@ -913,7 +930,8 @@ Usually touch:
 - `src/environment/diagnostics.py`
 - `src/config/runtime.py`
 - `src/train.py`
-- `tests/test_main.py` and/or `tests/test_train.py`
+- `tests/workflows/`
+- `tests/training/`
 
 ### Add a new environment profile, detection rule, or preflight diagnostic
 
@@ -924,8 +942,8 @@ Usually touch:
 - `src/environment/diagnostics.py`
 - `main.py`
 - `main.ipynb`
-- `tests/test_config.py`
-- `tests/test_main.py`
+- `tests/config/`
+- `tests/workflows/`
 
 ### Add a new metric or grouped evaluation summary
 
@@ -934,7 +952,7 @@ Usually touch:
 - `src/evaluation/metrics.py`
 - `src/evaluation/grouping.py`
 - `src/evaluation/evaluator.py`
-- evaluation tests
+- `tests/evaluation/`
 
 ### Add a new export or report
 
@@ -943,7 +961,7 @@ Usually touch:
 - `src/config/observability.py`
 - `src/observability/reporting.py`
 - maybe `src/workflows/training.py`
-- observability/reporting tests
+- `tests/observability/`
 
 ## Common Modification Guide
 

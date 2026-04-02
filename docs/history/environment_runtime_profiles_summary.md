@@ -60,6 +60,11 @@ Files updated:
 - `tests/test_main.py`
 - `tests/test_train.py`
 
+Later follow-up note:
+those runtime-facing tests now live under `tests/config/`, `tests/training/`,
+and `tests/workflows/`. The original list above reflects the file layout at the
+time this milestone landed.
+
 Files removed:
 
 - `src/config/environment.py`
@@ -287,6 +292,11 @@ That workflow is intentionally narrow:
 The goal is not to replace a real profiling suite. The goal is to make it easy
 to compare local CPU, CUDA, and Apple Silicon runs using one shared repository
 surface.
+
+An additional later cleanup moved CUDA synchronization fully to benchmark
+timing boundaries. The workflow now synchronizes the runtime device around the
+benchmark window instead of letting timing-only CUDA behavior leak into the
+model path.
 
 ## Robustness Follow-Up
 

@@ -55,6 +55,7 @@ from environment.tuning import (
     apply_runtime_environment_overrides,
     apply_runtime_tuning,
     maybe_compile_model,
+    synchronize_runtime_device,
 )
 from environment.types import (
     DEVICE_PROFILE_CHOICES,
@@ -82,4 +83,5 @@ __all__ = [
     "infer_device_profile",
     "maybe_compile_model",
     "resolve_device_profile",
+    "synchronize_runtime_device",
 ]

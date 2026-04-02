@@ -1,20 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-import logging
 from pathlib import Path
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
 
 import pytest
-
-torch = pytest.importorskip("torch")
-pytest.importorskip("pytorch_lightning")
-
-if TYPE_CHECKING:
-    from torch import Tensor
-else:
-    Tensor = Any
 
 from config import ObservabilityConfig
 from observability.callbacks import (
@@ -27,166 +15,18 @@ from observability.callbacks import (
     PredictionFigureCallback,
     SystemTelemetryCallback,
 )
-from observability.logging_utils import (
-    _log_text_to_loggers,
-    log_hyperparameters,
-    log_metrics_to_loggers,
+from tests.observability.support import (
+    ActivationModule,
+    ModelVisualizationModule,
+    PredictionModule,
+    RecordingLogger,
+    RecordingTextLogger,
+    RecordingTrainer,
+    StubDataModule,
+    TinyModule,
+    stub_virtual_memory,
+    torch,
 )
-from observability.runtime import setup_observability
-
-
-class RecordingExperiment:
-    def __init__(self) -> None:
-        self.text_events: list[tuple[str, str, int]] = []
-        self.graph_events: list[tuple[Any, Any]] = []
-        self.histogram_events: list[tuple[str, Any, int]] = []
-        self.figure_events: list[tuple[str, int]] = []
-
-    def add_scalar(self, tag: str, value: float, global_step: int) -> None:
-        del tag, value, global_step
-
-    def add_text(self, tag: str, text: str, global_step: int) -> None:
-        self.text_events.append((tag, text, global_step))
-
-    def add_graph(self, module: Any, input_to_model: Any) -> None:
-        self.graph_events.append((module, input_to_model))
-
-    def add_histogram(self, tag: str, values: Any, global_step: int) -> None:
-        self.histogram_events.append((tag, values, global_step))
-
-    def add_figure(self, tag: str, figure: Any, global_step: int) -> None:
-        del figure
-        self.figure_events.append((tag, global_step))
-
-
-class RecordingLogger:
-    def __init__(self) -> None:
-        self.experiment = RecordingExperiment()
-        self.metric_events: list[tuple[dict[str, float], int]] = []
-        self.hparam_events: list[dict[str, str | int | float | bool]] = []
-
-    def log_metrics(self, metrics: dict[str, float], step: int) -> None:
-        self.metric_events.append((metrics, step))
-
-    def log_hyperparams(self, params: dict[str, str | int | float | bool]) -> None:
-        self.hparam_events.append(params)
-
-
-@dataclass
-class RecordingTextLogger(logging.Logger):
-    messages: list[str]
-
-    def __post_init__(self) -> None:
-        super().__init__("recording-text-logger")
-
-    def info(
-        self,
-        msg: object,
-        *args: object,
-        exc_info: object | None = None,
-        stack_info: bool = False,
-        stacklevel: int = 1,
-        extra: object | None = None,
-    ) -> None:
-        del exc_info, stack_info, stacklevel, extra
-        rendered = str(msg) % args if args else str(msg)
-        self.messages.append(rendered)
-
-
-class RecordingTrainer:
-    def __init__(self, logger: RecordingLogger) -> None:
-        self.logger = logger
-        self.loggers = [logger]
-        self.global_step = 5
-        self.current_epoch = 0
-        self.sanity_checking = False
-        self.datamodule: Any = None
-
-
-class TinyModule(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.weight = torch.nn.Parameter(torch.tensor([[1.0, -2.0]], dtype=torch.float32))
-
-
-class ActivationModule(torch.nn.Module):
-    def __init__(self, trainer: RecordingTrainer) -> None:
-        super().__init__()
-        self._trainer = trainer
-        self.tcn3 = torch.nn.Linear(2, 2)
-        self.tcn5 = torch.nn.Linear(2, 2)
-        self.tcn7 = torch.nn.Linear(2, 2)
-        self.tft = torch.nn.Linear(2, 2)
-        self.grn = torch.nn.Linear(2, 2)
-        self.fcn = torch.nn.Linear(2, 2)
-        self.train()
-
-
-class ModelVisualizationModule(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.linear = torch.nn.Linear(2, 2)
-        self.device = torch.device("cpu")
-        self.quantiles = (0.1, 0.5, 0.9)
-
-    def forward(self, batch: dict[str, Tensor]) -> Tensor:
-        return self.linear(batch["encoder_cont"])
-
-
-class StubDataModule:
-    def __init__(self, batch: dict[str, Any]) -> None:
-        self._batch = batch
-
-    def train_dataloader(self) -> list[dict[str, Any]]:
-        return [self._batch]
-
-
-class PredictionModule(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.device = torch.device("cpu")
-        self.quantiles = (0.1, 0.5, 0.9)
-
-    def forward(self, batch: dict[str, Tensor]) -> Tensor:
-        del batch
-        return torch.tensor(
-            [[[95.0, 100.0, 105.0], [96.0, 101.0, 106.0]]],
-            dtype=torch.float32,
-        )
-
-    def _target_tensor(self, batch: dict[str, Tensor]) -> Tensor:
-        return batch["target"]
-
-
-def test_logging_helpers_publish_metrics_text_and_hparams() -> None:
-    logger = RecordingLogger()
-    trainer = RecordingTrainer(logger)
-
-    log_metrics_to_loggers(trainer, {"debug/example": 1.25}, step=7)
-    _log_text_to_loggers(trainer, "batch_audit/train", "sample batch")
-    log_hyperparameters(
-        trainer,
-        {
-            "config": {
-                "epochs": 3,
-                "output_dir": Path("artifacts/run"),
-            },
-            "flags": {"debug": True, "seed": None},
-        },
-    )
-
-    assert logger.metric_events == [({"debug/example": 1.25}, 7)]
-    assert logger.experiment.text_events == [
-        ("batch_audit/train", "sample batch", trainer.global_step)
-    ]
-    assert logger.hparam_events == [
-        {
-            "config/epochs": 3,
-            "config/output_dir": "artifacts/run",
-            "flags/debug": True,
-            "flags/seed": "None",
-        }
-    ]
 
 
 def test_batch_audit_callback_respects_stage_limit() -> None:
@@ -299,7 +139,7 @@ def test_system_telemetry_callback_logs_metrics_and_csv(
     )
     monkeypatch.setattr(
         "observability.system_callbacks.psutil.virtual_memory",
-        lambda: SimpleNamespace(percent=33.0, used=5 * (1024.0 ** 3)),
+        lambda: stub_virtual_memory(percent=33.0, used_gb=5.0),
     )
 
     callback.on_train_batch_end(
@@ -339,7 +179,10 @@ def test_model_tensorboard_callback_logs_model_text_and_graph() -> None:
         ),
     ).on_fit_start(trainer, module)
 
-    assert any(tag == "model/architecture" for tag, _text, _step in logger.experiment.text_events)
+    assert any(
+        tag == "model/architecture"
+        for tag, _text, _step in logger.experiment.text_events
+    )
     assert len(logger.experiment.graph_events) == 1
 
 
@@ -379,26 +222,3 @@ def test_prediction_figure_callback_logs_one_validation_figure_per_epoch() -> No
     )
 
     assert logger.experiment.figure_events == [("predictions/val", trainer.global_step)]
-
-
-def test_setup_observability_creates_text_logger_and_profiler(tmp_path: Path) -> None:
-    config = ObservabilityConfig(
-        enable_tensorboard=False,
-        enable_csv_fallback_logger=True,
-        enable_profiler=True,
-        profiler_type="simple",
-        log_dir=tmp_path / "logs",
-        text_log_path=tmp_path / "run.log",
-        telemetry_path=tmp_path / "telemetry.csv",
-        profiler_path=tmp_path / "profiler",
-    )
-
-    artifacts = setup_observability(config)
-    assert artifacts.logger is not None
-    assert artifacts.logger_dir == tmp_path / "logs"
-    assert artifacts.text_logger is not None
-    assert artifacts.profiler is not None
-
-    artifacts.text_logger.info("runtime ready")
-    assert artifacts.text_log_path is not None
-    assert "runtime ready" in artifacts.text_log_path.read_text(encoding="utf-8")

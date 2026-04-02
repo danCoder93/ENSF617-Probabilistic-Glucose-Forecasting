@@ -212,6 +212,59 @@ yet the final codebase structure.
 The key outcome of this phase was viability, not maintainability. It proved the
 project direction was worth structuring more carefully.
 
+### April 1, 2026, later follow-up: Test Layout Cleanup And Runtime Modernization
+
+This later follow-up is documented in
+[`history/test_layout_and_runtime_modernization_summary.md`](history/test_layout_and_runtime_modernization_summary.md).
+
+#### What changed
+
+The repository took a cleanup pass across two areas that had grown somewhat
+independently:
+
+- the test tree was reorganized into package-aligned folders such as
+  `tests/config/`, `tests/environment/`, `tests/models/`, `tests/training/`,
+  and `tests/workflows/`
+- the manual smoke script moved into `tests/manual/`
+- the TFT path stopped relying on `torch.jit.script(...)`
+- the benchmark workflow gained explicit runtime/device synchronization
+  boundaries for CUDA timing
+
+#### Why it changed
+
+The test tree had already grown into a real subsystem, but the root-level
+layout still mixed:
+
+- shared support files
+- package-aligned folders
+- broad catch-all test modules
+- manual smoke scripts
+
+At the same time, the runtime-performance story had evolved:
+
+- the repository already had environment-aware `torch.compile(...)` support
+- PyTorch had begun warning that TorchScript is deprecated
+- benchmark timing wanted CUDA synchronization at workflow boundaries rather
+  than inside model code
+
+The follow-up therefore moved the codebase toward a cleaner long-term story:
+
+- tests should reflect ownership boundaries the same way `src/` does
+- eager model code plus runtime-owned `torch.compile(...)` is the preferred
+  optimization path
+- timing-only CUDA behavior belongs to runtime/benchmark orchestration rather
+  than the model forward path
+
+#### Why this matters historically
+
+This pass did not introduce a new subsystem, but it tightened the coherence of
+two existing ones:
+
+- `tests/` became more obviously part of the architecture rather than a pile of
+  coverage files
+- the runtime layer became the single place where acceleration and timing
+  policy are interpreted
+
 ### April 1, 2026, `a769de1`: Data Refactor Into A Lightning DataModule
 
 This is the first milestone documented in
@@ -805,3 +858,5 @@ For deeper detail on any one phase, use the archived summaries:
 - [`history/observability_package_refactor_summary.md`](history/observability_package_refactor_summary.md)
 - [`history/evaluation_package_summary.md`](history/evaluation_package_summary.md)
 - [`history/environment_runtime_profiles_summary.md`](history/environment_runtime_profiles_summary.md)
+- [`history/test_layout_and_runtime_modernization_summary.md`](history/test_layout_and_runtime_modernization_summary.md)
+- [`history/test_layout_and_runtime_modernization_summary.md`](history/test_layout_and_runtime_modernization_summary.md)

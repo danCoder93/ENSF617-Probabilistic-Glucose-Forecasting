@@ -44,6 +44,7 @@ from environment import (
     format_runtime_diagnostics,
     has_error_diagnostics,
     resolve_device_profile,
+    synchronize_runtime_device,
 )
 from workflows.helpers import (
     _apply_early_apple_silicon_environment_defaults,
@@ -373,6 +374,7 @@ def run_environment_benchmark_workflow(
     )
 
     _reset_environment_benchmark_state(runtime_environment)
+    synchronize_runtime_device(environment=runtime_environment)
     start_time = perf_counter()
     artifacts = run_training_workflow(
         config,
@@ -394,6 +396,7 @@ def run_environment_benchmark_workflow(
         save_predictions=False,
         trainer_class=trainer_class,
     )
+    synchronize_runtime_device(environment=runtime_environment)
     duration_seconds = perf_counter() - start_time
     benchmark_memory = _collect_environment_benchmark_memory(runtime_environment)
     actual_train_batches = (

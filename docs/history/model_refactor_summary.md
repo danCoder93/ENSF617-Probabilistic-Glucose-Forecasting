@@ -348,6 +348,9 @@ Verification completed during this refactor:
   rank-3 temporal input plus broadcast context handling,
   and explicit failure for unsupported context-rank combinations
 
+Later follow-up note:
+that config/model coverage now lives under `tests/config/` and `tests/models/`.
+
 Verification still pending in a runtime environment with `torch` installed:
 
 - one end-to-end synthetic forward pass through `FusedModel`

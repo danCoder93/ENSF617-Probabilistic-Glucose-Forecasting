@@ -13,11 +13,7 @@ from pathlib import Path
 from typing import Sized, cast
 
 
-# This script is kept as a manual smoke test rather than an automated pytest
-# case because it can perform real dataset download and end-to-end data-module
-# preparation. That makes it useful for developer sanity checks, but too heavy
-# and too network-dependent for the regular unit-test suite.
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
@@ -27,20 +23,6 @@ from data.dataset import BatchItem
 from config import DataConfig
 
 
-# ============================================================
-# Manual smoke test
-# ============================================================
-# Purpose:
-#   Provide a developer-facing end-to-end check that exercises the
-#   real DataModule with real filesystem side effects and optional
-#   network download.
-#
-# Why this is not a pytest test:
-#   It is intentionally heavier and less deterministic than unit
-#   tests. Keeping it separate preserves a fast, isolated pytest
-#   suite while still giving developers an easy full-pipeline check.
-# ============================================================
-
 AZT1D_URL = (
     "https://data.mendeley.com/public-files/datasets/"
     "gk9m674wcx/files/b02a20be-27c4-4dd0-8bb5-9171c66262fb/file_downloaded"
@@ -48,8 +30,6 @@ AZT1D_URL = (
 
 
 def summarize_csv(file_path: Path) -> tuple[int, list[str]]:
-    # This helper keeps the smoke script readable by separating the quick CSV
-    # summary logic from the DataModule orchestration flow below.
     with file_path.open("r", newline="", encoding="utf-8") as file:
         reader = csv.reader(file)
         headers = next(reader, [])
@@ -58,8 +38,6 @@ def summarize_csv(file_path: Path) -> tuple[int, list[str]]:
 
 
 def describe_batch(batch: BatchItem) -> None:
-    # Printing shapes is usually enough for a manual smoke check because it tells
-    # us whether the batch contract materialized in the expected structure.
     print(f"Static categorical shape: {tuple(batch['static_categorical'].shape)}")
     print(f"Static continuous shape: {tuple(batch['static_continuous'].shape)}")
     print(f"Encoder continuous shape: {tuple(batch['encoder_continuous'].shape)}")

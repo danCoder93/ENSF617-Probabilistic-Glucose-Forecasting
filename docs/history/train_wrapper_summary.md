@@ -31,6 +31,10 @@ forecasting stack.
 - `tests/test_train.py`
 - `README.md`
 
+Later follow-up note:
+the wrapper coverage from this milestone now lives under `tests/training/`,
+while workflow-facing entry tests live under `tests/workflows/`.
+
 ## Architectural Role of `src/train.py`
 
 The new `src/train.py` does **not** redefine model-side learning logic.
@@ -185,6 +189,7 @@ evaluation `Trainer` session around that path inside the wrapper.
 ## Testing Added
 
 The work added `tests/test_train.py` to protect the new orchestration contract.
+That coverage now lives in `tests/training/`.
 
 That test module covers:
 

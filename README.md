@@ -55,13 +55,13 @@ pytest tests -q
 Run a few representative modules:
 
 ```bash
-pytest tests/test_config.py tests/test_fused_model.py tests/test_train.py -q
+pytest tests/config tests/training tests/workflows/test_training_workflow.py -q
 ```
 
 Run the evaluation-focused tests:
 
 ```bash
-pytest tests/test_evaluation_metrics.py tests/test_evaluation_evaluator.py -q
+pytest tests/evaluation -q
 ```
 
 ### Manual smoke test
@@ -70,7 +70,7 @@ For a heavier end-to-end data pipeline check that can download and prepare the
 AZT1D dataset, use the manual smoke script:
 
 ```bash
-python tests/manual_data_smoke.py
+python tests/manual/manual_data_smoke.py
 ```
 
 This is intentionally separate from the pytest suite because it may touch the
@@ -234,7 +234,7 @@ If you want to run the manual smoke script in Colab, execute it from the project
 root after dependencies are installed:
 
 ```bash
-python tests/manual_data_smoke.py
+python tests/manual/manual_data_smoke.py
 ```
 
 ### Slurm Examples

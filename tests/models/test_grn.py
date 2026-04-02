@@ -23,9 +23,6 @@ from config import TFTConfig
 
 
 def test_grn_from_tft_config_uses_shared_defaults() -> None:
-    # This verifies the central refactor goal: GRN instances can inherit shared
-    # TFT defaults without hiding the structural dimensions that remain specific
-    # to the local call site.
     config = TFTConfig(hidden_size=16, dropout=0.2, layer_norm_eps=1e-4)
 
     module = GRN.from_tft_config(
@@ -43,8 +40,6 @@ def test_grn_from_tft_config_uses_shared_defaults() -> None:
 
 
 def test_grn_supports_rank_2_inputs_with_context() -> None:
-    # Rank-2 support matters for static or non-temporal feature paths where the
-    # caller provides one feature vector and one context vector per batch item.
     module = GRN(
         input_size=4,
         hidden_size=8,
@@ -58,8 +53,6 @@ def test_grn_supports_rank_2_inputs_with_context() -> None:
 
 
 def test_grn_supports_rank_3_inputs_with_context_broadcast() -> None:
-    # Rank-3 support preserves the original TFT behavior where static context is
-    # broadcast across a temporal dimension.
     module = GRN(
         input_size=4,
         hidden_size=8,
@@ -73,8 +66,6 @@ def test_grn_supports_rank_3_inputs_with_context_broadcast() -> None:
 
 
 def test_grn_rejects_unsupported_context_rank_mismatch() -> None:
-    # A mismatched rank should now fail loudly rather than silently relying on
-    # accidental broadcasting semantics.
     module = GRN(
         input_size=4,
         hidden_size=8,

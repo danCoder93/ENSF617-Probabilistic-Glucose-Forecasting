@@ -182,10 +182,10 @@ def test_datamodule_bind_model_config_aligns_tft_metadata_with_data_contract(
     # The binder returns a new config rather than mutating the original one so
     # callers can keep the declarative config and the runtime-bound config
     # separate if they want to inspect or log both.
-    assert base_config.tft.static_categorical_inp_lens == []
-    assert bound_config.tft.static_categorical_inp_lens == [2]
-    assert bound_config.tft.temporal_known_categorical_inp_lens == []
-    assert bound_config.tft.temporal_observed_categorical_inp_lens == [4, 10]
+    assert base_config.tft.static_categorical_inp_lens == ()
+    assert bound_config.tft.static_categorical_inp_lens == (2,)
+    assert bound_config.tft.temporal_known_categorical_inp_lens == ()
+    assert bound_config.tft.temporal_observed_categorical_inp_lens == (4, 10)
 
     # When the data config did not declare FeatureSpec entries explicitly, the
     # binder should synthesize an equivalent schema from the fallback feature

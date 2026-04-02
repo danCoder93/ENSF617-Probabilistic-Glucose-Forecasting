@@ -35,6 +35,7 @@ from observability.system_callbacks import (
     ModelTensorBoardCallback,
     SystemTelemetryCallback,
 )
+from observability.utils import _has_module
 
 
 # ============================================================================
@@ -77,7 +78,7 @@ def build_observability_callbacks(
         callbacks.append(LearningRateMonitor(logging_interval="step"))
     if config.enable_device_stats:
         callbacks.append(DeviceStatsMonitor())
-    if config.enable_rich_progress_bar:
+    if config.enable_rich_progress_bar and _has_module("rich"):
         callbacks.append(RichProgressBar())
     if config.enable_batch_audit:
         callbacks.append(BatchAuditCallback(config, text_logger=text_logger))

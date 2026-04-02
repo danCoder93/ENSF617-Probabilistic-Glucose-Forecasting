@@ -85,6 +85,11 @@ Files updated:
 - `tests/test_train.py`
 - `tests/test_main.py`
 
+Later follow-up note:
+the observability-adjacent coverage discussed here now lives across
+`tests/config/`, `tests/training/`, `tests/workflows/`, and
+`tests/observability/`.
+
 ## Dependencies Added
 
 The observability stack added or formalized the use of:

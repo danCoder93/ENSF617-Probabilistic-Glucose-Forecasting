@@ -57,12 +57,21 @@ Files added:
 - `tests/test_main.py`
 - `docs/history/entrypoint_defaults_summary.md`
 
+Later follow-up note:
+that original top-level entrypoint coverage now lives under
+`tests/workflows/`, especially `test_entrypoint.py`, `test_cli.py`, and
+`test_training_workflow.py`.
+
 Files updated:
 
 - `src/train.py`
 - `tests/test_train.py`
 - `pyrightconfig.json`
 - `README.md`
+
+Later follow-up note:
+the training-wrapper coverage described below now lives under
+`tests/training/`.
 
 ## Main Architectural Addition
 
@@ -289,6 +298,8 @@ small-data or no-validation scenarios.
 ## Tests Added Or Updated
 
 This pass added `tests/test_main.py` and extended `tests/test_train.py`.
+Those responsibilities now live under `tests/workflows/` and
+`tests/training/`, but the behaviors protected are the same.
 
 ### `tests/test_main.py`
 

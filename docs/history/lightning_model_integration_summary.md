@@ -57,6 +57,10 @@ trainer/bootstrap concerns for a later step.
 - `tests/test_config.py`
 - `README.md`
 
+Later follow-up note:
+the model and config tests from this milestone now live under `tests/models/`
+and `tests/config/`.
+
 ## Main Model-Side Changes
 
 ### 1. `FusedModel` now acts as a fuller `LightningModule`
@@ -333,6 +337,9 @@ reverse-engineer design intent from commit history.
 ## Test Coverage Added
 
 New tests were added to protect the newer Lightning-oriented behavior.
+
+The current repository keeps the same coverage split, but the files now live
+under `tests/models/` and `tests/config/` rather than at the top level.
 
 ### `tests/test_fused_model.py`
 

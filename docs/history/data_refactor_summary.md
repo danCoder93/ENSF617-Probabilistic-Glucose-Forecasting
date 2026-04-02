@@ -105,7 +105,7 @@ The current repository layout keeps the shared test support in:
 
 - `tests/conftest.py`
 - `tests/support.py`
-- `tests/manual_data_smoke.py`
+- `tests/manual/manual_data_smoke.py`
 
 Later repository cleanup consolidated the test tree, so older dedicated
 `tests/data/...` module paths mentioned in the original refactor notes no

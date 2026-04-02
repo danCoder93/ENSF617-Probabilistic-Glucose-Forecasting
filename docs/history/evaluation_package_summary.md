@@ -6,6 +6,11 @@ project. It documents the later follow-up that introduced a dedicated
 evaluation package for structured forecasting metrics and detailed held-out
 evaluation artifacts.
 
+Later follow-up note:
+the automated evaluation tests now live under `tests/evaluation/` rather than
+at the repository root. The architectural ownership described below is still
+the same; only the test paths were grouped more explicitly later.
+
 ## Goal
 
 The goal of this pass was to stop treating detailed evaluation as scattered
@@ -30,12 +35,20 @@ Instead, the repository now has a clearer split:
 - `tests/test_evaluation_metrics.py`
 - `tests/test_evaluation_evaluator.py`
 
+Later follow-up note:
+those evaluation tests now live in `tests/evaluation/test_metrics.py` and
+`tests/evaluation/test_evaluator.py`. The list above reflects the layout when
+the evaluation package first landed.
+
 ## Files Updated
 
 - `src/models/fused_model.py`
 - `src/observability/reporting.py`
 - `main.py`
 - `tests/test_main.py`
+
+Later follow-up note:
+the entrypoint/workflow tests discussed here now live under `tests/workflows/`.
 
 ## Main Architectural Addition: `src/evaluation/`
 

@@ -196,6 +196,31 @@ def apply_runtime_tuning(
     return RuntimeTuningReport(applied=applied, skipped=skipped)
 
 
+def synchronize_runtime_device(
+    *,
+    environment: RuntimeEnvironment,
+) -> None:
+    """
+    Best-effort device synchronization for timing-sensitive runtime flows.
+
+    Context:
+    this is intentionally not part of model code. Synchronization is a runtime
+    orchestration concern used mainly for benchmark boundaries so async CUDA
+    kernels do not distort wall-clock measurements.
+    """
+
+    try:
+        import torch
+    except ImportError:
+        return
+
+    if environment.cuda_available and torch.cuda.is_available():
+        try:
+            torch.cuda.synchronize()
+        except Exception:
+            pass
+
+
 # ============================================================================
 # Optional Compilation
 # ============================================================================

@@ -70,7 +70,6 @@ from config import TFTConfig
 # `FusedModel._build_tft_inputs(...)` returned `dict[str, Tensor | None]`.
 TFTInputBatch = Mapping[str, Optional[Tensor]]
 
-# @torch.jit.script #Currently broken with autocast
 def fused_pointwise_linear_v1(x, a, b):
     """
     Apply the learned continuous-feature embedding transform for generic inputs.
@@ -95,10 +94,6 @@ def fused_pointwise_linear_v1(x, a, b):
     out = out + b
     return out
 
-# Pylance can flag `torch.jit.script` as a private-export usage even though it
-# is a valid runtime TorchScript entrypoint. Keep the runtime API unchanged and
-# suppress the false-positive warning at the exact use site.
-@torch.jit.script  # pyright: ignore[reportPrivateImportUsage]
 def fused_pointwise_linear_v2(x, a, b):
     """
     Apply the learned continuous-feature embedding transform for target history.
@@ -569,7 +564,7 @@ class InterpretableMultiHeadAttention(Module):
         attn_score = torch.matmul(q.permute((0, 2, 1, 3)), k.permute((0, 2, 3, 1)))
         attn_score.mul_(self.scale)
 
-        attn_score = attn_score + cast(Tensor, self._mask)
+        attn_score = attn_score + self._mask
 
         attn_prob = F.softmax(attn_score, dim=3)
         attn_prob = self.attn_dropout(attn_prob)
@@ -643,8 +638,6 @@ class TFTBack(Module):
         history, state = self.history_encoder(historical_features, (ch, cc))
         future_features, _ = self.future_vsn(future_inputs, cs)
         future, _ = self.future_encoder(future_features, state)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
 
         # First residual block over the recurrent temporal stream. TFT keeps the
         # original input embedding available as a skip path so later stages do
@@ -719,12 +712,20 @@ class TemporalFusionTransformer(Module):
         self.embedding = LazyEmbedding(config)
 
         self.static_encoder = StaticCovariateEncoder(config)
-        # Same targeted suppression as above: this is valid TorchScript usage,
-        # but some Pylance/PyTorch stub combinations report it as a private
-        # export even when runtime behavior is correct.
-        self.TFTpart2 = torch.jit.script(  # pyright: ignore[reportPrivateImportUsage]
-            TFTBack(config)
-        )
+        # Keep the temporal reasoning stack as a normal eager module.
+        #
+        # Why this is the future-proof default:
+        # - `torch.jit.script(...)` is deprecated upstream
+        # - the repository already exposes optional model-wide `torch.compile`
+        #   support at the runtime/trainer layer
+        # - keeping this block eager avoids binding the model internals to a
+        #   second compilation mechanism with different constraints
+        #
+        # In practice, this means:
+        # - plain eager execution works by default
+        # - runtime acceleration remains available through the existing
+        #   environment/profile/Trainer compile path when enabled
+        self.temporal_backbone = TFTBack(config)
 
     def forward_with_features(self, x: TFTInputBatch) -> Tuple[Tensor, Tensor]:
         # Accept the same optional-group contract as `forward(...)` because the
@@ -755,7 +756,14 @@ class TemporalFusionTransformer(Module):
         # The future stream contains only variables known ahead at inference
         # time. Observed-only inputs and the target are not available there.
         future_inputs = t_known_inp[:, self.encoder_length:]
-        return self.TFTpart2(historical_inputs, cs, ch, cc, ce, future_inputs)
+        return self.temporal_backbone(
+            historical_inputs,
+            cs,
+            ch,
+            cc,
+            ce,
+            future_inputs,
+        )
 
     def forward_features(self, x: TFTInputBatch) -> Tensor:
         # Expose the decoder representation before quantile projection so the
