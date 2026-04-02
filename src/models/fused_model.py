@@ -82,6 +82,15 @@ class FusedModel(LightningModule):
         weight_decay: float = 0.0,
         optimizer_name: str = "adam",
     ) -> None:
+        """
+        Bind the fused architecture, optimizer defaults, and runtime-aware TFT config.
+
+        Context:
+        construction does more than instantiate submodules. It also normalizes
+        checkpoint-friendly config payloads, binds the TFT branch to the real
+        data contract, and materializes any lazy TFT parameters so Lightning can
+        configure optimizers immediately after model creation.
+        """
         super().__init__()
 
         # Accept either the typed project config or its serialized checkpoint
@@ -252,6 +261,14 @@ class FusedModel(LightningModule):
 
     @staticmethod
     def _coerce_config(config: Config | Mapping[str, Any]) -> Config:
+        """
+        Normalize constructor inputs into the repository's typed `Config`.
+
+        Context:
+        local call sites pass a real dataclass config, while Lightning
+        checkpoint reloads pass the serialized hyperparameter payload that was
+        saved by `save_hyperparameters(...)`.
+        """
         # Constructor compatibility boundary:
         # - local training code will usually pass a real `Config`
         # - checkpoint reloads pass the serialized hyperparameter payload back
@@ -270,6 +287,14 @@ class FusedModel(LightningModule):
         feature_size: int,
         dtype: torch.dtype = torch.float32,
     ) -> Tensor | None:
+        """
+        Build one placeholder grouped tensor for TFT lazy-parameter initialization.
+
+        Context:
+        the lazy embedding only needs the eventual feature widths. Returning
+        `None` for zero-width groups preserves the same optional-group contract
+        used by the real forward path.
+        """
         # Helper for the lazy-parameter dry run above.
         #
         # Returning `None` for zero-width groups matches the real grouped TFT
@@ -280,6 +305,14 @@ class FusedModel(LightningModule):
         return torch.zeros(1, time_steps, feature_size, dtype=dtype)
 
     def _materialize_tft_lazy_parameters(self) -> None:
+        """
+        Force TFT lazy embedding parameters to materialize during model construction.
+
+        Context:
+        Lightning expects a fully known parameter set by the time it asks the
+        module to configure optimizers, so the fused model performs a tiny
+        synthetic dry run instead of waiting for the first real batch.
+        """
         embedding = getattr(self.tft, "embedding", None)
         has_uninitialized_params = getattr(embedding, "has_uninitialized_params", None)
         initialize_parameters = getattr(embedding, "initialize_parameters", None)
@@ -332,6 +365,14 @@ class FusedModel(LightningModule):
         )
 
     def _split_encoder_continuous(self, encoder_continuous: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+        """
+        Recover known, observed, and target slices from the packed continuous history tensor.
+
+        Context:
+        the shared batch contract stores continuous encoder features in one
+        combined tensor, but the TCN and TFT branches consume different semantic
+        subsets of that history.
+        """
         # `encoder_continuous` follows the shared data contract:
         # [known continuous | observed continuous | target history]
         #
@@ -360,6 +401,14 @@ class FusedModel(LightningModule):
         return known_history, observed_history, target_history
 
     def _split_encoder_categorical(self, encoder_categorical: Tensor) -> tuple[Tensor, Tensor]:
+        """
+        Recover known and observed categorical histories from the packed encoder tensor.
+
+        Context:
+        categorical history follows the same semantic ordering as the continuous
+        path, minus the target slice, so this helper keeps that split logic in
+        one explicit place.
+        """
         # Historical categorical features are ordered as:
         # [known categorical | observed categorical]
         #
@@ -370,11 +419,27 @@ class FusedModel(LightningModule):
         return known_history, observed_history
 
     def _optional_group(self, tensor: Tensor) -> Tensor | None:
+        """
+        Convert zero-width grouped tensors into the `None` markers expected by TFT.
+
+        Context:
+        the data pipeline may emit empty trailing feature axes for absent groups,
+        but the TFT grouped-input contract uses `None` to represent a missing
+        semantic family.
+        """
         # TFT expects missing feature groups to be passed as `None`, not as
         # empty tensors with zero trailing width.
         return None if tensor.shape[-1] == 0 else tensor
 
     def _build_tft_inputs(self, batch: dict[str, Tensor]) -> dict[str, Tensor | None]:
+        """
+        Assemble the semantic grouped-input dictionary consumed by the TFT branch.
+
+        Context:
+        this is the boundary where the DataModule's packed batch contract is
+        translated into the richer grouped representation expected by the
+        project-specific TFT implementation.
+        """
         # Build the exact grouped tensor contract expected by `TemporalFusionTransformer`.
         #
         # Importantly, the aligned architecture no longer injects TCN outputs
@@ -427,6 +492,14 @@ class FusedModel(LightningModule):
         }
 
     def forward(self, batch: dict[str, Tensor]) -> Tensor:
+        """
+        Produce horizon-aligned quantile forecasts from one prepared batch.
+
+        Context:
+        the forward pass is intentionally staged into branch-specific feature
+        extraction followed by late fusion so the TCN and TFT paths can learn
+        complementary representations before final quantile prediction.
+        """
         # -----------------------------
         # Step 1: Build TCN branch input
         # -----------------------------
@@ -497,9 +570,18 @@ class FusedModel(LightningModule):
         return self.fcn(fused_features)
 
     def _target_tensor(self, batch: dict[str, Any]) -> Tensor:
+        """Normalize the batch target into the `[batch, horizon]` shape used by loss and metrics."""
         return normalize_target_tensor(batch["target"])
 
     def quantile_loss(self, predictions: Tensor, target: Tensor) -> Tensor:
+        """
+        Compute the pinball loss over the model's configured quantile channels.
+
+        Context:
+        this is the canonical interpretation of the fused model's output
+        contract during optimization, so every training/evaluation path routes
+        through this helper rather than re-implementing quantile supervision.
+        """
         # This is the standard pinball loss used for quantile regression.
         #
         # Supervision contract:
@@ -545,6 +627,14 @@ class FusedModel(LightningModule):
         return torch.maximum((quantiles - 1.0) * errors, quantiles * errors).mean()
 
     def point_prediction(self, predictions: Tensor, *, quantile: float = 0.5) -> Tensor:
+        """
+        Extract one representative deterministic forecast from the probabilistic output tensor.
+
+        Context:
+        human-facing metrics such as MAE and RMSE are easier to interpret on one
+        point forecast, so the model uses the configured quantile closest to the
+        requested value, defaulting to the median.
+        """
         # The fused model is trained probabilistically, but MAE/RMSE are easier
         # to interpret on a single deterministic forecast. The most natural
         # choice is the median (0.5 quantile), so this helper selects the
@@ -563,6 +653,7 @@ class FusedModel(LightningModule):
         )
 
     def _metric_pair_for_stage(self, stage: str) -> tuple[Any | None, Any | None]:
+        """Return the stage-specific torchmetrics objects, if that optional dependency is available."""
         # Keep the stage-to-metric-object mapping explicit in one place so the
         # step methods do not each have to duplicate the same branching logic.
         if stage == "train":
@@ -585,6 +676,14 @@ class FusedModel(LightningModule):
         predictions: Tensor,
         batch_size: int,
     ) -> None:
+        """
+        Publish loss, point metrics, and distribution summaries for one stage.
+
+        Context:
+        this helper centralizes the model's logging policy so train/validation/
+        test steps share the same observability semantics while still allowing
+        stage-specific on-step and distributed-sync behavior.
+        """
         # Direct `training_step(...)` calls in unit tests do not attach a
         # Trainer. In that case we still want the method to remain usable for
         # smoke tests and loss verification, so logging becomes a no-op.
@@ -715,6 +814,14 @@ class FusedModel(LightningModule):
             )
 
     def _shared_step(self, batch: dict[str, Any], stage: str) -> Tensor:
+        """
+        Run the common prediction, loss, metric, and logging path for one stage.
+
+        Context:
+        Lightning exposes separate hooks for train/validation/test, but this
+        model intentionally keeps their supervision logic identical and varies
+        only the stage label used for metrics and logging policy.
+        """
         # Lightning encourages the train/val/test steps to stay small and to
         # share as much logic as possible. This helper is the fused-model
         # equivalent of the tutorial's "compute predictions, compute loss, log
@@ -768,6 +875,7 @@ class FusedModel(LightningModule):
         return loss
 
     def training_step(self, batch: dict[str, Any], batch_idx: int) -> Tensor:
+        """Lightning training hook that delegates to the shared stage implementation."""
         del batch_idx
         # Returning the loss tensor is the Lightning contract: the Trainer will
         # take care of backward propagation, optimizer stepping, gradient
@@ -776,6 +884,7 @@ class FusedModel(LightningModule):
         return self._shared_step(batch, "train")
 
     def validation_step(self, batch: dict[str, Any], batch_idx: int) -> Tensor:
+        """Lightning validation hook that reuses the same supervision path as training."""
         del batch_idx
         # Validation reuses the same supervision path but leaves optimization to
         # Lightning. The explicit method still matters because Lightning uses it
@@ -783,6 +892,7 @@ class FusedModel(LightningModule):
         return self._shared_step(batch, "val")
 
     def test_step(self, batch: dict[str, Any], batch_idx: int) -> Tensor:
+        """Lightning test hook that keeps held-out evaluation aligned with train/val semantics."""
         del batch_idx
         # Test follows the same pattern as validation so the model's reported
         # held-out performance is computed with exactly the same loss/metric
@@ -795,6 +905,14 @@ class FusedModel(LightningModule):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> Tensor:
+        """
+        Lightning prediction hook returning the full quantile forecast tensor.
+
+        Context:
+        prediction keeps the probabilistic output intact so downstream reporting
+        and evaluation code can derive medians, intervals, and calibration views
+        without rerunning the model.
+        """
         del batch_idx, dataloader_idx
         # Prediction intentionally returns the raw quantile tensor rather than a
         # median-only projection. That keeps inference maximally informative:
@@ -803,6 +921,14 @@ class FusedModel(LightningModule):
         return self(batch)
 
     def configure_optimizers(self) -> Optimizer:
+        """
+        Build the optimizer owned by this LightningModule's training contract.
+
+        Context:
+        optimizer choice and defaults live on the model because they describe
+        how this model family trains, while outer workflow code is responsible
+        only for orchestrating runs.
+        """
         # The optimizer is configured inside the LightningModule because that is
         # the Lightning design boundary:
         # - the module knows which parameters should be trained

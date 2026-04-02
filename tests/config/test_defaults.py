@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+# These tests protect the root default-builder helpers that keep the script and
+# notebook entrypoints aligned.
+#
+# The goal is not to prove those defaults are "best", but to ensure the helper
+# functions return one internally consistent baseline configuration.
+
 from pathlib import Path
 
 from defaults import (
@@ -11,6 +17,8 @@ from defaults import (
 
 
 def test_build_default_config_keeps_data_and_model_lengths_in_sync(tmp_path: Path) -> None:
+    # The default builder is one coherence boundary for encoder/horizon lengths,
+    # TCN horizon settings, and TFT example length.
     config = build_default_config(
         dataset_url=None,
         processed_dir=tmp_path / "processed",
@@ -35,6 +43,9 @@ def test_build_default_config_keeps_data_and_model_lengths_in_sync(tmp_path: Pat
 def test_build_default_train_snapshot_and_observability_configs_share_output_layout(
     tmp_path: Path,
 ) -> None:
+    # Output-layout consistency matters because the default builders are meant
+    # to create one tidy run directory structure across logs, reports, and
+    # checkpoints.
     train_config = build_default_train_config(default_root_dir=tmp_path)
     snapshot_config = build_default_snapshot_config(output_dir=tmp_path)
     observability_config = build_default_observability_config(
@@ -52,6 +63,8 @@ def test_build_default_train_snapshot_and_observability_configs_share_output_lay
 
 
 def test_build_default_observability_config_enables_activation_stats_for_debug_modes() -> None:
+    # Debug and trace modes intentionally trade more runtime cost for deeper
+    # visibility, and activation hooks are one of the main policy differences.
     baseline = build_default_observability_config(output_dir=None, mode="baseline")
     debug = build_default_observability_config(output_dir=None, mode="debug")
     trace = build_default_observability_config(output_dir=None, mode="trace")

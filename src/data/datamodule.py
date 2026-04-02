@@ -80,6 +80,14 @@ class AZT1DDataModule(_LightningDataModuleBase):
     """
 
     def __init__(self, config: DataConfig) -> None:
+        """
+        Bind the shared data config and initialize lazy dataset/runtime metadata fields.
+
+        Context:
+        the DataModule derives semantic feature groups immediately, but leaves
+        category vocabularies and split datasets unset until `setup()` has seen
+        the cleaned dataframe.
+        """
         super().__init__()
         self.config = config
 
@@ -98,6 +106,13 @@ class AZT1DDataModule(_LightningDataModuleBase):
         self.test_dataset: AZT1DSequenceDataset | None = None
 
     def prepare_data(self) -> None:
+        """
+        Materialize the processed dataset on disk if it is not already available.
+
+        Context:
+        this is the DataModule's side-effecting stage: download raw bytes if
+        needed, extract the archive, and rebuild the canonical processed CSV.
+        """
         # Keep this method idempotent because Lightning may call it more than
         # once in distributed settings.
         processed_path = Path(self.config.processed_file_path)
@@ -133,6 +148,13 @@ class AZT1DDataModule(_LightningDataModuleBase):
         preprocessor.build(force=self.config.rebuild_processed)
 
     def setup(self, stage: str | None = None) -> None:
+        """
+        Build in-memory split datasets and categorical metadata from the processed CSV.
+
+        Context:
+        once `prepare_data()` has handled disk state, `setup()` owns the pure
+        in-memory objects shared by training, validation, and test dataloaders.
+        """
         # Once we reach setup, raw data should already be materialized on disk.
         # From this point onward the job is to create in-memory training objects.
         #
@@ -193,6 +215,7 @@ class AZT1DDataModule(_LightningDataModuleBase):
         )
 
     def train_dataloader(self) -> DataLoader[BatchItem]:
+        """Wrap the prepared training dataset in a DataLoader using the shared loader policy."""
         if self.train_dataset is None:
             raise RuntimeError("setup() must be called before train_dataloader().")
 
@@ -208,6 +231,7 @@ class AZT1DDataModule(_LightningDataModuleBase):
         )
 
     def val_dataloader(self) -> DataLoader[BatchItem]:
+        """Wrap the prepared validation dataset in a non-shuffled DataLoader."""
         if self.val_dataset is None:
             raise RuntimeError("setup() must be called before val_dataloader().")
         return DataLoader(
@@ -218,6 +242,7 @@ class AZT1DDataModule(_LightningDataModuleBase):
         )
 
     def test_dataloader(self) -> DataLoader[BatchItem]:
+        """Wrap the prepared test dataset in a non-shuffled DataLoader."""
         if self.test_dataset is None:
             raise RuntimeError("setup() must be called before test_dataloader().")
         return DataLoader(
@@ -228,6 +253,13 @@ class AZT1DDataModule(_LightningDataModuleBase):
         )
 
     def _shared_dataloader_kwargs(self) -> dict[str, Any]:
+        """
+        Build the DataLoader keyword arguments shared by train/val/test loaders.
+
+        Context:
+        worker, pin-memory, persistent-worker, and prefetch semantics should
+        stay aligned across split loaders, so the policy is centralized here.
+        """
         # The DataLoader policy is intentionally centralized here so train/val/
         # test loaders stay aligned on worker semantics.
         #
@@ -314,6 +346,14 @@ class AZT1DDataModule(_LightningDataModuleBase):
         return replace(config, tft=bound_tft)
 
     def _build_fallback_feature_specs(self) -> tuple[FeatureSpec, ...]:
+        """
+        Synthesize `FeatureSpec` entries from the documented fallback feature groups.
+
+        Context:
+        this preserves one shared model/data contract during the migration period
+        where some call sites still rely on AZT1D-specific fallback group
+        definitions instead of a fully populated `config.data.features`.
+        """
         # The long-term design is for `config.data.features` to be the single
         # source of truth. During the transition period, the DataModule may still
         # be operating from documented fallback feature groups. In that case we

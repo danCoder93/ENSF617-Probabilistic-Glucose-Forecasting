@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+# These tests protect the runtime-profile resolution layer that turns one
+# user-facing environment choice into concrete Trainer/DataLoader defaults.
+
 from config import DataConfig, ObservabilityConfig, TrainConfig
 from environment import infer_device_profile, resolve_device_profile
 from tests.support import build_runtime_environment
 
 
 def test_infer_device_profile_auto_prefers_colab_slurm_mps_and_cuda() -> None:
+    # `auto` should prefer the most context-rich environment classification
+    # first instead of treating every machine like a generic local host.
     assert infer_device_profile(
         "auto",
         build_runtime_environment(is_colab=True, cuda_available=True, cuda_device_count=1),
@@ -35,6 +40,8 @@ def test_infer_device_profile_auto_prefers_colab_slurm_mps_and_cuda() -> None:
 
 
 def test_resolve_device_profile_prefers_cpu_bf16_and_compile_for_supported_local_cpu() -> None:
+    # Local CPU defaults should take advantage of BF16 and compile support when
+    # the detected environment says they are actually available.
     resolution = resolve_device_profile(
         requested_profile="local-cpu",
         environment=build_runtime_environment(
@@ -60,6 +67,8 @@ def test_resolve_device_profile_prefers_cpu_bf16_and_compile_for_supported_local
 
 
 def test_resolve_device_profile_applies_cuda_defaults_but_respects_explicit_overrides() -> None:
+    # Profiles provide strong defaults, but explicit user overrides must still
+    # win so targeted experiments can deviate from the default policy.
     resolution = resolve_device_profile(
         requested_profile="local-cuda",
         environment=build_runtime_environment(
@@ -98,6 +107,8 @@ def test_resolve_device_profile_applies_cuda_defaults_but_respects_explicit_over
 
 
 def test_resolve_device_profile_prefers_bf16_and_small_worker_pool_for_apple_silicon() -> None:
+    # Apple Silicon is intentionally treated differently from CUDA machines,
+    # especially around worker counts and device-stats observability defaults.
     resolution = resolve_device_profile(
         requested_profile="auto",
         environment=build_runtime_environment(
@@ -136,6 +147,8 @@ def test_resolve_device_profile_prefers_bf16_and_small_worker_pool_for_apple_sil
 
 
 def test_resolve_device_profile_prefers_bf16_when_cuda_reports_support() -> None:
+    # CUDA BF16 support should promote the precision policy automatically when
+    # the environment reports it, without the caller having to set it manually.
     resolution = resolve_device_profile(
         requested_profile="local-cuda",
         environment=build_runtime_environment(

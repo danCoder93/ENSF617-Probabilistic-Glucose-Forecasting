@@ -1,5 +1,19 @@
 from __future__ import annotations
 
+"""
+AI-assisted maintenance note:
+These tests protect the trainer wrapper's execution-time orchestration policy.
+
+Purpose:
+- verify checkpoint aliases are validated against available fit state
+- verify fit/test/predict composition falls back sensibly when no best checkpoint exists
+- verify optional compilation failures degrade to eager execution rather than aborting the run
+
+Context:
+the focus here is the wrapper's control flow around Lightning, not the details
+of the model's forward or loss implementation.
+"""
+
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -21,6 +35,8 @@ def test_checkpoint_alias_requires_fit_before_evaluation(
     write_processed_csv,
     build_data_config,
 ) -> None:
+    # Alias-based evaluation only makes sense once the wrapper has a live
+    # Trainer session and any checkpoint callback state produced by `fit()`.
     csv_path = write_processed_csv(steps_per_subject=80)
     data_config = build_data_config(csv_path)
     datamodule = AZT1DDataModule(data_config)
@@ -35,6 +51,8 @@ def test_resolve_checkpoint_reference_normalizes_aliases_and_explicit_paths(
     write_processed_csv,
     build_data_config,
 ) -> None:
+    # This helper is the normalization boundary for every evaluation call, so
+    # these assertions keep alias handling and explicit paths aligned.
     csv_path = write_processed_csv()
     data_config = build_data_config(csv_path)
     trainer = FusedModelTrainer(build_base_config(data_config))
@@ -58,6 +76,9 @@ def test_fit_test_predict_falls_back_to_in_memory_weights_without_best_checkpoin
     build_data_config,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The most common workflow is "fit, then evaluate." If that run never
+    # produced a validation-ranked best checkpoint, the wrapper should keep
+    # going with the current in-memory weights instead of failing.
     csv_path = write_processed_csv()
     data_config = build_data_config(csv_path)
     datamodule = AZT1DDataModule(data_config)
@@ -114,6 +135,9 @@ def test_fit_falls_back_to_eager_model_when_compile_raises(
     build_data_config,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Compilation is an optimization layer, not part of model correctness. A
+    # compile failure should therefore be observable but non-fatal when the
+    # eager model is otherwise valid.
     csv_path = write_processed_csv()
     data_config = build_data_config(csv_path)
     datamodule = AZT1DDataModule(data_config)

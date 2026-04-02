@@ -62,10 +62,19 @@ class AZT1DPreprocessor:
         dataset_dir: str | Path = "data/extracted/azt1d",
         output_file: str | Path = "data/processed/azt1d_processed.csv",
     ) -> None:
+        """Bind the extracted raw-data root and the canonical processed output path."""
         self.dataset_dir = self._resolve_data_dir(Path(dataset_dir))
         self.output_file = Path(output_file)
 
     def build(self, force: bool = False) -> Path:
+        """
+        Standardize the raw AZT1D CSV export tree into one canonical processed CSV.
+
+        Context:
+        the method intentionally performs only raw-file normalization and schema
+        harmonization; sequence splitting and tensor assembly belong to later
+        data-layer stages.
+        """
         # Reusing an existing processed file keeps repeated setup runs fast and
         # makes preprocessing an explicit, controllable step instead of hidden
         # work that happens during training.
@@ -142,6 +151,7 @@ class AZT1DPreprocessor:
         return self.output_file
 
     def _resolve_data_dir(self, dataset_dir: Path) -> Path:
+        """Choose the most likely extracted dataset root from the public AZT1D archive layouts."""
         # The public archive layout is slightly inconsistent across extraction
         # paths, so we probe a few likely roots once here rather than spreading
         # that discovery logic throughout the pipeline.
@@ -158,6 +168,7 @@ class AZT1DPreprocessor:
         return dataset_dir
 
     def _find_csv_files(self, dataset_dir: Path) -> list[Path]:
+        """Discover all raw CSV files under the extracted dataset root or fail loudly if none exist."""
         # Fail fast if the extracted dataset layout is wrong instead of letting
         # later stages continue with an empty or partial processed file.
         if not dataset_dir.exists() or not dataset_dir.is_dir():
@@ -170,6 +181,7 @@ class AZT1DPreprocessor:
         return csv_files
 
     def _text(self, row: dict[str, str | None], column: str) -> str:
+        """Read one raw CSV field as a stripped string, falling back to the empty string."""
         # Trimming raw whitespace here keeps later normalization logic simpler
         # and ensures the processed CSV is already reasonably clean.
         value = row.get(column, "")

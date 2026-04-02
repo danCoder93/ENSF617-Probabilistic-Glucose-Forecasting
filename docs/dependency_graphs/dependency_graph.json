@@ -1,0 +1,2697 @@
+{
+  "graph_version": 1,
+  "nodes": [
+    {
+      "name": "config",
+      "path": "src/config/__init__.py",
+      "package": "config",
+      "category": "package",
+      "layer": "production"
+    },
+    {
+      "name": "config.data",
+      "path": "src/config/data.py",
+      "package": "config",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "config.model",
+      "path": "src/config/model.py",
+      "package": "config",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "config.observability",
+      "path": "src/config/observability.py",
+      "package": "config",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "config.runtime",
+      "path": "src/config/runtime.py",
+      "package": "config",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "config.serde",
+      "path": "src/config/serde.py",
+      "package": "config",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "config.types",
+      "path": "src/config/types.py",
+      "package": "config",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "data.datamodule",
+      "path": "src/data/datamodule.py",
+      "package": "data",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "data.dataset",
+      "path": "src/data/dataset.py",
+      "package": "data",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "data.downloader",
+      "path": "src/data/downloader.py",
+      "package": "data",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "data.indexing",
+      "path": "src/data/indexing.py",
+      "package": "data",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "data.preprocessor",
+      "path": "src/data/preprocessor.py",
+      "package": "data",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "data.schema",
+      "path": "src/data/schema.py",
+      "package": "data",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "data.transforms",
+      "path": "src/data/transforms.py",
+      "package": "data",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "defaults",
+      "path": "defaults.py",
+      "package": "defaults",
+      "category": "entrypoint",
+      "layer": "production"
+    },
+    {
+      "name": "environment",
+      "path": "src/environment/__init__.py",
+      "package": "environment",
+      "category": "package",
+      "layer": "production"
+    },
+    {
+      "name": "environment.detection",
+      "path": "src/environment/detection.py",
+      "package": "environment",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "environment.diagnostics",
+      "path": "src/environment/diagnostics.py",
+      "package": "environment",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "environment.profiles",
+      "path": "src/environment/profiles.py",
+      "package": "environment",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "environment.tuning",
+      "path": "src/environment/tuning.py",
+      "package": "environment",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "environment.types",
+      "path": "src/environment/types.py",
+      "package": "environment",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "evaluation",
+      "path": "src/evaluation/__init__.py",
+      "package": "evaluation",
+      "category": "package",
+      "layer": "production"
+    },
+    {
+      "name": "evaluation.core",
+      "path": "src/evaluation/core.py",
+      "package": "evaluation",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "evaluation.evaluator",
+      "path": "src/evaluation/evaluator.py",
+      "package": "evaluation",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "evaluation.grouping",
+      "path": "src/evaluation/grouping.py",
+      "package": "evaluation",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "evaluation.metrics",
+      "path": "src/evaluation/metrics.py",
+      "package": "evaluation",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "evaluation.types",
+      "path": "src/evaluation/types.py",
+      "package": "evaluation",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "main",
+      "path": "main.py",
+      "package": "main",
+      "category": "entrypoint",
+      "layer": "production"
+    },
+    {
+      "name": "models.fused_model",
+      "path": "src/models/fused_model.py",
+      "package": "models",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "models.grn",
+      "path": "src/models/grn.py",
+      "package": "models",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "models.nn_head",
+      "path": "src/models/nn_head.py",
+      "package": "models",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "models.tcn",
+      "path": "src/models/tcn.py",
+      "package": "models",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "models.tft",
+      "path": "src/models/tft.py",
+      "package": "models",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "observability",
+      "path": "src/observability/__init__.py",
+      "package": "observability",
+      "category": "package",
+      "layer": "production"
+    },
+    {
+      "name": "observability.callbacks",
+      "path": "src/observability/callbacks.py",
+      "package": "observability",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "observability.debug_callbacks",
+      "path": "src/observability/debug_callbacks.py",
+      "package": "observability",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "observability.logging_utils",
+      "path": "src/observability/logging_utils.py",
+      "package": "observability",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "observability.parameter_callbacks",
+      "path": "src/observability/parameter_callbacks.py",
+      "package": "observability",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "observability.prediction_callbacks",
+      "path": "src/observability/prediction_callbacks.py",
+      "package": "observability",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "observability.reporting",
+      "path": "src/observability/reporting.py",
+      "package": "observability",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "observability.runtime",
+      "path": "src/observability/runtime.py",
+      "package": "observability",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "observability.system_callbacks",
+      "path": "src/observability/system_callbacks.py",
+      "package": "observability",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "observability.tensors",
+      "path": "src/observability/tensors.py",
+      "package": "observability",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "observability.utils",
+      "path": "src/observability/utils.py",
+      "package": "observability",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "tests",
+      "path": "tests/__init__.py",
+      "package": "tests",
+      "category": "package",
+      "layer": "test"
+    },
+    {
+      "name": "tests.config",
+      "path": "tests/config/__init__.py",
+      "package": "tests",
+      "category": "package",
+      "layer": "test"
+    },
+    {
+      "name": "tests.config.test_data_config",
+      "path": "tests/config/test_data_config.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.config.test_defaults",
+      "path": "tests/config/test_defaults.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.config.test_model_config",
+      "path": "tests/config/test_model_config.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.config.test_runtime_config",
+      "path": "tests/config/test_runtime_config.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.conftest",
+      "path": "tests/conftest.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.data",
+      "path": "tests/data/__init__.py",
+      "package": "tests",
+      "category": "package",
+      "layer": "test"
+    },
+    {
+      "name": "tests.data.test_datamodule",
+      "path": "tests/data/test_datamodule.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.data.test_dataset",
+      "path": "tests/data/test_dataset.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.data.test_downloader",
+      "path": "tests/data/test_downloader.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.data.test_indexing",
+      "path": "tests/data/test_indexing.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.data.test_preprocessor",
+      "path": "tests/data/test_preprocessor.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.data.test_schema",
+      "path": "tests/data/test_schema.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.data.test_transforms",
+      "path": "tests/data/test_transforms.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.environment",
+      "path": "tests/environment/__init__.py",
+      "package": "tests",
+      "category": "package",
+      "layer": "test"
+    },
+    {
+      "name": "tests.environment.test_diagnostics",
+      "path": "tests/environment/test_diagnostics.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.environment.test_profiles",
+      "path": "tests/environment/test_profiles.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.evaluation",
+      "path": "tests/evaluation/__init__.py",
+      "package": "tests",
+      "category": "package",
+      "layer": "test"
+    },
+    {
+      "name": "tests.evaluation.test_evaluator",
+      "path": "tests/evaluation/test_evaluator.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.evaluation.test_metrics",
+      "path": "tests/evaluation/test_metrics.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.manual",
+      "path": "tests/manual/__init__.py",
+      "package": "tests",
+      "category": "package",
+      "layer": "test"
+    },
+    {
+      "name": "tests.manual.manual_data_smoke",
+      "path": "tests/manual/manual_data_smoke.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.models",
+      "path": "tests/models/__init__.py",
+      "package": "tests",
+      "category": "package",
+      "layer": "test"
+    },
+    {
+      "name": "tests.models.test_fused_model",
+      "path": "tests/models/test_fused_model.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.models.test_grn",
+      "path": "tests/models/test_grn.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.observability",
+      "path": "tests/observability/__init__.py",
+      "package": "tests",
+      "category": "package",
+      "layer": "test"
+    },
+    {
+      "name": "tests.observability.support",
+      "path": "tests/observability/support.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.observability.test_callbacks",
+      "path": "tests/observability/test_callbacks.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.observability.test_logging_utils",
+      "path": "tests/observability/test_logging_utils.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.observability.test_package",
+      "path": "tests/observability/test_package.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.observability.test_reporting",
+      "path": "tests/observability/test_reporting.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.observability.test_runtime",
+      "path": "tests/observability/test_runtime.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.support",
+      "path": "tests/support.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.training",
+      "path": "tests/training/__init__.py",
+      "package": "tests",
+      "category": "package",
+      "layer": "test"
+    },
+    {
+      "name": "tests.training.test_trainer_construction",
+      "path": "tests/training/test_trainer_construction.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.training.test_trainer_execution",
+      "path": "tests/training/test_trainer_execution.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.workflows",
+      "path": "tests/workflows/__init__.py",
+      "package": "tests",
+      "category": "package",
+      "layer": "test"
+    },
+    {
+      "name": "tests.workflows.test_benchmark_workflow",
+      "path": "tests/workflows/test_benchmark_workflow.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.workflows.test_cli",
+      "path": "tests/workflows/test_cli.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.workflows.test_entrypoint",
+      "path": "tests/workflows/test_entrypoint.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.workflows.test_helpers",
+      "path": "tests/workflows/test_helpers.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "tests.workflows.test_training_workflow",
+      "path": "tests/workflows/test_training_workflow.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
+      "name": "train",
+      "path": "src/train.py",
+      "package": "train",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "utils.tft_utils",
+      "path": "src/utils/tft_utils.py",
+      "package": "utils",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "workflows",
+      "path": "src/workflows/__init__.py",
+      "package": "workflows",
+      "category": "package",
+      "layer": "production"
+    },
+    {
+      "name": "workflows.cli",
+      "path": "src/workflows/cli.py",
+      "package": "workflows",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "workflows.helpers",
+      "path": "src/workflows/helpers.py",
+      "package": "workflows",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "workflows.training",
+      "path": "src/workflows/training.py",
+      "package": "workflows",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "workflows.types",
+      "path": "src/workflows/types.py",
+      "package": "workflows",
+      "category": "module",
+      "layer": "production"
+    }
+  ],
+  "edges": [
+    {
+      "source": "config",
+      "target": "config.data",
+      "edge_type": "re_export",
+      "line": 46
+    },
+    {
+      "source": "config",
+      "target": "config.model",
+      "edge_type": "re_export",
+      "line": 47
+    },
+    {
+      "source": "config",
+      "target": "config.observability",
+      "edge_type": "re_export",
+      "line": 48
+    },
+    {
+      "source": "config",
+      "target": "config.runtime",
+      "edge_type": "re_export",
+      "line": 49
+    },
+    {
+      "source": "config",
+      "target": "config.serde",
+      "edge_type": "re_export",
+      "line": 50
+    },
+    {
+      "source": "config",
+      "target": "config.types",
+      "edge_type": "re_export",
+      "line": 60
+    },
+    {
+      "source": "config.data",
+      "target": "config.types",
+      "edge_type": "import",
+      "line": 14
+    },
+    {
+      "source": "config.data",
+      "target": "utils.tft_utils",
+      "edge_type": "import",
+      "line": 15
+    },
+    {
+      "source": "config.model",
+      "target": "config.data",
+      "edge_type": "import",
+      "line": 11
+    },
+    {
+      "source": "config.model",
+      "target": "utils.tft_utils",
+      "edge_type": "import",
+      "line": 12
+    },
+    {
+      "source": "config.observability",
+      "target": "config.types",
+      "edge_type": "import",
+      "line": 12
+    },
+    {
+      "source": "config.runtime",
+      "target": "config.types",
+      "edge_type": "import",
+      "line": 12
+    },
+    {
+      "source": "config.serde",
+      "target": "config.data",
+      "edge_type": "import",
+      "line": 14
+    },
+    {
+      "source": "config.serde",
+      "target": "config.model",
+      "edge_type": "import",
+      "line": 15
+    },
+    {
+      "source": "config.serde",
+      "target": "utils.tft_utils",
+      "edge_type": "import",
+      "line": 16
+    },
+    {
+      "source": "data.datamodule",
+      "target": "config",
+      "edge_type": "import",
+      "line": 26
+    },
+    {
+      "source": "data.datamodule",
+      "target": "data.dataset",
+      "edge_type": "import",
+      "line": 20
+    },
+    {
+      "source": "data.datamodule",
+      "target": "data.downloader",
+      "edge_type": "import",
+      "line": 21
+    },
+    {
+      "source": "data.datamodule",
+      "target": "data.indexing",
+      "edge_type": "import",
+      "line": 22
+    },
+    {
+      "source": "data.datamodule",
+      "target": "data.preprocessor",
+      "edge_type": "import",
+      "line": 23
+    },
+    {
+      "source": "data.datamodule",
+      "target": "data.schema",
+      "edge_type": "import",
+      "line": 24
+    },
+    {
+      "source": "data.datamodule",
+      "target": "data.transforms",
+      "edge_type": "import",
+      "line": 25
+    },
+    {
+      "source": "data.datamodule",
+      "target": "utils.tft_utils",
+      "edge_type": "import",
+      "line": 27
+    },
+    {
+      "source": "data.dataset",
+      "target": "data.indexing",
+      "edge_type": "import",
+      "line": 22
+    },
+    {
+      "source": "data.dataset",
+      "target": "data.schema",
+      "edge_type": "import",
+      "line": 23
+    },
+    {
+      "source": "data.indexing",
+      "target": "config",
+      "edge_type": "import",
+      "line": 18
+    },
+    {
+      "source": "data.indexing",
+      "target": "data.schema",
+      "edge_type": "import",
+      "line": 17
+    },
+    {
+      "source": "data.preprocessor",
+      "target": "data.schema",
+      "edge_type": "import",
+      "line": 16
+    },
+    {
+      "source": "data.schema",
+      "target": "config",
+      "edge_type": "import",
+      "line": 16
+    },
+    {
+      "source": "data.schema",
+      "target": "utils.tft_utils",
+      "edge_type": "import",
+      "line": 17
+    },
+    {
+      "source": "data.transforms",
+      "target": "config",
+      "edge_type": "import",
+      "line": 24
+    },
+    {
+      "source": "data.transforms",
+      "target": "data.schema",
+      "edge_type": "import",
+      "line": 20
+    },
+    {
+      "source": "defaults",
+      "target": "config",
+      "edge_type": "import",
+      "line": 37
+    },
+    {
+      "source": "environment",
+      "target": "environment.detection",
+      "edge_type": "re_export",
+      "line": 45
+    },
+    {
+      "source": "environment",
+      "target": "environment.diagnostics",
+      "edge_type": "re_export",
+      "line": 46
+    },
+    {
+      "source": "environment",
+      "target": "environment.profiles",
+      "edge_type": "re_export",
+      "line": 52
+    },
+    {
+      "source": "environment",
+      "target": "environment.tuning",
+      "edge_type": "re_export",
+      "line": 53
+    },
+    {
+      "source": "environment",
+      "target": "environment.types",
+      "edge_type": "re_export",
+      "line": 60
+    },
+    {
+      "source": "environment.detection",
+      "target": "environment.types",
+      "edge_type": "import",
+      "line": 29
+    },
+    {
+      "source": "environment.diagnostics",
+      "target": "config.data",
+      "edge_type": "import",
+      "line": 25
+    },
+    {
+      "source": "environment.diagnostics",
+      "target": "config.observability",
+      "edge_type": "import",
+      "line": 26
+    },
+    {
+      "source": "environment.diagnostics",
+      "target": "config.runtime",
+      "edge_type": "import",
+      "line": 27
+    },
+    {
+      "source": "environment.diagnostics",
+      "target": "environment.types",
+      "edge_type": "import",
+      "line": 28
+    },
+    {
+      "source": "environment.profiles",
+      "target": "config.data",
+      "edge_type": "import",
+      "line": 26
+    },
+    {
+      "source": "environment.profiles",
+      "target": "config.observability",
+      "edge_type": "import",
+      "line": 27
+    },
+    {
+      "source": "environment.profiles",
+      "target": "config.runtime",
+      "edge_type": "import",
+      "line": 28
+    },
+    {
+      "source": "environment.profiles",
+      "target": "environment.types",
+      "edge_type": "import",
+      "line": 29
+    },
+    {
+      "source": "environment.tuning",
+      "target": "config.runtime",
+      "edge_type": "import",
+      "line": 35
+    },
+    {
+      "source": "environment.tuning",
+      "target": "environment.types",
+      "edge_type": "import",
+      "line": 36
+    },
+    {
+      "source": "environment.types",
+      "target": "config.data",
+      "edge_type": "import",
+      "line": 28
+    },
+    {
+      "source": "environment.types",
+      "target": "config.observability",
+      "edge_type": "import",
+      "line": 29
+    },
+    {
+      "source": "environment.types",
+      "target": "config.runtime",
+      "edge_type": "import",
+      "line": 30
+    },
+    {
+      "source": "evaluation",
+      "target": "evaluation.core",
+      "edge_type": "re_export",
+      "line": 32
+    },
+    {
+      "source": "evaluation",
+      "target": "evaluation.evaluator",
+      "edge_type": "re_export",
+      "line": 39
+    },
+    {
+      "source": "evaluation",
+      "target": "evaluation.grouping",
+      "edge_type": "re_export",
+      "line": 40
+    },
+    {
+      "source": "evaluation",
+      "target": "evaluation.metrics",
+      "edge_type": "re_export",
+      "line": 41
+    },
+    {
+      "source": "evaluation",
+      "target": "evaluation.types",
+      "edge_type": "re_export",
+      "line": 50
+    },
+    {
+      "source": "evaluation.core",
+      "target": "evaluation.types",
+      "edge_type": "import",
+      "line": 30
+    },
+    {
+      "source": "evaluation.evaluator",
+      "target": "evaluation.core",
+      "edge_type": "import",
+      "line": 39
+    },
+    {
+      "source": "evaluation.evaluator",
+      "target": "evaluation.grouping",
+      "edge_type": "import",
+      "line": 40
+    },
+    {
+      "source": "evaluation.evaluator",
+      "target": "evaluation.metrics",
+      "edge_type": "import",
+      "line": 41
+    },
+    {
+      "source": "evaluation.evaluator",
+      "target": "evaluation.types",
+      "edge_type": "import",
+      "line": 50
+    },
+    {
+      "source": "evaluation.grouping",
+      "target": "evaluation.types",
+      "edge_type": "import",
+      "line": 26
+    },
+    {
+      "source": "main",
+      "target": "defaults",
+      "edge_type": "import",
+      "line": 13
+    },
+    {
+      "source": "main",
+      "target": "workflows.cli",
+      "edge_type": "import",
+      "line": 19
+    },
+    {
+      "source": "main",
+      "target": "workflows.helpers",
+      "edge_type": "import",
+      "line": 20
+    },
+    {
+      "source": "main",
+      "target": "workflows.training",
+      "edge_type": "import",
+      "line": 21
+    },
+    {
+      "source": "main",
+      "target": "workflows.types",
+      "edge_type": "import",
+      "line": 25
+    },
+    {
+      "source": "models.fused_model",
+      "target": "config",
+      "edge_type": "import",
+      "line": 46
+    },
+    {
+      "source": "models.fused_model",
+      "target": "evaluation",
+      "edge_type": "import",
+      "line": 38
+    },
+    {
+      "source": "models.fused_model",
+      "target": "models.grn",
+      "edge_type": "import",
+      "line": 36
+    },
+    {
+      "source": "models.fused_model",
+      "target": "models.nn_head",
+      "edge_type": "import",
+      "line": 37
+    },
+    {
+      "source": "models.fused_model",
+      "target": "models.tcn",
+      "edge_type": "import",
+      "line": 34
+    },
+    {
+      "source": "models.fused_model",
+      "target": "models.tft",
+      "edge_type": "import",
+      "line": 35
+    },
+    {
+      "source": "models.grn",
+      "target": "config",
+      "edge_type": "import",
+      "line": 27
+    },
+    {
+      "source": "models.tcn",
+      "target": "config",
+      "edge_type": "import",
+      "line": 29
+    },
+    {
+      "source": "models.tft",
+      "target": "config",
+      "edge_type": "import",
+      "line": 52
+    },
+    {
+      "source": "models.tft",
+      "target": "models.grn",
+      "edge_type": "import",
+      "line": 50
+    },
+    {
+      "source": "observability",
+      "target": "observability.callbacks",
+      "edge_type": "re_export",
+      "line": 46
+    },
+    {
+      "source": "observability",
+      "target": "observability.logging_utils",
+      "edge_type": "re_export",
+      "line": 57
+    },
+    {
+      "source": "observability",
+      "target": "observability.reporting",
+      "edge_type": "re_export",
+      "line": 61
+    },
+    {
+      "source": "observability",
+      "target": "observability.runtime",
+      "edge_type": "re_export",
+      "line": 65
+    },
+    {
+      "source": "observability.callbacks",
+      "target": "config",
+      "edge_type": "import",
+      "line": 23
+    },
+    {
+      "source": "observability.callbacks",
+      "target": "observability.debug_callbacks",
+      "edge_type": "import",
+      "line": 24
+    },
+    {
+      "source": "observability.callbacks",
+      "target": "observability.parameter_callbacks",
+      "edge_type": "import",
+      "line": 29
+    },
+    {
+      "source": "observability.callbacks",
+      "target": "observability.prediction_callbacks",
+      "edge_type": "import",
+      "line": 33
+    },
+    {
+      "source": "observability.callbacks",
+      "target": "observability.system_callbacks",
+      "edge_type": "import",
+      "line": 34
+    },
+    {
+      "source": "observability.callbacks",
+      "target": "observability.utils",
+      "edge_type": "import",
+      "line": 38
+    },
+    {
+      "source": "observability.debug_callbacks",
+      "target": "config",
+      "edge_type": "import",
+      "line": 19
+    },
+    {
+      "source": "observability.debug_callbacks",
+      "target": "observability.logging_utils",
+      "edge_type": "import",
+      "line": 20
+    },
+    {
+      "source": "observability.debug_callbacks",
+      "target": "observability.tensors",
+      "edge_type": "import",
+      "line": 21
+    },
+    {
+      "source": "observability.parameter_callbacks",
+      "target": "config",
+      "edge_type": "import",
+      "line": 17
+    },
+    {
+      "source": "observability.parameter_callbacks",
+      "target": "observability.logging_utils",
+      "edge_type": "import",
+      "line": 18
+    },
+    {
+      "source": "observability.prediction_callbacks",
+      "target": "config",
+      "edge_type": "import",
+      "line": 19
+    },
+    {
+      "source": "observability.prediction_callbacks",
+      "target": "observability.logging_utils",
+      "edge_type": "import",
+      "line": 20
+    },
+    {
+      "source": "observability.prediction_callbacks",
+      "target": "observability.tensors",
+      "edge_type": "import",
+      "line": 21
+    },
+    {
+      "source": "observability.prediction_callbacks",
+      "target": "observability.utils",
+      "edge_type": "import",
+      "line": 22
+    },
+    {
+      "source": "observability.reporting",
+      "target": "config",
+      "edge_type": "import",
+      "line": 26
+    },
+    {
+      "source": "observability.reporting",
+      "target": "evaluation",
+      "edge_type": "import",
+      "line": 27
+    },
+    {
+      "source": "observability.reporting",
+      "target": "observability.tensors",
+      "edge_type": "import",
+      "line": 28
+    },
+    {
+      "source": "observability.reporting",
+      "target": "observability.utils",
+      "edge_type": "import",
+      "line": 29
+    },
+    {
+      "source": "observability.runtime",
+      "target": "config",
+      "edge_type": "import",
+      "line": 32
+    },
+    {
+      "source": "observability.runtime",
+      "target": "observability.utils",
+      "edge_type": "import",
+      "line": 33
+    },
+    {
+      "source": "observability.system_callbacks",
+      "target": "config",
+      "edge_type": "import",
+      "line": 25
+    },
+    {
+      "source": "observability.system_callbacks",
+      "target": "observability.logging_utils",
+      "edge_type": "import",
+      "line": 26
+    },
+    {
+      "source": "observability.system_callbacks",
+      "target": "observability.tensors",
+      "edge_type": "import",
+      "line": 30
+    },
+    {
+      "source": "observability.system_callbacks",
+      "target": "observability.utils",
+      "edge_type": "import",
+      "line": 34
+    },
+    {
+      "source": "tests.config.test_data_config",
+      "target": "config",
+      "edge_type": "import",
+      "line": 8
+    },
+    {
+      "source": "tests.config.test_data_config",
+      "target": "utils.tft_utils",
+      "edge_type": "import",
+      "line": 9
+    },
+    {
+      "source": "tests.config.test_defaults",
+      "target": "defaults",
+      "edge_type": "import",
+      "line": 5
+    },
+    {
+      "source": "tests.config.test_model_config",
+      "target": "config",
+      "edge_type": "import",
+      "line": 9
+    },
+    {
+      "source": "tests.config.test_model_config",
+      "target": "utils.tft_utils",
+      "edge_type": "import",
+      "line": 17
+    },
+    {
+      "source": "tests.config.test_runtime_config",
+      "target": "config",
+      "edge_type": "import",
+      "line": 7
+    },
+    {
+      "source": "tests.conftest",
+      "target": "config",
+      "edge_type": "import",
+      "line": 39
+    },
+    {
+      "source": "tests.conftest",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 40
+    },
+    {
+      "source": "tests.data.test_datamodule",
+      "target": "config",
+      "edge_type": "import",
+      "line": 22
+    },
+    {
+      "source": "tests.data.test_datamodule",
+      "target": "data.datamodule",
+      "edge_type": "import",
+      "line": 14
+    },
+    {
+      "source": "tests.data.test_datamodule",
+      "target": "data.downloader",
+      "edge_type": "import",
+      "line": 15
+    },
+    {
+      "source": "tests.data.test_datamodule",
+      "target": "data.schema",
+      "edge_type": "import",
+      "line": 16
+    },
+    {
+      "source": "tests.data.test_datamodule",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 21
+    },
+    {
+      "source": "tests.data.test_dataset",
+      "target": "data.dataset",
+      "edge_type": "import",
+      "line": 9
+    },
+    {
+      "source": "tests.data.test_dataset",
+      "target": "data.indexing",
+      "edge_type": "import",
+      "line": 10
+    },
+    {
+      "source": "tests.data.test_dataset",
+      "target": "data.schema",
+      "edge_type": "import",
+      "line": 11
+    },
+    {
+      "source": "tests.data.test_dataset",
+      "target": "data.transforms",
+      "edge_type": "import",
+      "line": 12
+    },
+    {
+      "source": "tests.data.test_dataset",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 13
+    },
+    {
+      "source": "tests.data.test_downloader",
+      "target": "data.downloader",
+      "edge_type": "import",
+      "line": 15
+    },
+    {
+      "source": "tests.data.test_indexing",
+      "target": "data.indexing",
+      "edge_type": "import",
+      "line": 10
+    },
+    {
+      "source": "tests.data.test_indexing",
+      "target": "data.schema",
+      "edge_type": "import",
+      "line": 11
+    },
+    {
+      "source": "tests.data.test_indexing",
+      "target": "data.transforms",
+      "edge_type": "import",
+      "line": 12
+    },
+    {
+      "source": "tests.data.test_indexing",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 13
+    },
+    {
+      "source": "tests.data.test_preprocessor",
+      "target": "data.preprocessor",
+      "edge_type": "import",
+      "line": 14
+    },
+    {
+      "source": "tests.data.test_schema",
+      "target": "data.schema",
+      "edge_type": "import",
+      "line": 9
+    },
+    {
+      "source": "tests.data.test_schema",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 15
+    },
+    {
+      "source": "tests.data.test_schema",
+      "target": "utils.tft_utils",
+      "edge_type": "import",
+      "line": 16
+    },
+    {
+      "source": "tests.data.test_transforms",
+      "target": "data.schema",
+      "edge_type": "import",
+      "line": 9
+    },
+    {
+      "source": "tests.data.test_transforms",
+      "target": "data.transforms",
+      "edge_type": "import",
+      "line": 10
+    },
+    {
+      "source": "tests.data.test_transforms",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 11
+    },
+    {
+      "source": "tests.environment.test_diagnostics",
+      "target": "config",
+      "edge_type": "import",
+      "line": 3
+    },
+    {
+      "source": "tests.environment.test_diagnostics",
+      "target": "environment",
+      "edge_type": "import",
+      "line": 4
+    },
+    {
+      "source": "tests.environment.test_diagnostics",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 10
+    },
+    {
+      "source": "tests.environment.test_profiles",
+      "target": "config",
+      "edge_type": "import",
+      "line": 3
+    },
+    {
+      "source": "tests.environment.test_profiles",
+      "target": "environment",
+      "edge_type": "import",
+      "line": 4
+    },
+    {
+      "source": "tests.environment.test_profiles",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 5
+    },
+    {
+      "source": "tests.evaluation.test_evaluator",
+      "target": "evaluation",
+      "edge_type": "import",
+      "line": 17
+    },
+    {
+      "source": "tests.evaluation.test_metrics",
+      "target": "evaluation.metrics",
+      "edge_type": "import",
+      "line": 17
+    },
+    {
+      "source": "tests.manual.manual_data_smoke",
+      "target": "config",
+      "edge_type": "import",
+      "line": 23
+    },
+    {
+      "source": "tests.manual.manual_data_smoke",
+      "target": "data.datamodule",
+      "edge_type": "import",
+      "line": 21
+    },
+    {
+      "source": "tests.manual.manual_data_smoke",
+      "target": "data.dataset",
+      "edge_type": "import",
+      "line": 22
+    },
+    {
+      "source": "tests.models.test_fused_model",
+      "target": "config",
+      "edge_type": "import",
+      "line": 23
+    },
+    {
+      "source": "tests.models.test_fused_model",
+      "target": "models.fused_model",
+      "edge_type": "import",
+      "line": 22
+    },
+    {
+      "source": "tests.models.test_fused_model",
+      "target": "utils.tft_utils",
+      "edge_type": "import",
+      "line": 24
+    },
+    {
+      "source": "tests.models.test_grn",
+      "target": "config",
+      "edge_type": "import",
+      "line": 22
+    },
+    {
+      "source": "tests.models.test_grn",
+      "target": "models.grn",
+      "edge_type": "import",
+      "line": 21
+    },
+    {
+      "source": "tests.observability.test_callbacks",
+      "target": "config",
+      "edge_type": "import",
+      "line": 7
+    },
+    {
+      "source": "tests.observability.test_callbacks",
+      "target": "observability.callbacks",
+      "edge_type": "import",
+      "line": 8
+    },
+    {
+      "source": "tests.observability.test_callbacks",
+      "target": "tests.observability.support",
+      "edge_type": "import",
+      "line": 18
+    },
+    {
+      "source": "tests.observability.test_logging_utils",
+      "target": "observability.logging_utils",
+      "edge_type": "import",
+      "line": 5
+    },
+    {
+      "source": "tests.observability.test_logging_utils",
+      "target": "tests.observability.support",
+      "edge_type": "import",
+      "line": 10
+    },
+    {
+      "source": "tests.observability.test_package",
+      "target": "observability",
+      "edge_type": "import",
+      "line": 8
+    },
+    {
+      "source": "tests.observability.test_package",
+      "target": "observability.callbacks",
+      "edge_type": "import",
+      "line": 28
+    },
+    {
+      "source": "tests.observability.test_package",
+      "target": "observability.logging_utils",
+      "edge_type": "import",
+      "line": 29
+    },
+    {
+      "source": "tests.observability.test_package",
+      "target": "observability.reporting",
+      "edge_type": "import",
+      "line": 31
+    },
+    {
+      "source": "tests.observability.test_package",
+      "target": "observability.runtime",
+      "edge_type": "import",
+      "line": 33
+    },
+    {
+      "source": "tests.observability.test_reporting",
+      "target": "evaluation.types",
+      "edge_type": "import",
+      "line": 10
+    },
+    {
+      "source": "tests.observability.test_reporting",
+      "target": "observability.reporting",
+      "edge_type": "import",
+      "line": 11
+    },
+    {
+      "source": "tests.observability.test_runtime",
+      "target": "config",
+      "edge_type": "import",
+      "line": 9
+    },
+    {
+      "source": "tests.observability.test_runtime",
+      "target": "observability.runtime",
+      "edge_type": "import",
+      "line": 10
+    },
+    {
+      "source": "tests.support",
+      "target": "config",
+      "edge_type": "import",
+      "line": 12
+    },
+    {
+      "source": "tests.support",
+      "target": "environment",
+      "edge_type": "import",
+      "line": 13
+    },
+    {
+      "source": "tests.training.test_trainer_construction",
+      "target": "config",
+      "edge_type": "import",
+      "line": 29
+    },
+    {
+      "source": "tests.training.test_trainer_construction",
+      "target": "data.datamodule",
+      "edge_type": "import",
+      "line": 18
+    },
+    {
+      "source": "tests.training.test_trainer_construction",
+      "target": "observability",
+      "edge_type": "import",
+      "line": 19
+    },
+    {
+      "source": "tests.training.test_trainer_construction",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 30
+    },
+    {
+      "source": "tests.training.test_trainer_construction",
+      "target": "train",
+      "edge_type": "import",
+      "line": 9
+    },
+    {
+      "source": "tests.training.test_trainer_execution",
+      "target": "config",
+      "edge_type": "import",
+      "line": 16
+    },
+    {
+      "source": "tests.training.test_trainer_execution",
+      "target": "data.datamodule",
+      "edge_type": "import",
+      "line": 13
+    },
+    {
+      "source": "tests.training.test_trainer_execution",
+      "target": "models.fused_model",
+      "edge_type": "import",
+      "line": 14
+    },
+    {
+      "source": "tests.training.test_trainer_execution",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 17
+    },
+    {
+      "source": "tests.training.test_trainer_execution",
+      "target": "train",
+      "edge_type": "import",
+      "line": 10
+    },
+    {
+      "source": "tests.workflows.test_benchmark_workflow",
+      "target": "defaults",
+      "edge_type": "import",
+      "line": 13
+    },
+    {
+      "source": "tests.workflows.test_benchmark_workflow",
+      "target": "environment",
+      "edge_type": "import",
+      "line": 19
+    },
+    {
+      "source": "tests.workflows.test_benchmark_workflow",
+      "target": "models.fused_model",
+      "edge_type": "import",
+      "line": 20
+    },
+    {
+      "source": "tests.workflows.test_benchmark_workflow",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 22
+    },
+    {
+      "source": "tests.workflows.test_benchmark_workflow",
+      "target": "train",
+      "edge_type": "import",
+      "line": 21
+    },
+    {
+      "source": "tests.workflows.test_benchmark_workflow",
+      "target": "workflows.training",
+      "edge_type": "import",
+      "line": 23
+    },
+    {
+      "source": "tests.workflows.test_cli",
+      "target": "config",
+      "edge_type": "import",
+      "line": 6
+    },
+    {
+      "source": "tests.workflows.test_cli",
+      "target": "environment",
+      "edge_type": "import",
+      "line": 7
+    },
+    {
+      "source": "tests.workflows.test_cli",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 8
+    },
+    {
+      "source": "tests.workflows.test_cli",
+      "target": "workflows.cli",
+      "edge_type": "import",
+      "line": 9
+    },
+    {
+      "source": "tests.workflows.test_entrypoint",
+      "target": "defaults",
+      "edge_type": "import",
+      "line": 4
+    },
+    {
+      "source": "tests.workflows.test_entrypoint",
+      "target": "main",
+      "edge_type": "import",
+      "line": 3
+    },
+    {
+      "source": "tests.workflows.test_entrypoint",
+      "target": "workflows.cli",
+      "edge_type": "import",
+      "line": 10
+    },
+    {
+      "source": "tests.workflows.test_entrypoint",
+      "target": "workflows.helpers",
+      "edge_type": "import",
+      "line": 11
+    },
+    {
+      "source": "tests.workflows.test_entrypoint",
+      "target": "workflows.training",
+      "edge_type": "import",
+      "line": 12
+    },
+    {
+      "source": "tests.workflows.test_helpers",
+      "target": "config",
+      "edge_type": "import",
+      "line": 9
+    },
+    {
+      "source": "tests.workflows.test_helpers",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 10
+    },
+    {
+      "source": "tests.workflows.test_helpers",
+      "target": "workflows.cli",
+      "edge_type": "import",
+      "line": 11
+    },
+    {
+      "source": "tests.workflows.test_helpers",
+      "target": "workflows.helpers",
+      "edge_type": "import",
+      "line": 12
+    },
+    {
+      "source": "tests.workflows.test_training_workflow",
+      "target": "defaults",
+      "edge_type": "import",
+      "line": 13
+    },
+    {
+      "source": "tests.workflows.test_training_workflow",
+      "target": "environment",
+      "edge_type": "import",
+      "line": 17
+    },
+    {
+      "source": "tests.workflows.test_training_workflow",
+      "target": "models.fused_model",
+      "edge_type": "import",
+      "line": 15
+    },
+    {
+      "source": "tests.workflows.test_training_workflow",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 18
+    },
+    {
+      "source": "tests.workflows.test_training_workflow",
+      "target": "train",
+      "edge_type": "import",
+      "line": 16
+    },
+    {
+      "source": "tests.workflows.test_training_workflow",
+      "target": "workflows.training",
+      "edge_type": "import",
+      "line": 19
+    },
+    {
+      "source": "train",
+      "target": "config",
+      "edge_type": "import",
+      "line": 42
+    },
+    {
+      "source": "train",
+      "target": "data.datamodule",
+      "edge_type": "import",
+      "line": 28
+    },
+    {
+      "source": "train",
+      "target": "environment",
+      "edge_type": "import",
+      "line": 29
+    },
+    {
+      "source": "train",
+      "target": "models.fused_model",
+      "edge_type": "import",
+      "line": 35
+    },
+    {
+      "source": "train",
+      "target": "observability",
+      "edge_type": "import",
+      "line": 36
+    },
+    {
+      "source": "workflows",
+      "target": "workflows.cli",
+      "edge_type": "re_export",
+      "line": 20
+    },
+    {
+      "source": "workflows",
+      "target": "workflows.helpers",
+      "edge_type": "re_export",
+      "line": 21
+    },
+    {
+      "source": "workflows",
+      "target": "workflows.training",
+      "edge_type": "re_export",
+      "line": 22
+    },
+    {
+      "source": "workflows",
+      "target": "workflows.types",
+      "edge_type": "re_export",
+      "line": 26
+    },
+    {
+      "source": "workflows.cli",
+      "target": "config",
+      "edge_type": "import",
+      "line": 20
+    },
+    {
+      "source": "workflows.cli",
+      "target": "defaults",
+      "edge_type": "import",
+      "line": 21
+    },
+    {
+      "source": "workflows.cli",
+      "target": "environment",
+      "edge_type": "import",
+      "line": 30
+    },
+    {
+      "source": "workflows.cli",
+      "target": "workflows.helpers",
+      "edge_type": "import",
+      "line": 40
+    },
+    {
+      "source": "workflows.cli",
+      "target": "workflows.training",
+      "edge_type": "import",
+      "line": 51
+    },
+    {
+      "source": "workflows.cli",
+      "target": "workflows.types",
+      "edge_type": "import",
+      "line": 55
+    },
+    {
+      "source": "workflows.helpers",
+      "target": "config",
+      "edge_type": "import",
+      "line": 19
+    },
+    {
+      "source": "workflows.helpers",
+      "target": "environment",
+      "edge_type": "import",
+      "line": 20
+    },
+    {
+      "source": "workflows.helpers",
+      "target": "train",
+      "edge_type": "import",
+      "line": 27
+    },
+    {
+      "source": "workflows.training",
+      "target": "config",
+      "edge_type": "import",
+      "line": 24
+    },
+    {
+      "source": "workflows.training",
+      "target": "data.datamodule",
+      "edge_type": "import",
+      "line": 600
+    },
+    {
+      "source": "workflows.training",
+      "target": "defaults",
+      "edge_type": "import",
+      "line": 31
+    },
+    {
+      "source": "workflows.training",
+      "target": "environment",
+      "edge_type": "import",
+      "line": 37
+    },
+    {
+      "source": "workflows.training",
+      "target": "evaluation",
+      "edge_type": "import",
+      "line": 59
+    },
+    {
+      "source": "workflows.training",
+      "target": "observability",
+      "edge_type": "import",
+      "line": 602
+    },
+    {
+      "source": "workflows.training",
+      "target": "train",
+      "edge_type": "import",
+      "line": 60
+    },
+    {
+      "source": "workflows.training",
+      "target": "workflows.helpers",
+      "edge_type": "import",
+      "line": 49
+    },
+    {
+      "source": "workflows.training",
+      "target": "workflows.types",
+      "edge_type": "import",
+      "line": 54
+    },
+    {
+      "source": "workflows.types",
+      "target": "environment",
+      "edge_type": "import",
+      "line": 17
+    },
+    {
+      "source": "workflows.types",
+      "target": "evaluation",
+      "edge_type": "import",
+      "line": 22
+    },
+    {
+      "source": "workflows.types",
+      "target": "train",
+      "edge_type": "import",
+      "line": 23
+    }
+  ],
+  "package_edges": [
+    {
+      "source": "config",
+      "target": "utils",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "data",
+      "target": "config",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "data",
+      "target": "utils",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "defaults",
+      "target": "config",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "environment",
+      "target": "config",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "main",
+      "target": "defaults",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "main",
+      "target": "workflows",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "models",
+      "target": "config",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "models",
+      "target": "evaluation",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "observability",
+      "target": "config",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "observability",
+      "target": "evaluation",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "train",
+      "target": "config",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "train",
+      "target": "data",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "train",
+      "target": "environment",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "train",
+      "target": "models",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "train",
+      "target": "observability",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "workflows",
+      "target": "config",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "workflows",
+      "target": "data",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "workflows",
+      "target": "defaults",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "workflows",
+      "target": "environment",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "workflows",
+      "target": "evaluation",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "workflows",
+      "target": "observability",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "workflows",
+      "target": "train",
+      "edge_type": "import",
+      "line": null
+    }
+  ],
+  "test_edges": [
+    {
+      "source": "tests.config.test_data_config",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 8
+    },
+    {
+      "source": "tests.config.test_data_config",
+      "target": "utils.tft_utils",
+      "edge_type": "test_dependency",
+      "line": 9
+    },
+    {
+      "source": "tests.config.test_defaults",
+      "target": "defaults",
+      "edge_type": "test_dependency",
+      "line": 5
+    },
+    {
+      "source": "tests.config.test_model_config",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 9
+    },
+    {
+      "source": "tests.config.test_model_config",
+      "target": "utils.tft_utils",
+      "edge_type": "test_dependency",
+      "line": 17
+    },
+    {
+      "source": "tests.config.test_runtime_config",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 7
+    },
+    {
+      "source": "tests.conftest",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 39
+    },
+    {
+      "source": "tests.data.test_datamodule",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 22
+    },
+    {
+      "source": "tests.data.test_datamodule",
+      "target": "data.datamodule",
+      "edge_type": "test_dependency",
+      "line": 14
+    },
+    {
+      "source": "tests.data.test_datamodule",
+      "target": "data.downloader",
+      "edge_type": "test_dependency",
+      "line": 15
+    },
+    {
+      "source": "tests.data.test_datamodule",
+      "target": "data.schema",
+      "edge_type": "test_dependency",
+      "line": 16
+    },
+    {
+      "source": "tests.data.test_dataset",
+      "target": "data.dataset",
+      "edge_type": "test_dependency",
+      "line": 9
+    },
+    {
+      "source": "tests.data.test_dataset",
+      "target": "data.indexing",
+      "edge_type": "test_dependency",
+      "line": 10
+    },
+    {
+      "source": "tests.data.test_dataset",
+      "target": "data.schema",
+      "edge_type": "test_dependency",
+      "line": 11
+    },
+    {
+      "source": "tests.data.test_dataset",
+      "target": "data.transforms",
+      "edge_type": "test_dependency",
+      "line": 12
+    },
+    {
+      "source": "tests.data.test_downloader",
+      "target": "data.downloader",
+      "edge_type": "test_dependency",
+      "line": 15
+    },
+    {
+      "source": "tests.data.test_indexing",
+      "target": "data.indexing",
+      "edge_type": "test_dependency",
+      "line": 10
+    },
+    {
+      "source": "tests.data.test_indexing",
+      "target": "data.schema",
+      "edge_type": "test_dependency",
+      "line": 11
+    },
+    {
+      "source": "tests.data.test_indexing",
+      "target": "data.transforms",
+      "edge_type": "test_dependency",
+      "line": 12
+    },
+    {
+      "source": "tests.data.test_preprocessor",
+      "target": "data.preprocessor",
+      "edge_type": "test_dependency",
+      "line": 14
+    },
+    {
+      "source": "tests.data.test_schema",
+      "target": "data.schema",
+      "edge_type": "test_dependency",
+      "line": 9
+    },
+    {
+      "source": "tests.data.test_schema",
+      "target": "utils.tft_utils",
+      "edge_type": "test_dependency",
+      "line": 16
+    },
+    {
+      "source": "tests.data.test_transforms",
+      "target": "data.schema",
+      "edge_type": "test_dependency",
+      "line": 9
+    },
+    {
+      "source": "tests.data.test_transforms",
+      "target": "data.transforms",
+      "edge_type": "test_dependency",
+      "line": 10
+    },
+    {
+      "source": "tests.environment.test_diagnostics",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 3
+    },
+    {
+      "source": "tests.environment.test_diagnostics",
+      "target": "environment",
+      "edge_type": "test_dependency",
+      "line": 4
+    },
+    {
+      "source": "tests.environment.test_profiles",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 3
+    },
+    {
+      "source": "tests.environment.test_profiles",
+      "target": "environment",
+      "edge_type": "test_dependency",
+      "line": 4
+    },
+    {
+      "source": "tests.evaluation.test_evaluator",
+      "target": "evaluation",
+      "edge_type": "test_dependency",
+      "line": 17
+    },
+    {
+      "source": "tests.evaluation.test_metrics",
+      "target": "evaluation.metrics",
+      "edge_type": "test_dependency",
+      "line": 17
+    },
+    {
+      "source": "tests.manual.manual_data_smoke",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 23
+    },
+    {
+      "source": "tests.manual.manual_data_smoke",
+      "target": "data.datamodule",
+      "edge_type": "test_dependency",
+      "line": 21
+    },
+    {
+      "source": "tests.manual.manual_data_smoke",
+      "target": "data.dataset",
+      "edge_type": "test_dependency",
+      "line": 22
+    },
+    {
+      "source": "tests.models.test_fused_model",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 23
+    },
+    {
+      "source": "tests.models.test_fused_model",
+      "target": "models.fused_model",
+      "edge_type": "test_dependency",
+      "line": 22
+    },
+    {
+      "source": "tests.models.test_fused_model",
+      "target": "utils.tft_utils",
+      "edge_type": "test_dependency",
+      "line": 24
+    },
+    {
+      "source": "tests.models.test_grn",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 22
+    },
+    {
+      "source": "tests.models.test_grn",
+      "target": "models.grn",
+      "edge_type": "test_dependency",
+      "line": 21
+    },
+    {
+      "source": "tests.observability.test_callbacks",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 7
+    },
+    {
+      "source": "tests.observability.test_callbacks",
+      "target": "observability.callbacks",
+      "edge_type": "test_dependency",
+      "line": 8
+    },
+    {
+      "source": "tests.observability.test_logging_utils",
+      "target": "observability.logging_utils",
+      "edge_type": "test_dependency",
+      "line": 5
+    },
+    {
+      "source": "tests.observability.test_package",
+      "target": "observability",
+      "edge_type": "test_dependency",
+      "line": 8
+    },
+    {
+      "source": "tests.observability.test_package",
+      "target": "observability.callbacks",
+      "edge_type": "test_dependency",
+      "line": 28
+    },
+    {
+      "source": "tests.observability.test_package",
+      "target": "observability.logging_utils",
+      "edge_type": "test_dependency",
+      "line": 29
+    },
+    {
+      "source": "tests.observability.test_package",
+      "target": "observability.reporting",
+      "edge_type": "test_dependency",
+      "line": 31
+    },
+    {
+      "source": "tests.observability.test_package",
+      "target": "observability.runtime",
+      "edge_type": "test_dependency",
+      "line": 33
+    },
+    {
+      "source": "tests.observability.test_reporting",
+      "target": "evaluation.types",
+      "edge_type": "test_dependency",
+      "line": 10
+    },
+    {
+      "source": "tests.observability.test_reporting",
+      "target": "observability.reporting",
+      "edge_type": "test_dependency",
+      "line": 11
+    },
+    {
+      "source": "tests.observability.test_runtime",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 9
+    },
+    {
+      "source": "tests.observability.test_runtime",
+      "target": "observability.runtime",
+      "edge_type": "test_dependency",
+      "line": 10
+    },
+    {
+      "source": "tests.support",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 12
+    },
+    {
+      "source": "tests.support",
+      "target": "environment",
+      "edge_type": "test_dependency",
+      "line": 13
+    },
+    {
+      "source": "tests.training.test_trainer_construction",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 29
+    },
+    {
+      "source": "tests.training.test_trainer_construction",
+      "target": "data.datamodule",
+      "edge_type": "test_dependency",
+      "line": 18
+    },
+    {
+      "source": "tests.training.test_trainer_construction",
+      "target": "observability",
+      "edge_type": "test_dependency",
+      "line": 19
+    },
+    {
+      "source": "tests.training.test_trainer_construction",
+      "target": "train",
+      "edge_type": "test_dependency",
+      "line": 9
+    },
+    {
+      "source": "tests.training.test_trainer_execution",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 16
+    },
+    {
+      "source": "tests.training.test_trainer_execution",
+      "target": "data.datamodule",
+      "edge_type": "test_dependency",
+      "line": 13
+    },
+    {
+      "source": "tests.training.test_trainer_execution",
+      "target": "models.fused_model",
+      "edge_type": "test_dependency",
+      "line": 14
+    },
+    {
+      "source": "tests.training.test_trainer_execution",
+      "target": "train",
+      "edge_type": "test_dependency",
+      "line": 10
+    },
+    {
+      "source": "tests.workflows.test_benchmark_workflow",
+      "target": "defaults",
+      "edge_type": "test_dependency",
+      "line": 13
+    },
+    {
+      "source": "tests.workflows.test_benchmark_workflow",
+      "target": "environment",
+      "edge_type": "test_dependency",
+      "line": 19
+    },
+    {
+      "source": "tests.workflows.test_benchmark_workflow",
+      "target": "models.fused_model",
+      "edge_type": "test_dependency",
+      "line": 20
+    },
+    {
+      "source": "tests.workflows.test_benchmark_workflow",
+      "target": "train",
+      "edge_type": "test_dependency",
+      "line": 21
+    },
+    {
+      "source": "tests.workflows.test_benchmark_workflow",
+      "target": "workflows.training",
+      "edge_type": "test_dependency",
+      "line": 23
+    },
+    {
+      "source": "tests.workflows.test_cli",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 6
+    },
+    {
+      "source": "tests.workflows.test_cli",
+      "target": "environment",
+      "edge_type": "test_dependency",
+      "line": 7
+    },
+    {
+      "source": "tests.workflows.test_cli",
+      "target": "workflows.cli",
+      "edge_type": "test_dependency",
+      "line": 9
+    },
+    {
+      "source": "tests.workflows.test_entrypoint",
+      "target": "defaults",
+      "edge_type": "test_dependency",
+      "line": 4
+    },
+    {
+      "source": "tests.workflows.test_entrypoint",
+      "target": "main",
+      "edge_type": "test_dependency",
+      "line": 3
+    },
+    {
+      "source": "tests.workflows.test_entrypoint",
+      "target": "workflows.cli",
+      "edge_type": "test_dependency",
+      "line": 10
+    },
+    {
+      "source": "tests.workflows.test_entrypoint",
+      "target": "workflows.helpers",
+      "edge_type": "test_dependency",
+      "line": 11
+    },
+    {
+      "source": "tests.workflows.test_entrypoint",
+      "target": "workflows.training",
+      "edge_type": "test_dependency",
+      "line": 12
+    },
+    {
+      "source": "tests.workflows.test_helpers",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 9
+    },
+    {
+      "source": "tests.workflows.test_helpers",
+      "target": "workflows.cli",
+      "edge_type": "test_dependency",
+      "line": 11
+    },
+    {
+      "source": "tests.workflows.test_helpers",
+      "target": "workflows.helpers",
+      "edge_type": "test_dependency",
+      "line": 12
+    },
+    {
+      "source": "tests.workflows.test_training_workflow",
+      "target": "defaults",
+      "edge_type": "test_dependency",
+      "line": 13
+    },
+    {
+      "source": "tests.workflows.test_training_workflow",
+      "target": "environment",
+      "edge_type": "test_dependency",
+      "line": 17
+    },
+    {
+      "source": "tests.workflows.test_training_workflow",
+      "target": "models.fused_model",
+      "edge_type": "test_dependency",
+      "line": 15
+    },
+    {
+      "source": "tests.workflows.test_training_workflow",
+      "target": "train",
+      "edge_type": "test_dependency",
+      "line": 16
+    },
+    {
+      "source": "tests.workflows.test_training_workflow",
+      "target": "workflows.training",
+      "edge_type": "test_dependency",
+      "line": 19
+    }
+  ]
+}

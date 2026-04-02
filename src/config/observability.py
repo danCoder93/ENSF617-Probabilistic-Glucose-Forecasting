@@ -89,6 +89,14 @@ class ObservabilityConfig:
     torchview_expand_nested: bool = True
 
     def __post_init__(self) -> None:
+        """
+        Validate observability mode/limits and normalize filesystem targets.
+
+        Context:
+        observability is runtime policy rather than model semantics, so this is
+        the earliest safe place to reject impossible sampling settings or invalid
+        output-path values.
+        """
         # Validate high-level behavior early so invalid observability requests
         # fail near config construction time rather than much later during
         # trainer assembly.
@@ -138,4 +146,3 @@ class ObservabilityConfig:
             )
         if self.torchview_depth <= 0:
             raise ValueError("torchview_depth must be > 0")
-

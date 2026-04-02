@@ -41,11 +41,13 @@ class BatchAuditCallback(Callback):
         *,
         text_logger: logging.Logger | None = None,
     ) -> None:
+        """Store batch-audit policy, optional text logger, and per-stage audit counters."""
         self.config = config
         self.text_logger = text_logger
         self._seen_counts = {"train": 0, "val": 0, "test": 0}
 
     def _maybe_log_batch(self, trainer: Any, stage: str, batch: Any) -> None:
+        """Emit one summarized batch snapshot when the stage-specific audit cap allows it."""
         # Audit only a small number of batches per stage to keep the text logs
         # and TensorBoard text pane useful rather than overwhelming.
         if not self.config.enable_batch_audit:
@@ -66,6 +68,7 @@ class BatchAuditCallback(Callback):
         batch: Any,
         batch_idx: int,
     ) -> None:
+        """Training hook that records an early batch summary when auditing is enabled."""
         del pl_module, batch_idx
         self._maybe_log_batch(trainer, "train", batch)
 
@@ -77,6 +80,7 @@ class BatchAuditCallback(Callback):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
+        """Validation hook that records an early batch summary when auditing is enabled."""
         del pl_module, batch_idx, dataloader_idx
         self._maybe_log_batch(trainer, "val", batch)
 
@@ -88,6 +92,7 @@ class BatchAuditCallback(Callback):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
+        """Test hook that records an early batch summary when auditing is enabled."""
         del pl_module, batch_idx, dataloader_idx
         self._maybe_log_batch(trainer, "test", batch)
 
@@ -108,9 +113,11 @@ class GradientStatsCallback(Callback):
     """
 
     def __init__(self, config: ObservabilityConfig) -> None:
+        """Store the debug-sampling policy used for gradient and parameter-health logging."""
         self.config = config
 
     def on_after_backward(self, trainer: Any, pl_module: Any) -> None:
+        """Summarize gradient and parameter health immediately after backpropagation."""
         # This hook runs after gradients exist but before the next optimizer
         # step. That makes it the right place to summarize gradient health
         # without having to modify model code.
@@ -173,11 +180,13 @@ class ActivationStatsCallback(Callback):
     """
 
     def __init__(self, config: ObservabilityConfig) -> None:
+        """Initialize activation-stat policy plus the hook/metric state used during fit."""
         self.config = config
         self._handles: list[Any] = []
         self._pending_metrics: dict[str, float] = {}
 
     def _register_hook(self, pl_module: Any, module_name: str) -> None:
+        """Attach one forward hook to a named high-level module if that module exists."""
         # We register on named high-level modules rather than every submodule
         # to keep the activation output readable and tied to the architecture
         # the user actually thinks about.
@@ -211,6 +220,7 @@ class ActivationStatsCallback(Callback):
         self._handles.append(module.register_forward_hook(hook))
 
     def on_fit_start(self, trainer: Any, pl_module: Any) -> None:
+        """Register activation hooks on the major fused-model blocks at fit start."""
         del trainer
         if not self.config.enable_activation_stats:
             return
@@ -225,6 +235,7 @@ class ActivationStatsCallback(Callback):
         batch: Any,
         batch_idx: int,
     ) -> None:
+        """Flush any staged activation metrics once the training batch has finished."""
         del pl_module, outputs, batch, batch_idx
         if not self._pending_metrics:
             return
@@ -235,6 +246,7 @@ class ActivationStatsCallback(Callback):
         self._pending_metrics = {}
 
     def on_fit_end(self, trainer: Any, pl_module: Any) -> None:
+        """Remove any registered activation hooks so later runs do not retain stale instrumentation."""
         del trainer, pl_module
         for handle in self._handles:
             handle.remove()

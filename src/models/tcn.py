@@ -79,10 +79,12 @@ class ChannelLayerNorm(nn.Module):
     """
 
     def __init__(self, num_channels: int) -> None:
+        """Create the LayerNorm instance used after temporarily moving channels to the trailing axis."""
         super().__init__()
         self.norm = nn.LayerNorm(num_channels)
 
     def forward(self, x: Tensor) -> Tensor:
+        """Normalize a channel-first temporal tensor and restore its original layout."""
         # Temporarily move channels to the last dimension so standard LayerNorm
         # can normalize feature channels at each timestep independently.
         return self.norm(x.transpose(1, 2)).transpose(1, 2)
@@ -111,6 +113,7 @@ class CausalConv1d(nn.Module):
         kernel_size: int,
         dilation: int,
     ) -> None:
+        """Create the causal convolution and remember the amount of left padding required."""
         super().__init__()
         # Effective receptive field grows with both kernel size and dilation.
         # This is the core mechanism that lets the TCN cover short and mid-range
@@ -130,6 +133,7 @@ class CausalConv1d(nn.Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
+        """Apply left padding and run the causal convolution without future leakage."""
         # Left padding ensures the convolution output stays length-preserving
         # without letting the filter see timesteps to the right of the current
         # position.
@@ -164,6 +168,7 @@ class TemporalBlock(nn.Module):
         dropout: float,
         activation_name: str,
     ) -> None:
+        """Build one residual temporal block at a single dilation scale."""
         super().__init__()
         # First temporal transform:
         # causal conv -> normalization -> nonlinearity -> dropout
@@ -197,6 +202,7 @@ class TemporalBlock(nn.Module):
         self.output_activation = _build_activation(activation_name)
 
     def forward(self, x: Tensor) -> Tensor:
+        """Apply the two-convolution residual temporal block and return the transformed history."""
         residual = self.residual_projection(x)
 
         # The main path learns a causal temporal transformation while the
@@ -246,6 +252,14 @@ class TCN(nn.Module):
     """
 
     def __init__(self, config: TCNConfig) -> None:
+        """
+        Build the project-specific TCN backbone, horizon summarizer, and output head.
+
+        Context:
+        one instance of this class represents one kernel-size branch inside the
+        fused model, so construction stays focused on history-only temporal
+        encoding rather than broader sequence-modeling features.
+        """
         super().__init__()
         # Each dilation value configures one residual block, so the backbone
         # depth is defined jointly by `num_channels` and `dilations`.
@@ -305,6 +319,7 @@ class TCN(nn.Module):
         self.output_proj = nn.Linear(last_channels, config.output_size)
 
     def encode(self, x: Tensor) -> Tensor:
+        """Run the causal residual backbone over encoder history and return temporal features."""
         if x.ndim != 3:
             raise ValueError(
                 "TCN expects input shaped [batch, encoder_length, num_inputs]"
@@ -326,6 +341,7 @@ class TCN(nn.Module):
         return x.transpose(1, 2)
 
     def summarize(self, x: Tensor) -> Tensor:
+        """Collapse encoded history into one compact branch summary at the forecast origin."""
         encoded = self.encode(x)
 
         # We summarize the final encoded timestep because it has the widest
@@ -338,6 +354,7 @@ class TCN(nn.Module):
         return encoded[:, -1, :]
 
     def forward_features(self, x: Tensor) -> Tensor:
+        """Return the branch's horizon-aligned latent features before final scalar projection."""
         # This is the interface the fused model uses. It expands one compact
         # branch summary into one hidden feature vector per forecast step so the
         # TCN can participate in late fusion as a representation branch rather
@@ -351,6 +368,7 @@ class TCN(nn.Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
+        """Return the branch's final per-horizon output channels."""
         # Keep a branch-local forecast path available so the TCN still behaves
         # like a normal forecaster when called directly. The fused model now
         # uses `forward_features(...)` instead.

@@ -39,6 +39,15 @@ DEFAULT_GLUCOSE_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
 
 @dataclass
 class _GroupedAccumulator:
+    """
+    Running totals for one grouped evaluation slice.
+
+    Context:
+    the evaluator flattens predictions into row records first, and this
+    accumulator then folds just the numeric fields needed to produce the grouped
+    metric schema.
+    """
+
     count: int = 0
     abs_error_sum: float = 0.0
     squared_error_sum: float = 0.0
@@ -50,6 +59,7 @@ class _GroupedAccumulator:
     coverage_count: int = 0
 
     def update(self, row: dict[str, Any]) -> None:
+        """Fold one row-level evaluation record into the running grouped totals."""
         # This accumulator intentionally keeps only the running totals needed by
         # the current grouped-metric surface. That keeps grouped aggregation
         # cheap and easy to inspect.
@@ -75,6 +85,7 @@ class _GroupedAccumulator:
             self.coverage_count += 1
 
     def to_row(self, *, group_name: str, group_value: str | int) -> GroupedMetricRow:
+        """Convert the accumulated totals into one public grouped-metric row."""
         # Returning an explicit zeroed row for the empty case keeps the grouped
         # result shape predictable, even though current callers normally only
         # build accumulators for seen groups.

@@ -126,6 +126,14 @@ class TFTEmbedding(Module):
     """
 
     def __init__(self, config, initialize_cont_params=True):
+        """
+        Bind one embedding sub-path per semantic TFT input group.
+
+        Context:
+        TFT keeps variables separate after embedding so later variable-selection
+        blocks can score their importance explicitly rather than after the
+        features have already been mixed together.
+        """
         # `initialize_cont_params=False` is used by `LazyEmbedding` so the
         # continuous embedding parameters can be materialized only after the
         # real grouped-input widths are known at runtime.
@@ -190,6 +198,14 @@ class TFTEmbedding(Module):
 
 
     def reset_parameters(self):
+        """
+        Initialize continuous projections and categorical lookup tables.
+
+        Context:
+        the continuous path uses explicit parameter tensors rather than plain
+        `nn.Linear` modules, so the embedding block owns their initialization
+        policy directly.
+        """
         # Continuous embedding matrices are initialized with Xavier so each
         # feature-specific hidden vector starts with a reasonable scale instead
         # of collapsing to zero or exploding. Bias terms start at zero so the
@@ -230,6 +246,14 @@ class TFTEmbedding(Module):
             cont_emb: Optional[Tensor], # continuous weights embeddings
             cont_bias: Optional[Tensor], # continuous bias embeddings
             ) -> Optional[Tensor]:
+        """
+        Embed one semantic variable group into TFT's per-variable hidden layout.
+
+        Context:
+        this helper unifies categorical lookup embeddings and continuous
+        pointwise linear embeddings behind the same output convention so later
+        TFT blocks can operate on "variable slots" instead of raw input types.
+        """
         # Convert one semantic feature group into per-variable hidden vectors.
         # This helper keeps categorical and continuous paths aligned so the rest
         # of the module can work in terms of "embedded variable slots" rather
@@ -268,6 +292,14 @@ class TFTEmbedding(Module):
             return None
 
     def forward(self, x: TFTInputBatch):
+        """
+        Convert the grouped TFT batch contract into embedded static and temporal streams.
+
+        Context:
+        this is the boundary between raw grouped input tensors from the fused
+        model/data pipeline and the per-variable hidden representations consumed
+        by the downstream static encoder and temporal backbone.
+        """
         # Pull apart the semantic batch groups that FusedModel assembled for
         # TFT. Every key corresponds to one role in the shared schema.
         s_cat_inp = x.get('s_cat', None)
@@ -343,6 +375,14 @@ class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
     cls_to_become = TFTEmbedding
 
     def __init__(self, config):
+        """
+        Create a TFT embedding block whose continuous parameters are shape-lazy.
+
+        Context:
+        several continuous feature widths are only fully known once runtime data
+        metadata is bound, so this variant defers parameter materialization until
+        it sees one real grouped batch.
+        """
         # Call into `TFTEmbedding` without eager continuous-parameter creation.
         # This preserves the same public behavior while deferring shape binding
         # until the first real batch arrives.
@@ -377,6 +417,14 @@ class LazyEmbedding(LazyModuleMixin, TFTEmbedding):
         self.t_tgt_embedding_bias = UninitializedParameter()
 
     def initialize_parameters(self, x):
+        """
+        Materialize deferred continuous-embedding parameters from one grouped batch.
+
+        Context:
+        after this method runs once, the lazy embedding has the same parameter
+        structure as the eager embedding path and can share the same forward
+        implementation and initialization routine.
+        """
         # Materialize any continuous-embedding parameters the first time the
         # module sees a real batch. After this, the module behaves like a normal
         # eagerly initialized embedding block.
@@ -429,6 +477,14 @@ class VariableSelectionNetwork(Module):
     """
 
     def __init__(self, config, num_inputs):
+        """
+        Build the joint and per-variable GRNs used to score and transform variables.
+
+        Context:
+        TFT separates "how should this variable be transformed?" from "how much
+        should this variable matter right now?", and this module owns both parts
+        of that variable-selection contract.
+        """
         super().__init__()
         # The joint GRN consumes the flattened per-variable embeddings and emits
         # one score per input variable. We keep the input/output sizing explicit
@@ -449,6 +505,14 @@ class VariableSelectionNetwork(Module):
         )
 
     def forward(self, x: Tensor, context: Optional[Tensor] = None):
+        """
+        Reduce a set of variable slots into one context-aware hidden representation.
+
+        Context:
+        the output keeps the common hidden size but removes the explicit
+        variable axis by learning sparse weights over the transformed variable
+        embeddings.
+        """
         # Flatten the per-variable embeddings so the joint GRN can score all
         # variables together, then normalize those scores into attention-like
         # sparse weights over the variable axis.
@@ -488,6 +552,14 @@ class StaticCovariateEncoder(Module):
     """
 
     def __init__(self, config):
+        """
+        Build the static-variable encoder and its downstream context projections.
+
+        Context:
+        TFT uses one selected static summary vector to seed several later roles,
+        so this module packages the selection step and the four derived context
+        projections together.
+        """
         super().__init__()
         self.vsn = VariableSelectionNetwork(config, config.num_static_vars)
         # The static encoder produces four distinct context vectors used by the
@@ -499,6 +571,14 @@ class StaticCovariateEncoder(Module):
         )
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+        """
+        Encode static inputs into the four context vectors reused across TFT.
+
+        Context:
+        these outputs drive variable selection, static enrichment, and recurrent
+        initialization, so keeping them derived from one shared static summary
+        keeps those downstream stages aligned.
+        """
         variable_ctx, sparse_weights = self.vsn(x)
         # `variable_ctx` is the single static summary vector after TFT has
         # decided which static variables matter most. From that one summary, the
@@ -526,6 +606,14 @@ class InterpretableMultiHeadAttention(Module):
     """
 
     def __init__(self, config):
+        """
+        Build TFT's causal self-attention block with a shared-value-head design.
+
+        Context:
+        this attention variant keeps separate query/key projections per head but
+        shares the value projection so head outputs remain directly comparable
+        and can be averaged for TFT's interpretable attention behavior.
+        """
         super().__init__()
         self.n_head = config.n_head
         assert config.hidden_size % config.n_head == 0
@@ -541,6 +629,14 @@ class InterpretableMultiHeadAttention(Module):
         self.register_buffer("_mask", torch.triu(torch.full((config.example_length, config.example_length), float('-inf')), 1).unsqueeze(0))
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
+        """
+        Apply causal self-attention over the full historical-plus-future temporal stream.
+
+        Context:
+        the returned attention map is part of the block's interpretability
+        contract, while the projected output continues through the decoder-side
+        residual path.
+        """
         bs, t, h_size = x.shape
         # The linear layer emits:
         # - one query vector per head
@@ -591,6 +687,14 @@ class TFTBack(Module):
     """
 
     def __init__(self, config):
+        """
+        Construct the post-embedding temporal reasoning stack of TFT.
+
+        Context:
+        this module owns the historical/future variable-selection blocks, the
+        recurrent encoders, static enrichment, causal attention, and final
+        decoder-side quantile projection.
+        """
         super().__init__()
 
         self.encoder_length = config.encoder_length
@@ -631,6 +735,14 @@ class TFTBack(Module):
         self.quantile_proj = nn.Linear(config.hidden_size, len(config.quantiles))
         
     def forward(self, historical_inputs, cs, ch, cc, ce, future_inputs):
+        """
+        Turn embedded historical and future inputs into decoder features and quantiles.
+
+        Context:
+        the method keeps TFT's major stages explicit: variable selection,
+        recurrent encoding, static enrichment, causal attention, decoder-side
+        refinement, and final quantile projection.
+        """
         # Historical and future inputs are processed separately at first because
         # TFT treats "already observed" and "known ahead" information
         # differently before joining them into one temporal stream.
@@ -701,6 +813,13 @@ class TemporalFusionTransformer(Module):
     - as a representation branch inside the fused model via `forward_features(...)`
     """
     def __init__(self, config: TFTConfig):
+        """
+        Build the repository's TFT branch with both feature and quantile interfaces.
+
+        Context:
+        this wrapper keeps one TFT implementation usable both as a standalone
+        forecaster and as the latent-feature branch consumed by the fused model.
+        """
         super().__init__()
 
         # This determines where the example transitions from encoder history to
@@ -728,6 +847,14 @@ class TemporalFusionTransformer(Module):
         self.temporal_backbone = TFTBack(config)
 
     def forward_with_features(self, x: TFTInputBatch) -> Tuple[Tensor, Tensor]:
+        """
+        Run TFT and return both latent decoder features and final quantile outputs.
+
+        Context:
+        the fused model needs the latent decoder representation before quantile
+        projection, while standalone TFT inference still wants the projected
+        probabilistic forecast from the same forward path.
+        """
         # Accept the same optional-group contract as `forward(...)` because the
         # fused model uses this latent-feature path directly. Keeping the two
         # signatures aligned prevents the feature-extraction interface from
@@ -766,12 +893,26 @@ class TemporalFusionTransformer(Module):
         )
 
     def forward_features(self, x: TFTInputBatch) -> Tensor:
+        """
+        Return only the horizon-aligned decoder representation produced by TFT.
+
+        Context:
+        this is the interface consumed by the fused model, where fusion happens
+        in latent space before the final quantile readout.
+        """
         # Expose the decoder representation before quantile projection so the
         # fused model can combine TFT features with TCN features in latent space.
         features, _ = self.forward_with_features(x)
         return features
 
     def forward(self, x: TFTInputBatch) -> Tensor:
+        """
+        Return TFT's standalone probabilistic forecast output.
+
+        Context:
+        this remains the default public interface for callers that use TFT as an
+        end-to-end model rather than as a branch inside the fused architecture.
+        """
         # Default standalone interface: return probabilistic forecast outputs.
         _, quantiles = self.forward_with_features(x)
         return quantiles

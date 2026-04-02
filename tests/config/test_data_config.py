@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+# These tests protect the narrow `DataConfig` contract used by the data layer.
+#
+# They focus on two responsibilities:
+# - normalizing user-facing path inputs into stable `Path` objects
+# - rejecting split/dataloader settings that would make the data contract
+#   inconsistent before the rest of the pipeline starts
+
 from pathlib import Path
 from typing import cast
 
@@ -10,12 +17,16 @@ from utils.tft_utils import DataTypes, FeatureSpec, InputTypes
 
 
 def _feature_specs(*specs: FeatureSpec) -> tuple[FeatureSpec, ...]:
+    # Keeping the tuple helper local makes the tests read in terms of semantic
+    # feature declarations instead of casts.
     return cast(tuple[FeatureSpec, ...], specs)
 
 
 def test_data_config_normalizes_paths_and_preserves_processed_file_contract(
     tmp_path: Path,
 ) -> None:
+    # Path normalization is a core part of the config contract because the data
+    # layer accepts user-friendly strings but downstream code expects `Path`.
     features = _feature_specs(
         FeatureSpec("subject_id", InputTypes.STATIC, DataTypes.CATEGORICAL),
     )
@@ -44,6 +55,8 @@ def test_data_config_normalizes_paths_and_preserves_processed_file_contract(
 
 
 def test_data_config_rejects_invalid_split_contracts() -> None:
+    # Split policy mistakes should fail at config construction time rather than
+    # surfacing later as confusing empty-window or leakage issues.
     with pytest.raises(ValueError, match="sum to 1.0"):
         DataConfig(train_ratio=0.8, val_ratio=0.15, test_ratio=0.15)
 

@@ -144,6 +144,14 @@ class FusedModelTrainer:
         logger: Any = None,
         callbacks: Sequence[Callback] = (),
     ) -> None:
+        """
+        Bind declarative config, trainer policy, observability, and runtime tuning state.
+
+        Context:
+        construction prepares the reusable orchestration object but deliberately
+        stops short of building the model or Trainer. Those later steps depend
+        on runtime metadata discovered from the DataModule.
+        """
         # `config` is the declarative project config. It is intentionally kept
         # unmodified here because the runtime-bound variant depends on the
         # DataModule's discovered metadata and is therefore produced later.
@@ -215,6 +223,14 @@ class FusedModelTrainer:
         self.best_checkpoint_path: str = ""
 
     def _prepare_datamodule(self, datamodule: AZT1DDataModule) -> None:
+        """
+        Eagerly prepare and set up the DataModule before model construction.
+
+        Context:
+        this repository binds runtime-discovered feature metadata into the model
+        config, so the wrapper needs the post-setup DataModule state earlier
+        than a typical Lightning project would.
+        """
         # We prepare/setup eagerly because runtime categorical metadata must be
         # known before `FusedModel` can be constructed with a bound TFT config.
         #
@@ -230,6 +246,14 @@ class FusedModelTrainer:
         datamodule.setup()
 
     def build_model(self, datamodule: AZT1DDataModule) -> FusedModel:
+        """
+        Build the fused LightningModule using the DataModule's bound runtime config.
+
+        Context:
+        the model cannot be instantiated from the declarative top-level config
+        alone because categorical cardinalities and a few fallback feature
+        details become concrete only after the DataModule inspects the data.
+        """
         # Step 1: make sure the DataModule has discovered all runtime metadata
         # needed by the TFT branch.
         self._prepare_datamodule(datamodule)
@@ -253,12 +277,27 @@ class FusedModelTrainer:
         return model
 
     def has_validation_data(self, datamodule: AZT1DDataModule) -> bool:
+        """
+        Report whether the prepared DataModule exposes any validation windows.
+
+        Context:
+        this helper exists so notebook and workflow code can query split
+        availability without reimplementing DataModule preparation and length
+        checks.
+        """
         # Exposed as a helper because notebook/main callers may want to inspect
         # split availability before actually launching training.
         self._prepare_datamodule(datamodule)
         return _dataset_size(datamodule.val_dataset) > 0
 
     def has_test_data(self, datamodule: AZT1DDataModule) -> bool:
+        """
+        Report whether the prepared DataModule exposes any test windows.
+
+        Context:
+        the wrapper uses the same split-availability policy for both external
+        callers and its own internal fit/test/predict orchestration.
+        """
         # Same idea as `has_validation_data(...)`: keep split-availability
         # checks in one place rather than repeating DataModule setup and length
         # logic in outer scripts.
@@ -266,6 +305,14 @@ class FusedModelTrainer:
         return _dataset_size(datamodule.test_dataset) > 0
 
     def build_callbacks(self, *, has_validation_data: bool) -> list[Callback]:
+        """
+        Assemble the callback stack for one training run.
+
+        Context:
+        callback construction is where caller-supplied hooks, project
+        observability defaults, checkpoint policy, and early stopping policy are
+        merged into one ordered runtime contract.
+        """
         # Start from any user-supplied callbacks so the wrapper remains
         # extensible; the project-specific callbacks are appended after that so
         # they can coexist with logger-specific or experiment-specific hooks.
@@ -362,6 +409,14 @@ class FusedModelTrainer:
         return callbacks
 
     def build_trainer(self, *, has_validation_data: bool) -> Trainer:
+        """
+        Translate the repository's `TrainConfig` into a Lightning `Trainer`.
+
+        Context:
+        this is the main adapter layer between the repo's typed runtime policy
+        and Lightning's constructor kwargs, including validation-dependent
+        behavior and observability integration.
+        """
         # Keep Trainer construction data-driven so `main.py` or notebooks can
         # configure runs by passing a typed `TrainConfig` rather than rebuilding
         # this argument list each time.
@@ -435,6 +490,14 @@ class FusedModelTrainer:
         *,
         ckpt_path: str | Path | None = None,
     ) -> FitArtifacts:
+        """
+        Build the model, optionally compile it, and hand the epoch loop to Lightning.
+
+        Context:
+        `fit(...)` is the wrapper's primary entry point because it establishes
+        the in-memory model, bound runtime config, Trainer session, and cached
+        checkpoint state later reused by evaluation and prediction helpers.
+        """
         # `fit(...)` is the primary orchestration entry point:
         # 1. build the bound model from the prepared DataModule
         # 2. decide whether validation/test splits are actually populated
@@ -537,6 +600,14 @@ class FusedModelTrainer:
         )
 
     def _require_fit_state(self) -> tuple[FusedModel, Trainer]:
+        """
+        Return the in-memory model and Trainer, or raise if `fit()` has not run.
+
+        Context:
+        several evaluation helpers intentionally reuse the current training
+        session instead of rebuilding everything from scratch, so this guard
+        keeps that requirement explicit.
+        """
         # The current implementation supports in-memory evaluation/prediction
         # after a training run. This guard makes that contract explicit instead
         # of failing later with a less readable `NoneType` error.
@@ -551,6 +622,14 @@ class FusedModelTrainer:
         return self.model, self.trainer
 
     def _resolve_checkpoint_reference(self, ckpt_path: CheckpointSelection) -> str | None:
+        """
+        Normalize checkpoint selection into the form expected by Lightning.
+
+        Context:
+        the wrapper accepts `None`, Lightning aliases such as `"best"` and
+        `"last"`, and explicit filesystem paths. Centralizing that translation
+        keeps all evaluation entry points aligned.
+        """
         # This helper accepts three checkpoint styles:
         # - `None`: use the current in-memory model
         # - `"best"` / `"last"`: let Lightning resolve a standard alias
@@ -585,6 +664,14 @@ class FusedModelTrainer:
         return str(Path(ckpt_path))
 
     def _model_for_evaluation(self, resolved_ckpt_path: str | None) -> FusedModel:
+        """
+        Choose whether evaluation should use the in-memory model or reload from disk.
+
+        Context:
+        alias-based and in-memory evaluation stay attached to the current fit
+        session, while explicit checkpoint paths intentionally construct a fresh
+        model instance from saved weights.
+        """
         # If the caller asked for in-memory evaluation, or for Lightning's
         # built-in `"best"` / `"last"` aliases, we keep using the model already
         # attached to the current training session.
@@ -607,6 +694,14 @@ class FusedModelTrainer:
         *,
         ckpt_path: CheckpointSelection = "best",
     ) -> list[Mapping[str, float]]:
+        """
+        Evaluate the held-out test split with the selected checkpoint reference.
+
+        Context:
+        this method is intentionally thin around Lightning's `trainer.test(...)`
+        and exists mainly to enforce repo-specific split checks, checkpoint
+        normalization, and in-memory fit-state reuse.
+        """
         # We re-run DataModule preparation here so test-time calls from a
         # notebook remain robust even if they happen in a later cell after the
         # original fit call.
@@ -649,6 +744,14 @@ class FusedModelTrainer:
         *,
         ckpt_path: CheckpointSelection = "best",
     ) -> list[Tensor]:
+        """
+        Produce raw probabilistic forecasts for the held-out test split.
+
+        Context:
+        this mirrors `test(...)` but routes through Lightning's prediction loop
+        so callers receive the full quantile tensors needed by reporting and
+        downstream analysis helpers.
+        """
         # `predict_test(...)` mirrors `test(...)`, but routes through
         # `trainer.predict(...)` so the caller gets the raw probabilistic output
         # tensors from `FusedModel.predict_step(...)`.
@@ -702,6 +805,14 @@ class FusedModelTrainer:
         fit_ckpt_path: str | Path | None = None,
         eval_ckpt_path: CheckpointSelection = "best",
     ) -> TrainingRunArtifacts:
+        """
+        Run the common experiment pattern of fit, test, and held-out prediction in one call.
+
+        Context:
+        this method is composition over the public stage-specific helpers, not a
+        second hidden execution path, so all stage semantics remain defined in
+        one place.
+        """
         # Convenience method for the common workflow used in experiments:
         # train the model, evaluate the held-out test split, and collect raw
         # test predictions in one call.

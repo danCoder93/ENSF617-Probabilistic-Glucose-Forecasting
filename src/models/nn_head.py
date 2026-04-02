@@ -40,6 +40,7 @@ class ResidualMLPBlock(nn.Module):
     """
 
     def __init__(self, hidden_size: int, feedforward_size: int, dropout: float) -> None:
+        """Create one residual position-wise feed-forward refinement block."""
         super().__init__()
         # The inner width is deliberately larger than the external hidden size.
         # This lets the block briefly expand the representation, apply a
@@ -57,6 +58,7 @@ class ResidualMLPBlock(nn.Module):
         self.norm = nn.LayerNorm(hidden_size)
 
     def forward(self, x: Tensor) -> Tensor:
+        """Refine one `[batch, horizon, hidden]` tensor while preserving its external shape."""
         # Input / output shape:
         #   [batch, prediction_length, hidden_size]
         #
@@ -103,6 +105,14 @@ class NNHead(nn.Module):
         num_blocks: int = 2,
         dropout: float = 0.1,
     ) -> None:
+        """
+        Build the final position-wise readout stack over fused horizon features.
+
+        Context:
+        the head assumes temporal reasoning and branch fusion have already
+        happened upstream, so its job is only to widen, refine, and project each
+        horizon step independently into the final forecast channels.
+        """
         super().__init__()
         if num_blocks <= 0:
             raise ValueError("num_blocks must be > 0")
@@ -152,6 +162,7 @@ class NNHead(nn.Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
+        """Project fused hidden features into the final per-horizon output channels."""
         # Input:
         #   [batch, prediction_length, input_size]
         # Output:

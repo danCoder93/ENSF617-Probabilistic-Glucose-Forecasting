@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# These tests protect the observability runtime-setup helpers that assemble the
+# logger, profiler, and text logging surfaces for a run.
+
 from pathlib import Path
 
 import pytest
@@ -13,6 +16,8 @@ from observability.runtime import build_lightning_logger, setup_observability
 def test_build_lightning_logger_falls_back_to_csv_when_tensorboard_is_disabled(
     tmp_path: Path,
 ) -> None:
+    # When TensorBoard is disabled, the runtime setup should still leave the run
+    # with a usable scalar logger via the CSV fallback path.
     logger, logger_dir = build_lightning_logger(
         ObservabilityConfig(
             enable_tensorboard=False,
@@ -26,6 +31,8 @@ def test_build_lightning_logger_falls_back_to_csv_when_tensorboard_is_disabled(
 
 
 def test_setup_observability_creates_text_logger_and_profiler(tmp_path: Path) -> None:
+    # This is the broadest runtime-setup smoke test in the file: logger,
+    # profiler, and text-log surfaces should all come back wired and usable.
     config = ObservabilityConfig(
         enable_tensorboard=False,
         enable_csv_fallback_logger=True,

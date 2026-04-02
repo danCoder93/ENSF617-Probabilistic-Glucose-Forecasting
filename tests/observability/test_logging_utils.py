@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# These tests protect the small logging helpers shared across the observability
+# package.
+
 from pathlib import Path
 
 from observability.logging_utils import (
@@ -11,6 +14,8 @@ from tests.observability.support import RecordingLogger, RecordingTrainer
 
 
 def test_logging_helpers_publish_metrics_text_and_hparams() -> None:
+    # The helpers flatten several different payload types into the logger
+    # surface, so one compact test keeps those surfaces aligned.
     logger = RecordingLogger()
     trainer = RecordingTrainer(logger)
 

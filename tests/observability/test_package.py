@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# These tests protect the public `observability` package facade and its
+# re-export contract.
+
 import pytest
 
 pytest.importorskip("torch")
@@ -42,6 +45,8 @@ from observability.runtime import setup_text_logger as runtime_setup_text_logger
 
 
 def test_observability_package_reexports_runtime_and_reporting_api() -> None:
+    # The package facade exists so callers can import observability surfaces
+    # from one stable location even as implementation modules stay split.
     assert ObservabilityArtifacts is RuntimeObservabilityArtifacts
     assert setup_observability is runtime_setup
     assert setup_text_logger is runtime_setup_text_logger
@@ -55,6 +60,8 @@ def test_observability_package_reexports_runtime_and_reporting_api() -> None:
 
 
 def test_observability_package_reexports_callback_types() -> None:
+    # The callback re-exports are part of the package's public import surface,
+    # so this test keeps that facade intentional.
     callback_types = {
         BatchAuditCallback,
         GradientStatsCallback,

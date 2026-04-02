@@ -1,5 +1,21 @@
 from __future__ import annotations
 
+"""
+AI-assisted maintenance note:
+These tests protect the environment-benchmark workflow that runs a short,
+diagnostic-oriented training pass.
+
+Purpose:
+- verify benchmark summaries are written with the expected fields
+- verify CUDA synchronization boundaries are honored around the timed region
+- verify invalid benchmark batch-count inputs fail early
+
+Context:
+the benchmark workflow is mostly orchestration, so these tests use a tiny fake
+trainer and focus on workflow control flow rather than on the full Lightning
+execution stack.
+"""
+
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping, cast
@@ -24,7 +40,17 @@ from workflows.training import run_environment_benchmark_workflow
 
 
 class FakeTrainer(FusedModelTrainer):
+    """
+    Minimal trainer fake for benchmark-workflow orchestration tests.
+
+    Context:
+    the benchmark workflow only needs stable fit/test/predict outputs and
+    access to the constructed trainer kwargs, so this fake keeps the tests
+    deterministic and fast.
+    """
+
     def __init__(self, config, **kwargs: object) -> None:
+        """Capture the bound config and trainer-construction kwargs for assertions."""
         self.config = config
         self.kwargs: dict[str, Any] = dict(kwargs)
 
@@ -34,6 +60,7 @@ class FakeTrainer(FusedModelTrainer):
         *,
         ckpt_path: str | Path | None = None,
     ) -> FitArtifacts:
+        """Simulate a completed benchmark fit without running a real training loop."""
         del datamodule, ckpt_path
         return FitArtifacts(
             model=cast(FusedModel, SimpleNamespace(quantiles=(0.1, 0.5, 0.9))),
@@ -51,6 +78,7 @@ class FakeTrainer(FusedModelTrainer):
         *,
         ckpt_path="best",
     ) -> list[Mapping[str, float]]:
+        """Return one deterministic metric payload for benchmark summary generation."""
         del datamodule, ckpt_path
         return [{"test_loss": 0.123}]
 
@@ -60,6 +88,7 @@ class FakeTrainer(FusedModelTrainer):
         *,
         ckpt_path="best",
     ) -> list[torch.Tensor]:
+        """Return one deterministic prediction batch so downstream export paths can run."""
         del datamodule, ckpt_path
         return [torch.ones(2, 2, 3)]
 
@@ -68,6 +97,8 @@ def test_run_environment_benchmark_workflow_writes_summary(
     tmp_path,
     write_processed_csv,
 ) -> None:
+    # This verifies the benchmark workflow still writes a complete summary even
+    # though it only trains for a deliberately small number of batches.
     csv_path = write_processed_csv(steps_per_subject=12)
     config = build_default_config(
         dataset_url=None,
@@ -116,6 +147,9 @@ def test_run_environment_benchmark_workflow_synchronizes_cuda_boundaries(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    # The benchmark workflow synchronizes device boundaries before and after the
+    # timed training region so CUDA timings are not polluted by queued async
+    # work. This test checks that those synchronization calls happen.
     sync_calls: list[str] = []
 
     monkeypatch.setattr(
@@ -158,6 +192,8 @@ def test_run_environment_benchmark_workflow_synchronizes_cuda_boundaries(
 def test_run_environment_benchmark_workflow_requires_positive_batch_count(
     tmp_path: Path,
 ) -> None:
+    # A non-positive benchmark batch count is a caller error, so the workflow
+    # should reject it before trying to construct the benchmark run.
     with pytest.raises(ValueError, match="benchmark_train_batches must be > 0"):
         run_environment_benchmark_workflow(
             build_default_config(

@@ -19,6 +19,16 @@ from environment import RuntimeEnvironment
 # 2. The tests read more like documentation because the fixture roles are named
 #    after what they do rather than appearing as untyped callables.
 class WriteProcessedCsv(Protocol):
+    """
+    Callable fixture contract for building small processed data fixtures.
+
+    Context:
+    many tests need the same kind of synthetic processed CSV but with slightly
+    different subject counts, sequence lengths, or gap patterns. Naming the
+    callable contract here makes those tests easier to type-check and easier to
+    read as "test data builders" rather than opaque fixtures.
+    """
+
     def __call__(
         self,
         *,
@@ -26,14 +36,34 @@ class WriteProcessedCsv(Protocol):
         subject_ids: tuple[str, ...] = ("subject_a",),
         steps_per_subject: int = 12,
         gap_after_step: int | None = None,
-    ) -> Path: ...
+    ) -> Path:
+        """Write one processed CSV fixture and return its filesystem path."""
+        ...
 
 
 class BuildDataConfig(Protocol):
-    def __call__(self, processed_csv_path: Path, **overrides: Any) -> DataConfig: ...
+    """
+    Callable fixture contract for producing temp-directory-backed DataConfig objects.
+
+    Context:
+    tests often want to override only one or two DataConfig fields while
+    inheriting the same safe temp-directory defaults from `conftest.py`.
+    """
+
+    def __call__(self, processed_csv_path: Path, **overrides: Any) -> DataConfig:
+        """Build a `DataConfig` rooted entirely in pytest-managed temp folders."""
+        ...
 
 
 def build_minimal_data_config(**overrides: Any) -> DataConfig:
+    """
+    Build the smallest valid `DataConfig` for focused unit tests.
+
+    Context:
+    many tests do not care about real filesystem layout or dataloader tuning.
+    Starting from these intentionally conservative defaults keeps those tests
+    short while still constructing the production dataclass.
+    """
     defaults: dict[str, Any] = {
         "dataset_url": None,
         "num_workers": 0,
@@ -45,6 +75,14 @@ def build_minimal_data_config(**overrides: Any) -> DataConfig:
 
 
 def build_base_config(data_config: DataConfig) -> Config:
+    """
+    Pair a prepared `DataConfig` with lightweight default model configs.
+
+    Context:
+    test modules that are not about architecture tuning usually just need a
+    coherent top-level `Config` object whose model branches are small enough to
+    initialize quickly.
+    """
     return Config(
         data=data_config,
         tft=TFTConfig(),
@@ -53,6 +91,15 @@ def build_base_config(data_config: DataConfig) -> Config:
 
 
 def build_runtime_environment(**overrides: Any) -> RuntimeEnvironment:
+    """
+    Build a deterministic runtime-environment snapshot for environment tests.
+
+    Context:
+    the environment package reasons about many hardware and dependency flags at
+    once. Using one canonical synthetic environment here keeps tests explicit
+    about which capability they are overriding instead of rebuilding the full
+    structure inline every time.
+    """
     base = RuntimeEnvironment(
         platform="test-platform",
         system="Linux",

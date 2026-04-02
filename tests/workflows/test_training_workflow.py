@@ -1,5 +1,21 @@
 from __future__ import annotations
 
+"""
+AI-assisted maintenance note:
+These tests protect the top-level reusable training workflow in
+`workflows.training`.
+
+Purpose:
+- verify the workflow writes the expected artifact set
+- verify profile-default application is reflected in the trainer/runtime config
+- verify preflight diagnostics can stop the workflow before training begins
+
+Context:
+the tests intentionally replace the real trainer wrapper with a small fake so
+they can focus on workflow composition, artifact plumbing, and checkpoint
+selection policy rather than on Lightning execution details.
+"""
+
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping, cast
@@ -20,9 +36,19 @@ from workflows.training import run_training_workflow
 
 
 class FakeTrainer(FusedModelTrainer):
+    """
+    Small workflow-level trainer fake that records evaluation checkpoint choices.
+
+    Context:
+    these tests are not about the internal Trainer wrapper. They only need a
+    trainer-shaped object that returns deterministic fit/test/predict payloads
+    so the workflow's orchestration logic can be asserted directly.
+    """
+
     last_instance: FakeTrainer | None = None
 
     def __init__(self, config, **kwargs: object) -> None:
+        """Capture the runtime config and keyword arguments the workflow passed to the trainer."""
         self.config = config
         self.kwargs: dict[str, Any] = dict(kwargs)
         self.test_ckpt_path: object = None
@@ -35,6 +61,7 @@ class FakeTrainer(FusedModelTrainer):
         *,
         ckpt_path: str | Path | None = None,
     ) -> FitArtifacts:
+        """Simulate a successful fit while still preparing the DataModule like the real workflow would."""
         del ckpt_path
         datamodule.prepare_data()
         datamodule.setup()
@@ -54,6 +81,7 @@ class FakeTrainer(FusedModelTrainer):
         *,
         ckpt_path: CheckpointSelection = "best",
     ) -> list[Mapping[str, float]]:
+        """Record which checkpoint reference the workflow asked to evaluate."""
         del datamodule
         self.test_ckpt_path = ckpt_path
         return [{"test_loss": 0.123}]
@@ -64,6 +92,7 @@ class FakeTrainer(FusedModelTrainer):
         *,
         ckpt_path: CheckpointSelection = "best",
     ) -> list[torch.Tensor]:
+        """Return deterministic quantile-shaped batches while recording checkpoint selection."""
         self.predict_ckpt_path = ckpt_path
         predictions: list[torch.Tensor] = []
         for batch in datamodule.test_dataloader():
@@ -76,6 +105,10 @@ def test_run_training_workflow_falls_back_to_in_memory_eval_and_writes_artifacts
     tmp_path,
     write_processed_csv,
 ) -> None:
+    # This is the broadest happy-path workflow scenario in the file:
+    # train, evaluate, export predictions, derive analysis tables, and write a
+    # final summary bundle. The fake trainer keeps the assertions focused on
+    # orchestration rather than on model execution.
     csv_path = write_processed_csv(steps_per_subject=80)
     config = build_default_config(
         dataset_url=None,
@@ -142,6 +175,9 @@ def test_run_training_workflow_applies_profile_defaults_when_unresolved(
     tmp_path,
     write_processed_csv,
 ) -> None:
+    # When profile resolution is left to the workflow, it should still produce
+    # one concrete runtime config before trainer construction. This test checks
+    # that those defaults actually flow into the trainer-facing config.
     csv_path = write_processed_csv(steps_per_subject=12)
     config = build_default_config(
         dataset_url=None,
@@ -176,6 +212,8 @@ def test_run_training_workflow_applies_profile_defaults_when_unresolved(
 
 
 def test_run_training_workflow_fails_fast_on_preflight_errors(tmp_path) -> None:
+    # Error-severity diagnostics should be able to stop the workflow before any
+    # expensive training work starts when the caller opts into fail-fast mode.
     config = build_default_config(
         dataset_url=None,
         processed_dir=tmp_path / "processed",

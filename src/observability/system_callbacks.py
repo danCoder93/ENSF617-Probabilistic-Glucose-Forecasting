@@ -59,11 +59,19 @@ class SystemTelemetryCallback(Callback):
         *,
         text_logger: logging.Logger | None = None,
     ) -> None:
+        """Store telemetry policy and optional plain-text logging surface for the callback."""
         self.config = config
         self.text_logger = text_logger
         self._telemetry_header_written = False
 
     def _gpu_metrics(self) -> dict[str, float]:
+        """
+        Collect best-effort GPU or MPS telemetry in the same metric shape used by host logging.
+
+        Context:
+        returning one stable dictionary keeps downstream metric logging and CSV
+        export simple even when only some backend-specific telemetry is available.
+        """
         # CUDA memory stats are always available when CUDA is active, but
         # utilization percentage depends on optional NVML bindings. We return a
         # consistent metric dictionary either way so downstream logging stays
@@ -120,6 +128,7 @@ class SystemTelemetryCallback(Callback):
         return metrics
 
     def _append_csv_row(self, row: Mapping[str, float]) -> None:
+        """Append one telemetry snapshot to the configured CSV artifact when that output is enabled."""
         # The CSV output mirrors what is logged live. This is useful when the
         # user wants to inspect runtime telemetry after the run without opening
         # TensorBoard.
@@ -148,6 +157,7 @@ class SystemTelemetryCallback(Callback):
         batch: Any,
         batch_idx: int,
     ) -> None:
+        """Sample and publish host/device telemetry at the configured step interval."""
         del pl_module, outputs, batch, batch_idx
         if not self.config.enable_system_telemetry:
             return
@@ -204,12 +214,14 @@ class ModelTensorBoardCallback(Callback):
         *,
         text_logger: logging.Logger | None = None,
     ) -> None:
+        """Store visualization policy and the one-shot state used by model-graph logging."""
         self.config = config
         self.text_logger = text_logger
         self._graph_logged = False
         self._torchview_logged = False
 
     def _sample_tensor_batch(self, trainer: Any, pl_module: Any) -> Any:
+        """Sample one tensor-only training batch suitable for graph/architecture visualization."""
         # We intentionally use a single sampled train batch for graph/model
         # visualization. This avoids perturbing the training loop while still
         # giving Lightning and torchview realistic tensor shapes.
@@ -243,6 +255,7 @@ class ModelTensorBoardCallback(Callback):
         pl_module: Any,
         batch_on_device: Any,
     ) -> None:
+        """Render the optional torchview artifact and surface it back into TensorBoard when possible."""
         # torchview is complementary to TensorBoard, not a replacement for it.
         # The goal here is to create one static architecture artifact per run
         # that can also be surfaced back into TensorBoard as an image/text
@@ -320,6 +333,7 @@ class ModelTensorBoardCallback(Callback):
             self.text_logger.info("saved torchview model diagram to %s", png_path)
 
     def on_fit_start(self, trainer: Any, pl_module: Any) -> None:
+        """Emit one-time model text, graph, and optional torchview artifacts at fit start."""
         # We do model visualization at fit start because:
         # - the model is fully constructed
         # - the datamodule is already attached

@@ -41,6 +41,7 @@ class MaybeLayerNorm(Module):
     """
 
     def __init__(self, output_size, hidden_size, eps):
+        """Choose between real layer norm and identity based on the effective output width."""
         super().__init__()
         if output_size and output_size == 1:
             self.ln = nn.Identity()
@@ -48,6 +49,7 @@ class MaybeLayerNorm(Module):
             self.ln = LayerNorm(output_size if output_size else hidden_size, eps=eps)
 
     def forward(self, x):
+        """Apply the chosen normalization layer to the incoming tensor."""
         return self.ln(x)
 
 
@@ -66,10 +68,12 @@ class GLU(Module):
     """
 
     def __init__(self, hidden_size, output_size):
+        """Create the linear projection that supplies content and gate channels to the GLU."""
         super().__init__()
         self.lin = nn.Linear(hidden_size, output_size * 2)
 
     def forward(self, x: Tensor) -> Tensor:
+        """Apply the learned projection and split it into gated GLU output channels."""
         x = self.lin(x)
         x = glu(x)
         return x
@@ -104,6 +108,14 @@ class GRN(Module):
         dropout=0.0,
         layer_norm_eps=1e-3,
     ):
+        """
+        Build one GRN block with optional context injection and optional output projection.
+
+        Context:
+        this same block is reused across TFT internals and the fused-model
+        fusion head, so the constructor keeps the shape-defining dimensions
+        explicit while validating the shared GRN math contract.
+        """
         super().__init__()
         # Validate the low-level GRN contract at construction time so
         # configuration mistakes fail early and consistently. The rest of the
@@ -147,6 +159,13 @@ class GRN(Module):
         output_size: Optional[int] = None,
         context_hidden_size: Optional[int] = None,
     ) -> "GRN":
+        """
+        Build a GRN that inherits hidden/dropout/norm defaults from `TFTConfig`.
+
+        Context:
+        this keeps TFT-owned GRNs and the fused model's post-fusion GRN aligned
+        without forcing each call site to repeat the same shared defaults.
+        """
         # Keep the shape-defining dimensions explicit at the call site while
         # inheriting the shared architectural defaults that should stay aligned
         # across TFT-owned GRNs and the fused model's post-TFT fusion block.
@@ -160,6 +179,13 @@ class GRN(Module):
         )
 
     def forward(self, a: Tensor, c: Optional[Tensor] = None):
+        """
+        Apply the GRN transform, optional context injection, residual shortcut, and normalization.
+
+        Context:
+        the method accepts either rank-2 or rank-3 feature tensors so the same
+        GRN implementation can serve both static and temporal code paths.
+        """
         # `a` is the main feature tensor. Depending on the caller it may be:
         # - rank 2: [batch, features]
         # - rank 3: [batch, time, features]

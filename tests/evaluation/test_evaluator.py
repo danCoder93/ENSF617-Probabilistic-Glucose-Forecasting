@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# These tests protect the end-to-end evaluator that turns batch-aligned
+# predictions and targets into grouped summary outputs.
+
 """
 AI-assisted implementation note:
 These tests protect the evaluation package's end-to-end evaluator contract.
@@ -18,6 +21,8 @@ from evaluation import evaluate_batch, evaluate_prediction_batches
 
 
 def test_evaluate_batch_returns_grouped_metrics() -> None:
+    # This is the broadest evaluator-contract test in the file: one batch in,
+    # grouped summaries out, with both deterministic and probabilistic metrics.
     quantiles = (0.1, 0.5, 0.9)
     predictions = torch.tensor(
         [
@@ -54,6 +59,8 @@ def test_evaluate_batch_returns_grouped_metrics() -> None:
 
 
 def test_evaluate_prediction_batches_matches_batch_evaluation() -> None:
+    # The multi-batch convenience path should agree with the evaluator's
+    # core semantics instead of quietly drifting from direct batch evaluation.
     quantiles = (0.1, 0.5, 0.9)
     prediction_batches = [
         torch.tensor([[[1.0, 2.0, 3.0]]], dtype=torch.float32),

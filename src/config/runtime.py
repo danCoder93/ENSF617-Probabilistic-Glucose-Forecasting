@@ -65,6 +65,14 @@ class SnapshotConfig:
     save_weights_only: bool = False
 
     def __post_init__(self) -> None:
+        """
+        Normalize snapshot paths and validate the checkpoint-ranking policy.
+
+        Context:
+        snapshot configuration maps directly onto Lightning callback behavior,
+        so validating it here keeps invalid run-control policies out of the
+        training wrapper.
+        """
         # Normalize path-like inputs once so the rest of the training code can
         # assume `Path | None` semantics rather than handling raw strings too.
         if self.dirpath is not None:
@@ -179,6 +187,14 @@ class TrainConfig:
     early_stopping_patience: int | None = 5
 
     def __post_init__(self) -> None:
+        """
+        Normalize Trainer-facing path inputs and validate loop/runtime tuning fields.
+
+        Context:
+        this keeps the Trainer wrapper focused on orchestration by ensuring the
+        typed runtime policy is already coherent before Lightning objects are
+        assembled.
+        """
         # Normalize path-like values once so downstream orchestration can treat
         # this field consistently as a `Path | None`.
         if self.default_root_dir is not None:

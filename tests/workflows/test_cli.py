@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+"""
+AI-assisted maintenance note:
+These tests protect the command-line layer in `workflows.cli`.
+
+Purpose:
+- verify CLI parsing preserves intended value types
+- verify device-profile resolution and diagnostics are threaded into the final
+  runtime configuration
+- verify diagnostics-only mode exits before the training workflow is invoked
+"""
+
 from dataclasses import replace
 from pathlib import Path
 
@@ -13,6 +24,8 @@ def test_build_cli_configuration_parses_values_and_profile_outputs(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    # This test treats CLI parsing plus profile resolution as one translation
+    # boundary from raw argv strings to the structured workflow configuration.
     parser = build_argument_parser()
     args = parser.parse_args(
         [
@@ -90,6 +103,9 @@ def test_cli_main_in_diagnostics_only_mode_skips_training(
     tmp_path: Path,
     capsys,
 ) -> None:
+    # Diagnostics-only mode is intentionally a non-training code path. This
+    # assertion keeps the CLI honest about stopping after environment checks and
+    # human-readable reporting.
     monkeypatch.setattr(
         "workflows.cli.detect_runtime_environment",
         lambda: build_runtime_environment(),

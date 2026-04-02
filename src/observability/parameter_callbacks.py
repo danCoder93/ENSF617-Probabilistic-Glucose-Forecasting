@@ -32,13 +32,16 @@ class ParameterScalarTelemetryCallback(Callback):
     """
 
     def __init__(self, config: ObservabilityConfig) -> None:
+        """Store the observability policy that governs scalar parameter logging frequency."""
         self.config = config
 
     @staticmethod
     def _tag_name(parameter_name: str, stat_name: str) -> str:
+        """Build the TensorBoard-friendly scalar tag used for one parameter statistic."""
         return f"parameter_scalars/{parameter_name.replace('.', '/')}/{stat_name}"
 
     def on_train_epoch_end(self, trainer: Any, pl_module: Any) -> None:
+        """Log compact parameter and gradient summary scalars at eligible epoch boundaries."""
         # Epoch-end logging keeps these summaries stable and affordable.
         # Logging per parameter on every step would be too heavy for normal
         # runs.
@@ -92,9 +95,11 @@ class ParameterHistogramCallback(Callback):
     """
 
     def __init__(self, config: ObservabilityConfig) -> None:
+        """Store the observability policy that governs histogram logging frequency."""
         self.config = config
 
     def on_train_epoch_end(self, trainer: Any, pl_module: Any) -> None:
+        """Log parameter and gradient histograms to TensorBoard at eligible epoch boundaries."""
         # Histograms are intentionally recorded at epoch granularity because
         # the payload size is much larger than scalar metrics.
         if not self.config.enable_parameter_histograms:

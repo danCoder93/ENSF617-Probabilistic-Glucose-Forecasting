@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# These tests protect the reporting/export helpers that run after predictions
+# already exist.
+
 from pathlib import Path
 
 import pytest
@@ -12,14 +15,21 @@ from observability.reporting import export_prediction_table, generate_plotly_rep
 
 
 class StubDataModule:
+    """Minimal datamodule exposing only the test-dataloader surface used by reporting helpers."""
+
     def __init__(self, test_batches: list[dict[str, object]]) -> None:
+        """Store the synthetic test batches that should be exposed to the exporter."""
         self._test_batches = test_batches
 
     def test_dataloader(self) -> list[dict[str, object]]:
+        """Return the stored synthetic batches as the held-out prediction surface."""
         return self._test_batches
 
 
 def test_export_prediction_table_writes_analysis_friendly_rows(tmp_path: Path) -> None:
+    # Prediction export is the bridge from batched quantile tensors to a flat
+    # analysis table, so this test checks both schema and a few key derived
+    # values.
     predictions = [
         torch.tensor(
             [
@@ -84,6 +94,8 @@ def test_export_prediction_table_writes_analysis_friendly_rows(tmp_path: Path) -
 def test_generate_plotly_reports_creates_html_artifacts_from_prediction_table(
     tmp_path: Path,
 ) -> None:
+    # Plot generation should stay a thin artifact layer over the exported
+    # prediction table plus optional evaluation summaries.
     pytest.importorskip("plotly")
 
     prediction_table_path = tmp_path / "predictions.csv"

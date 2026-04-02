@@ -37,11 +37,13 @@ class PredictionFigureCallback(Callback):
     """
 
     def __init__(self, config: ObservabilityConfig) -> None:
+        """Initialize the per-stage epoch tracking used to throttle qualitative prediction figures."""
         self.config = config
         self._logged_validation_epochs: set[int] = set()
         self._logged_test_epochs: set[int] = set()
 
     def _should_log(self, trainer: Any, stage: str) -> bool:
+        """Return whether one prediction figure set should be emitted for this stage and epoch."""
         # We only log one small figure set per stage per eligible epoch. The
         # goal is qualitative inspection, not exhaustive visualization of every
         # batch.
@@ -66,6 +68,13 @@ class PredictionFigureCallback(Callback):
         batch: Mapping[str, Any],
         stage: str,
     ) -> None:
+        """
+        Render and publish one small qualitative forecast figure set for the current batch.
+
+        Context:
+        the callback is intentionally qualitative and sampled. It shows a few
+        representative windows instead of trying to visualize every forecast.
+        """
         # This uses the current model directly on the observed batch so the
         # figure reflects the live state of the run at that point in training.
         if not self._should_log(trainer, stage):
@@ -155,6 +164,7 @@ class PredictionFigureCallback(Callback):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
+        """Validation hook that emits at most one sampled figure set per eligible epoch."""
         del outputs, batch_idx, dataloader_idx
         self._log_prediction_figure(trainer, pl_module, batch, "val")
 
@@ -167,5 +177,6 @@ class PredictionFigureCallback(Callback):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
+        """Test hook that emits at most one sampled figure set per eligible epoch."""
         del outputs, batch_idx, dataloader_idx
         self._log_prediction_figure(trainer, pl_module, batch, "test")

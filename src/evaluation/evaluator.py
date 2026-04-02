@@ -55,6 +55,13 @@ def _empty_result(
     quantiles: Sequence[float],
     point_quantile: float,
 ) -> EvaluationResult:
+    """
+    Construct the deterministic empty-result payload used when no batches are available.
+
+    Context:
+    higher-level workflows still want a shape-stable evaluation object even when
+    prediction or test stages are skipped intentionally.
+    """
     # Keeping an explicit empty-result constructor makes the "no predictions"
     # case deterministic and easy for outer workflow code to serialize.
     #
@@ -80,6 +87,13 @@ def _empty_result(
 
 
 def _rows_from_batch(batch: EvaluationBatch) -> list[dict[str, Any]]:
+    """
+    Flatten one normalized evaluation batch into row-oriented records for grouped aggregation.
+
+    Context:
+    grouped views such as horizon, subject, and glucose-range slices are easier
+    to express over ordinary rows than over batched tensors.
+    """
     # The evaluator's grouped views all start from one denormalized row-per-
     # horizon representation. That keeps grouping simple and avoids forcing the
     # grouping layer to understand tensor layouts directly.
@@ -240,6 +254,13 @@ def _evaluate_batches(
     quantiles: Sequence[float],
     point_quantile: float,
 ) -> EvaluationResult:
+    """
+    Aggregate normalized evaluation batches into one full `EvaluationResult`.
+
+    Context:
+    this shared reduction core feeds both public evaluator entrypoints so global
+    tensor metrics and grouped row metrics stay defined in exactly one place.
+    """
     # `_evaluate_batches(...)` is the shared aggregation core behind the two
     # public entrypoints above.
     #

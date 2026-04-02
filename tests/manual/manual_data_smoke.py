@@ -30,6 +30,7 @@ AZT1D_URL = (
 
 
 def summarize_csv(file_path: Path) -> tuple[int, list[str]]:
+    """Return the processed CSV row count and header list for quick manual inspection."""
     with file_path.open("r", newline="", encoding="utf-8") as file:
         reader = csv.reader(file)
         headers = next(reader, [])
@@ -38,6 +39,7 @@ def summarize_csv(file_path: Path) -> tuple[int, list[str]]:
 
 
 def describe_batch(batch: BatchItem) -> None:
+    """Print the tensor-shape contract of one batch for developer-run smoke testing."""
     print(f"Static categorical shape: {tuple(batch['static_categorical'].shape)}")
     print(f"Static continuous shape: {tuple(batch['static_continuous'].shape)}")
     print(f"Encoder continuous shape: {tuple(batch['encoder_continuous'].shape)}")

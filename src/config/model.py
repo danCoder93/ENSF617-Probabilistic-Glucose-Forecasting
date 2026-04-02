@@ -72,6 +72,14 @@ class TCNConfig:
     output_size: int = 1
 
     def __post_init__(self) -> None:
+        """
+        Normalize sequence-like inputs and validate the narrow project TCN contract.
+
+        Context:
+        the refactored TCN intentionally supports a smaller configuration
+        surface than older generic variants, so unsupported combinations should
+        fail here rather than later during model construction.
+        """
         # Convert list-like user inputs to tuples so the config
         # becomes immutable in practice after construction.
         self.num_channels = tuple(int(channel) for channel in self.num_channels)
@@ -182,6 +190,14 @@ class TFTConfig:
     num_historic_vars: int = 0
 
     def __post_init__(self) -> None:
+        """
+        Derive TFT input counts from the semantic feature schema and validate the result.
+
+        Context:
+        this config is the bridge between declarative feature semantics and the
+        runtime-bound metadata the TFT branch needs, so the derived counts live
+        here instead of being recomputed ad hoc inside model code.
+        """
         # Normalize list-like inputs to tuples so callers can
         # build configs flexibly while downstream code receives a
         # consistent immutable-looking shape.
@@ -320,4 +336,3 @@ class Config:
 
     # Temporal Convolution Network branch configuration.
     tcn: TCNConfig
-

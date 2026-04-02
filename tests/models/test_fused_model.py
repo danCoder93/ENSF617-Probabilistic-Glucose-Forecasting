@@ -25,6 +25,7 @@ from utils.tft_utils import DataTypes, FeatureSpec, InputTypes
 
 
 def _build_config() -> Config:
+    """Build a deliberately small but semantically complete fused-model config for unit tests."""
     features = (
         FeatureSpec("age_years", InputTypes.STATIC, DataTypes.CONTINUOUS),
         FeatureSpec("hour_of_day", InputTypes.KNOWN, DataTypes.CONTINUOUS),
@@ -64,6 +65,13 @@ def _build_config() -> Config:
 
 
 def _build_batch(config: Config, batch_size: int = 2) -> dict[str, Tensor]:
+    """
+    Build one synthetic batch matching the fused model's expected data contract.
+
+    Context:
+    the tests only care about tensor shape and contract alignment, so the batch
+    uses small random tensors and zero-width optional categorical groups.
+    """
     encoder_length = config.data.encoder_length
     prediction_length = config.data.prediction_length
 
@@ -84,6 +92,9 @@ def _build_batch(config: Config, batch_size: int = 2) -> dict[str, Tensor]:
 
 
 def test_fused_model_forward_emits_quantile_forecasts() -> None:
+    # This is the broadest shape-contract test in the file: if the aligned
+    # fusion path changes incorrectly, the horizon or quantile dimensions will
+    # usually drift here first.
     torch.manual_seed(0)
     config = _build_config()
     model = FusedModel(config)
@@ -99,6 +110,9 @@ def test_fused_model_forward_emits_quantile_forecasts() -> None:
 
 
 def test_fused_model_materializes_lazy_tft_parameters_during_init() -> None:
+    # Lightning wants the optimizer-visible parameter set to be fully
+    # materialized up front, so the fused model proactively initializes the
+    # lazy TFT embedding during construction.
     model = FusedModel(_build_config())
 
     assert not any(
@@ -108,6 +122,9 @@ def test_fused_model_materializes_lazy_tft_parameters_during_init() -> None:
 
 
 def test_fused_model_accepts_serialized_config_payload() -> None:
+    # Checkpoint reloads reconstruct the model from serialized hyperparameters
+    # rather than a live dataclass instance, so that compatibility path needs
+    # direct coverage.
     config = _build_config()
 
     model = FusedModel(config_to_dict(config))
@@ -117,6 +134,9 @@ def test_fused_model_accepts_serialized_config_payload() -> None:
 
 
 def test_fused_model_training_step_matches_quantile_loss() -> None:
+    # The public `training_step(...)` hook should stay a thin wrapper around the
+    # canonical quantile-loss path rather than quietly introducing different
+    # supervision behavior.
     torch.manual_seed(0)
     config = _build_config()
     model = FusedModel(config)
@@ -131,6 +151,8 @@ def test_fused_model_training_step_matches_quantile_loss() -> None:
 
 
 def test_fused_model_point_prediction_uses_median_quantile() -> None:
+    # Human-facing point metrics are defined through the model's point-forecast
+    # helper, which should default to the median quantile channel.
     model = FusedModel(_build_config())
     predictions = torch.tensor(
         [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]],
@@ -143,6 +165,9 @@ def test_fused_model_point_prediction_uses_median_quantile() -> None:
 
 
 def test_fused_model_configure_optimizers_uses_model_hyperparameters() -> None:
+    # Optimizer construction is intentionally owned by the LightningModule, not
+    # by the outer training workflow, so the configured hyperparameters should
+    # be reflected directly in the returned optimizer.
     model = FusedModel(
         _build_config(),
         learning_rate=5e-4,

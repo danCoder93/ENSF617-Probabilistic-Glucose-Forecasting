@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+"""
+AI-assisted maintenance note:
+These tests protect the small helper layer that sits between raw CLI inputs and
+the reusable workflow functions.
+
+Purpose:
+- verify JSON-ready rendering keeps config/report payloads serializable
+- verify parser helpers preserve the intended Python value types
+- verify early Apple Silicon environment defaults are applied before heavier runtime setup
+"""
+
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +34,8 @@ from workflows.helpers import (
 
 
 def test_json_ready_normalizes_paths_dataclasses_and_nested_sequences() -> None:
+    # Workflow summaries are written as JSON-friendly payloads, so this helper
+    # must normalize common project object types without losing nested structure.
     payload = {
         "path": Path("artifacts/run"),
         "environment": build_runtime_environment(cuda_available=True),
@@ -37,6 +50,8 @@ def test_json_ready_normalizes_paths_dataclasses_and_nested_sequences() -> None:
 
 
 def test_parse_helpers_preserve_cli_value_types() -> None:
+    # These helpers are the first defense against type drift between argparse
+    # strings and the typed config objects used deeper in the workflow stack.
     assert _parse_csv_ints("64, 32,16") == (64, 32, 16)
     assert _parse_csv_floats("0.1, 0.5, 0.9") == (0.1, 0.5, 0.9)
     assert _parse_devices("auto") == "auto"
@@ -50,6 +65,9 @@ def test_parse_helpers_preserve_cli_value_types() -> None:
 
 
 def test_collect_explicit_cli_overrides_tracks_cli_destinations() -> None:
+    # Explicit override tracking matters because device-profile resolution needs
+    # to know which values came from the user and therefore should not be
+    # silently replaced by profile defaults.
     parser = build_argument_parser()
 
     overrides = _collect_explicit_cli_overrides(
@@ -61,6 +79,8 @@ def test_collect_explicit_cli_overrides_tracks_cli_destinations() -> None:
 
 
 def test_resolve_eval_ckpt_path_falls_back_when_best_checkpoint_is_missing() -> None:
+    # The helper should preserve the common "best when available, otherwise
+    # in-memory weights" workflow policy used by the higher-level training flow.
     assert _resolve_eval_ckpt_path(
         SimpleNamespace(best_checkpoint_path=""),
         "best",
@@ -74,6 +94,8 @@ def test_resolve_eval_ckpt_path_falls_back_when_best_checkpoint_is_missing() -> 
 def test_apply_early_apple_silicon_environment_defaults_sets_mps_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # These environment defaults have to be applied very early on Apple
+    # Silicon, before heavier runtime initialization happens elsewhere.
     monkeypatch.setattr("workflows.helpers.platform.system", lambda: "Darwin")
     monkeypatch.setattr("workflows.helpers.platform.machine", lambda: "arm64")
     monkeypatch.delenv("PYTORCH_MPS_HIGH_WATERMARK_RATIO", raising=False)

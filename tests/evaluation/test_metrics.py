@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# These tests protect the primitive metric formulas used by the evaluation
+# package before those metrics are composed into higher-level summaries.
+
 """
 AI-assisted implementation note:
 These tests protect the evaluation package's primitive metric formulas.
@@ -26,6 +29,8 @@ from evaluation.metrics import (
 
 
 def test_metric_primitives_compute_expected_values() -> None:
+    # Point metrics should remain exact and easy to sanity-check with tiny
+    # hand-computable tensors.
     target = torch.tensor([[1.0, 3.0]], dtype=torch.float32)
     point_prediction = torch.tensor([[2.0, 1.0]], dtype=torch.float32)
 
@@ -37,6 +42,8 @@ def test_metric_primitives_compute_expected_values() -> None:
 
 
 def test_probabilistic_metric_primitives_compute_expected_values() -> None:
+    # The probabilistic helpers share one small synthetic example so interval
+    # width, coverage, and pinball behavior can be validated together.
     quantiles = (0.1, 0.5, 0.9)
     predictions = torch.tensor(
         [[[0.0, 1.0, 2.0], [2.0, 3.0, 4.0]]],

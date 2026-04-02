@@ -23,6 +23,8 @@ from config import TFTConfig
 
 
 def test_grn_from_tft_config_uses_shared_defaults() -> None:
+    # The factory method is the refactor boundary these tests were added to
+    # protect, so it should faithfully thread shared TFT defaults into new GRNs.
     config = TFTConfig(hidden_size=16, dropout=0.2, layer_norm_eps=1e-4)
 
     module = GRN.from_tft_config(
@@ -40,6 +42,8 @@ def test_grn_from_tft_config_uses_shared_defaults() -> None:
 
 
 def test_grn_supports_rank_2_inputs_with_context() -> None:
+    # Rank-2 inputs are the simpler non-temporal case and should pass through
+    # the same GRN implementation that also supports temporal tensors.
     module = GRN(
         input_size=4,
         hidden_size=8,
@@ -53,6 +57,8 @@ def test_grn_supports_rank_2_inputs_with_context() -> None:
 
 
 def test_grn_supports_rank_3_inputs_with_context_broadcast() -> None:
+    # Temporal inputs rely on the GRN broadcasting a per-example context vector
+    # across timesteps, which is a key behavior for the TFT path.
     module = GRN(
         input_size=4,
         hidden_size=8,
@@ -66,6 +72,8 @@ def test_grn_supports_rank_3_inputs_with_context_broadcast() -> None:
 
 
 def test_grn_rejects_unsupported_context_rank_mismatch() -> None:
+    # Unsupported rank combinations should fail loudly so shape mistakes surface
+    # close to the GRN instead of producing harder-to-debug downstream errors.
     module = GRN(
         input_size=4,
         hidden_size=8,

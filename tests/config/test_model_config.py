@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+# These tests protect the model-side configuration contracts and their
+# checkpoint-friendly serialization behavior.
+#
+# They focus on:
+# - the narrowed TCN config surface used by the refactored branch
+# - TFT's derived counts from semantic feature declarations
+# - top-level config grouping and round-trip serialization
+
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -18,10 +26,14 @@ from utils.tft_utils import DataTypes, FeatureSpec, InputTypes
 
 
 def _feature_specs(*specs: FeatureSpec) -> tuple[FeatureSpec, ...]:
+    # Local helper so the tests can express semantic feature declarations
+    # directly without repeating the tuple cast.
     return cast(tuple[FeatureSpec, ...], specs)
 
 
 def test_tcn_config_accepts_sequence_inputs_used_by_older_call_sites() -> None:
+    # This keeps the refactored TCN config compatible with the common
+    # tuple-style sequence inputs used by earlier call sites.
     config = TCNConfig(
         num_inputs=3,
         num_channels=(8, 16),
@@ -38,6 +50,8 @@ def test_tcn_config_accepts_sequence_inputs_used_by_older_call_sites() -> None:
 
 
 def test_tcn_config_rejects_normalization_modes_not_supported_by_refactor() -> None:
+    # The refactor intentionally narrowed the supported normalization surface,
+    # so unsupported legacy options should fail loudly.
     with pytest.raises(ValueError, match="layer_norm"):
         TCNConfig(
             num_inputs=2,
@@ -48,6 +62,8 @@ def test_tcn_config_rejects_normalization_modes_not_supported_by_refactor() -> N
 
 
 def test_tft_config_derives_counts_from_feature_schema_and_runtime_metadata() -> None:
+    # TFT config is the bridge between semantic feature declarations and the
+    # concrete counts used by embedding and variable-selection layers.
     features = _feature_specs(
         FeatureSpec("subject_id", InputTypes.STATIC, DataTypes.CATEGORICAL),
         FeatureSpec("age_years", InputTypes.STATIC, DataTypes.CONTINUOUS),
@@ -76,6 +92,8 @@ def test_tft_config_derives_counts_from_feature_schema_and_runtime_metadata() ->
 
 
 def test_tft_config_supports_runtime_rebinding_used_by_datamodule_and_fused_model() -> None:
+    # The DataModule and fused model both rely on dataclass rebinding rather
+    # than mutation, so the derived counts need to stay coherent after replace().
     features = _feature_specs(
         FeatureSpec("subject_id", InputTypes.STATIC, DataTypes.CATEGORICAL),
         FeatureSpec("hour", InputTypes.KNOWN, DataTypes.CONTINUOUS),
@@ -100,11 +118,15 @@ def test_tft_config_supports_runtime_rebinding_used_by_datamodule_and_fused_mode
 
 
 def test_tft_config_validates_layer_norm_epsilon() -> None:
+    # Layer norm epsilon is a subtle numerical-stability knob, so invalid
+    # values should be rejected right at config construction.
     with pytest.raises(ValueError, match="layer_norm_eps must be > 0.0"):
         TFTConfig(layer_norm_eps=0.0)
 
 
 def test_top_level_config_groups_data_tft_and_tcn_contracts() -> None:
+    # The top-level config is intentionally simple: one object should carry the
+    # data contract and both model-branch contracts together.
     config = Config(
         data=DataConfig(num_workers=0, pin_memory=False, persistent_workers=False),
         tft=TFTConfig(),
@@ -117,6 +139,8 @@ def test_top_level_config_groups_data_tft_and_tcn_contracts() -> None:
 
 
 def test_top_level_config_round_trips_through_checkpoint_friendly_dict() -> None:
+    # Checkpoint compatibility depends on the config being serializable to
+    # plain Python data and reconstructible without semantic drift.
     features = _feature_specs(
         FeatureSpec("subject_id", InputTypes.STATIC, DataTypes.CATEGORICAL),
         FeatureSpec("hour", InputTypes.KNOWN, DataTypes.CONTINUOUS),

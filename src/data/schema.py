@@ -137,6 +137,7 @@ class FeatureGroups:
 
     @property
     def categorical_columns(self) -> tuple[str, ...]:
+        """Return every categorical column that needs one shared vocabulary/ID mapping."""
         # All categorical columns that need one shared category-to-ID mapping.
         return _ordered_unique(
             self.static_categorical
@@ -146,6 +147,7 @@ class FeatureGroups:
 
     @property
     def continuous_columns(self) -> tuple[str, ...]:
+        """Return every continuous column the cleaned dataframe must expose numerically."""
         # All continuous columns that must be numerically clean and ready for
         # slicing before any Dataset is instantiated.
         return _ordered_unique(
@@ -157,6 +159,7 @@ class FeatureGroups:
 
     @property
     def encoder_continuous(self) -> tuple[str, ...]:
+        """Return the packed encoder-side continuous feature order used by the Dataset."""
         # Encoder history must expose every continuous signal available up to the
         # forecast origin. That includes:
         # 1. known-ahead continuous signals on the historical axis
@@ -173,12 +176,14 @@ class FeatureGroups:
 
     @property
     def encoder_categorical(self) -> tuple[str, ...]:
+        """Return the packed encoder-side categorical feature order used by the Dataset."""
         # Encoder history includes both known-ahead and observed categorical
         # signals because both are available on the historical axis.
         return _ordered_unique(self.known_categorical + self.observed_categorical)
 
     @property
     def decoder_known_continuous(self) -> tuple[str, ...]:
+        """Return the decoder-side continuous features that are legitimately known ahead of time."""
         # Decoder inputs are intentionally restricted to "known" features only.
         # Observed features and targets are not available from the future at
         # inference time, so including them here would create leakage.
@@ -186,6 +191,7 @@ class FeatureGroups:
 
     @property
     def decoder_known_categorical(self) -> tuple[str, ...]:
+        """Return the decoder-side categorical features that are legitimately known ahead of time."""
         return self.known_categorical
 
 

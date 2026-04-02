@@ -40,7 +40,9 @@ class TestDataloaderProvider(Protocol):
     truly depends on.
     """
 
-    def test_dataloader(self) -> Any: ...
+    def test_dataloader(self) -> Any:
+        """Return the held-out test dataloader or iterable of test batches used for export."""
+        ...
 
 
 # ============================================================================

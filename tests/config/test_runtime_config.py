@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# These tests protect the runtime-side config contracts used by trainer,
+# checkpoint, and observability orchestration.
+
 from pathlib import Path
 
 import pytest
@@ -10,6 +13,8 @@ from config import ObservabilityConfig, SnapshotConfig, TrainConfig
 def test_observability_config_normalizes_paths_and_validates_mode(
     tmp_path: Path,
 ) -> None:
+    # Observability config accepts user-facing path strings, but runtime code
+    # expects normalized paths plus a known mode vocabulary.
     config = ObservabilityConfig(
         mode="debug",
         log_dir=str(tmp_path / "logs"),
@@ -30,6 +35,8 @@ def test_observability_config_normalizes_paths_and_validates_mode(
 
 
 def test_train_config_validates_runtime_tuning_contract() -> None:
+    # Runtime-tuning flags have dependencies between them, so invalid
+    # combinations should fail before Trainer construction.
     with pytest.raises(ValueError, match="compile_mode requires compile_model"):
         TrainConfig(compile_model=False, compile_mode="default")
 
@@ -38,6 +45,8 @@ def test_train_config_validates_runtime_tuning_contract() -> None:
 
 
 def test_snapshot_config_normalizes_dirpath_and_validates_mode(tmp_path: Path) -> None:
+    # Snapshot config is the typed front door to Lightning checkpoint policy,
+    # so mode and path normalization belong in the config layer itself.
     config = SnapshotConfig(
         dirpath=str(tmp_path / "checkpoints"),
         mode="max",

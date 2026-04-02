@@ -92,6 +92,14 @@ class AZT1DSequenceDataset(Dataset[BatchItem]):
         feature_groups: FeatureGroups,
         category_maps: dict[str, tuple[str, ...]],
     ) -> None:
+        """
+        Cache the cleaned dataframe, sample index, and pre-encoded feature arrays.
+
+        Context:
+        dataset construction does the repeated dataframe-to-array conversion once
+        so per-sample retrieval can stay focused on slicing and assembling the
+        semantic batch contract.
+        """
         self.dataframe = dataframe.reset_index(drop=True)
         self.sample_index = list(sample_index)
         self.feature_groups = feature_groups
@@ -118,9 +126,17 @@ class AZT1DSequenceDataset(Dataset[BatchItem]):
         )
 
     def __len__(self) -> int:
+        """Return the number of precomputed sequence windows available to the Dataset."""
         return len(self.sample_index)
 
     def __getitem__(self, index: int) -> BatchItem:
+        """
+        Assemble one model-ready sample from the indexed sequence boundaries.
+
+        Context:
+        this is where cleaned dataframe rows are translated into the exact batch
+        groups consumed by the fused TCN + TFT model stack.
+        """
         sample = self.sample_index[index]
         encoder_slice = slice(sample.encoder_start, sample.encoder_end)
         decoder_slice = slice(sample.decoder_start, sample.decoder_end)
@@ -171,6 +187,7 @@ class AZT1DSequenceDataset(Dataset[BatchItem]):
         }
 
     def _row_continuous(self, row_index: int, columns: Sequence[str]) -> NDArray:
+        """Read one static continuous feature vector anchored at a single row."""
         # Static continuous features are read from a single anchor row because
         # they should not vary across timesteps within one sequence.
         if not columns:
@@ -184,6 +201,7 @@ class AZT1DSequenceDataset(Dataset[BatchItem]):
         )
 
     def _row_categorical(self, row_index: int, columns: Sequence[str]) -> NDArray:
+        """Read one static categorical feature vector anchored at a single row."""
         # Static categorical features follow the same rule: one row anchors the
         # identity of the whole sequence.
         if not columns:
@@ -194,6 +212,7 @@ class AZT1DSequenceDataset(Dataset[BatchItem]):
         )
 
     def _slice_continuous(self, row_slice: slice, columns: Sequence[str]) -> NDArray:
+        """Read one temporal continuous tensor in `[time, feature]` layout."""
         # Temporal continuous features are returned as [time, feature] so that
         # default DataLoader collation naturally yields [batch, time, feature].
         if not columns:
@@ -204,6 +223,7 @@ class AZT1DSequenceDataset(Dataset[BatchItem]):
         return np.stack(stacked, axis=-1).astype(np.float32, copy=False)
 
     def _slice_categorical(self, row_slice: slice, columns: Sequence[str]) -> NDArray:
+        """Read one temporal categorical tensor in `[time, feature]` integer-ID layout."""
         # Temporal categorical features mirror the continuous layout, but remain
         # integer encoded for later embedding layers.
         if not columns:
@@ -214,6 +234,13 @@ class AZT1DSequenceDataset(Dataset[BatchItem]):
         return np.stack(stacked, axis=-1).astype(np.int64, copy=False)
 
     def _encode_categorical_column(self, column: str) -> NDArray:
+        """
+        Convert one categorical dataframe column into stable integer IDs.
+
+        Context:
+        the Dataset applies the DataModule-fitted vocabulary so train/val/test
+        splits and the model-side embedding cardinalities stay aligned.
+        """
         # The Dataset applies a frozen category map fitted by the DataModule.
         # This keeps train/val/test integer IDs perfectly aligned.
         categories = self.category_maps.get(column)

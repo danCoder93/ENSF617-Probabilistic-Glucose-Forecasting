@@ -65,6 +65,7 @@ def infer_device_profile(
 
 
 def _slurm_worker_default(environment: RuntimeEnvironment) -> int:
+    """Choose a conservative DataLoader worker default for scheduler-managed jobs."""
     # Slurm allocations often represent the most trustworthy CPU budget signal
     # we have for cluster jobs because they reflect scheduler intent rather
     # than raw host capacity. We still leave one CPU free when possible so the
@@ -76,6 +77,7 @@ def _slurm_worker_default(environment: RuntimeEnvironment) -> int:
 
 
 def _cpu_parallelism_budget(environment: RuntimeEnvironment) -> int:
+    """Estimate the usable host-side parallelism budget from physical or logical core counts."""
     # Physical cores are preferred over logical cores because loader workers
     # and Torch intra-op threads tend to saturate "real" core capacity first.
     # Logical count is still a useful fallback on platforms where physical-core
@@ -87,6 +89,7 @@ def _cpu_parallelism_budget(environment: RuntimeEnvironment) -> int:
 
 
 def _local_cpu_worker_default(environment: RuntimeEnvironment) -> int:
+    """Choose a modest worker count for local CPU-only runs."""
     # Local CPU runs need to balance two competing consumers of host parallelism:
     # DataLoader workers and Torch operator threads. Using roughly half the
     # machine for workers and capping at a modest value keeps the default
@@ -95,6 +98,7 @@ def _local_cpu_worker_default(environment: RuntimeEnvironment) -> int:
 
 
 def _local_cuda_worker_default(environment: RuntimeEnvironment) -> int:
+    """Choose a more throughput-oriented worker count for local CUDA runs."""
     # CUDA runs usually benefit from a somewhat more aggressive loader pool
     # because the GPU can sit idle if batches are not prepared fast enough.
     # We still cap the count so the default remains sane on large hosts.
@@ -102,6 +106,7 @@ def _local_cuda_worker_default(environment: RuntimeEnvironment) -> int:
 
 
 def _apple_silicon_worker_default(environment: RuntimeEnvironment) -> int:
+    """Choose a smaller worker pool for Apple Silicon MPS runs."""
     # Apple Silicon often responds better to a smaller worker pool than CUDA
     # systems do. The platform can be sensitive to host-side loader overhead,
     # and the MPS path frequently benefits more from "few workers, simple
@@ -110,6 +115,7 @@ def _apple_silicon_worker_default(environment: RuntimeEnvironment) -> int:
 
 
 def _persistent_workers_enabled(num_workers: int) -> bool:
+    """Return whether persistent workers make semantic sense for the given worker count."""
     # Persistent workers only make semantic sense when there are workers to
     # persist. Centralizing that rule here keeps the profile table from having
     # to repeat the same guard in every branch.
@@ -117,6 +123,7 @@ def _persistent_workers_enabled(num_workers: int) -> bool:
 
 
 def _prefetch_factor_default(num_workers: int, *, accelerator: str) -> int | None:
+    """Choose the default DataLoader prefetch depth for the current accelerator class."""
     # `prefetch_factor` only matters when multiprocessing workers are active.
     # GPU runs get a deeper queue because keeping the device fed is usually the
     # higher priority, while CPU/MPS paths stay more conservative.
@@ -128,6 +135,7 @@ def _prefetch_factor_default(num_workers: int, *, accelerator: str) -> int | Non
 
 
 def _cuda_precision_default(environment: RuntimeEnvironment) -> str:
+    """Choose the preferred mixed-precision policy for CUDA-capable runs."""
     # BF16 is preferred when the CUDA stack reports support because it usually
     # gives the mixed-precision benefits we want with fewer numeric edge cases
     # than FP16. The fallback to `16-mixed` keeps older or narrower GPUs fast.
@@ -135,6 +143,7 @@ def _cuda_precision_default(environment: RuntimeEnvironment) -> str:
 
 
 def _cpu_precision_default(environment: RuntimeEnvironment) -> int | str:
+    """Choose the preferred precision policy for CPU-only runs."""
     # CPU BF16 is intentionally opt-in via capability detection because plain
     # CPU mixed precision is much less universal than CUDA mixed precision.
     # When support is unclear, the safer default remains full FP32.
@@ -142,12 +151,14 @@ def _cpu_precision_default(environment: RuntimeEnvironment) -> int | str:
 
 
 def _cpu_intraop_threads_default(environment: RuntimeEnvironment) -> int:
+    """Choose a default PyTorch intra-op thread budget for host-side execution."""
     # Intra-op threads govern how much parallelism a single operator may use.
     # Capping them avoids one local run consuming every host thread by default.
     return max(1, min(_cpu_parallelism_budget(environment), 8))
 
 
 def _cpu_interop_threads_default(environment: RuntimeEnvironment) -> int:
+    """Choose a default PyTorch inter-op thread budget for host-side execution."""
     # Inter-op parallelism should usually stay lower than intra-op parallelism.
     # This helps CPU and MPS runs avoid multiplying "operators in flight" by
     # "threads per operator" into an oversubscribed mess.
@@ -155,6 +166,7 @@ def _cpu_interop_threads_default(environment: RuntimeEnvironment) -> int:
 
 
 def _compile_defaults_for_profile(profile: str) -> tuple[bool, str | None]:
+    """Return whether `torch.compile` should be enabled by default for the given profile."""
     # Compilation is treated as a profile-sensitive throughput experiment, not
     # a universal truth. CPU and CUDA local runs get the most useful defaults,
     # while the other profiles stay more conservative unless the caller opts in.
@@ -197,6 +209,7 @@ def resolve_device_profile(
         *,
         cli_dest: str | None = None,
     ) -> None:
+        """Apply one profile default only when the user did not already override that field."""
         # Explicit user inputs remain authoritative. Profiles only provide
         # defaults for settings the caller did not specify directly.
         #

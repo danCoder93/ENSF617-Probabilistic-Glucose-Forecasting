@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# These tests protect the environment-diagnostics layer that turns runtime state
+# plus config into actionable warnings and errors.
+
 from config import DataConfig, ObservabilityConfig, TrainConfig
 from environment import (
     RuntimeDiagnostic,
@@ -11,6 +14,8 @@ from tests.support import build_runtime_environment
 
 
 def test_collect_runtime_diagnostics_flags_backend_mismatch_and_missing_packages() -> None:
+    # A requested CUDA run without torch, Lightning, or CUDA support should
+    # surface multiple independent diagnostics rather than only one generic error.
     diagnostics = collect_runtime_diagnostics(
         requested_profile="local-cuda",
         resolved_profile="local-cuda",
@@ -38,6 +43,8 @@ def test_collect_runtime_diagnostics_flags_backend_mismatch_and_missing_packages
 
 
 def test_collect_runtime_diagnostics_flags_bf16_and_invalid_worker_persistence() -> None:
+    # This mixes numeric-capability checks with loader-policy checks to confirm
+    # the diagnostics layer reports both hardware and config mismatches together.
     diagnostics = collect_runtime_diagnostics(
         requested_profile="local-cuda",
         resolved_profile="local-cuda",
@@ -66,6 +73,8 @@ def test_collect_runtime_diagnostics_flags_bf16_and_invalid_worker_persistence()
 
 
 def test_collect_runtime_diagnostics_flags_unsupported_cpu_bf16() -> None:
+    # CPU BF16 support is environment-sensitive, so the diagnostics layer should
+    # explain when a requested mixed-precision policy is not actually supported.
     diagnostics = collect_runtime_diagnostics(
         requested_profile="local-cpu",
         resolved_profile="local-cpu",
@@ -85,6 +94,8 @@ def test_collect_runtime_diagnostics_flags_unsupported_cpu_bf16() -> None:
 
 
 def test_format_runtime_diagnostics_includes_severity_code_and_suggestion() -> None:
+    # Formatting matters because these diagnostics are shown directly to users
+    # in CLI and notebook-facing workflows.
     rendered = format_runtime_diagnostics(
         (
             RuntimeDiagnostic(

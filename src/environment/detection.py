@@ -36,10 +36,12 @@ from environment.types import RuntimeEnvironment
 # keep the main detection function readable without turning basic stdlib probes
 # into package-level public API.
 def _module_available(name: str) -> bool:
+    """Return whether the named Python module can be imported in the current environment."""
     return importlib.util.find_spec(name) is not None
 
 
 def _optional_int(value: str | None) -> int | None:
+    """Parse an integer-valued environment variable defensively, returning `None` on failure."""
     if value is None:
         return None
     try:
@@ -49,10 +51,12 @@ def _optional_int(value: str | None) -> int | None:
 
 
 def _is_apple_silicon(system: str, machine: str) -> bool:
+    """Return whether the current platform identifiers match Apple Silicon macOS."""
     return system == "Darwin" and machine in {"arm64", "arm64e"}
 
 
 def _optional_bool_probe(namespace: Any, attribute_name: str) -> bool | None:
+    """Call an optional backend probe and collapse probe failures into `None`."""
     probe = getattr(namespace, attribute_name, None)
     if not callable(probe):
         return None
@@ -67,6 +71,14 @@ def _cpu_supports_bf16(
     *,
     torch_module: Any | None = None,
 ) -> bool:
+    """
+    Estimate whether the current CPU stack likely supports BF16 execution.
+
+    Context:
+    support detection is best-effort because different torch versions expose
+    different internal probes. The helper prefers concrete backend probes when
+    available and falls back to capability-string heuristics otherwise.
+    """
     if torch_module is not None:
         cpu_namespace = getattr(torch_module, "cpu", None)
         c_namespace = getattr(torch_module, "_C", None)

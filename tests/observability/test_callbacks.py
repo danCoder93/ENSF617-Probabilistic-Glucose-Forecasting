@@ -1,5 +1,17 @@
 from __future__ import annotations
 
+"""
+AI-assisted maintenance note:
+These tests protect the observability callback stack exposed through
+`observability.callbacks`.
+
+Purpose:
+- verify each callback emits the expected metrics, text, figures, or graphs
+- verify callback throttling and stage/epoch limits work as intended
+- verify the callbacks can operate against the lightweight recording helpers in
+  `tests.observability.support`
+"""
+
 from pathlib import Path
 
 import pytest
@@ -30,6 +42,8 @@ from tests.observability.support import (
 
 
 def test_batch_audit_callback_respects_stage_limit() -> None:
+    # Batch-audit logging is intentionally capped so debug output stays useful
+    # instead of exploding across long runs.
     logger = RecordingLogger()
     trainer = RecordingTrainer(logger)
     text_logger = RecordingTextLogger(messages=[])
@@ -52,6 +66,8 @@ def test_batch_audit_callback_respects_stage_limit() -> None:
 
 
 def test_gradient_and_parameter_callbacks_emit_diagnostics() -> None:
+    # These two callback families operate at different granularities, but both
+    # should surface numeric health information through the same logger path.
     logger = RecordingLogger()
     trainer = RecordingTrainer(logger)
     trainer.global_step = 10
@@ -77,6 +93,8 @@ def test_gradient_and_parameter_callbacks_emit_diagnostics() -> None:
 
 
 def test_activation_stats_callback_flushes_module_metrics() -> None:
+    # Activation hooks need to both record metrics and clean themselves up so
+    # repeated tests or later runs do not retain stale hooks.
     logger = RecordingLogger()
     trainer = RecordingTrainer(logger)
     trainer.global_step = 10
@@ -101,6 +119,8 @@ def test_activation_stats_callback_flushes_module_metrics() -> None:
 
 
 def test_parameter_histogram_callback_logs_parameter_and_gradient_histograms() -> None:
+    # Histogram logging is heavier than scalar telemetry, so this test keeps its
+    # contract narrow: parameter values and gradients should both be emitted.
     logger = RecordingLogger()
     trainer = RecordingTrainer(logger)
     trainer.global_step = 12
@@ -120,6 +140,8 @@ def test_system_telemetry_callback_logs_metrics_and_csv(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # System telemetry has both metric and CSV side effects; this test checks
+    # both so the callback's "log and persist" contract stays intact.
     logger = RecordingLogger()
     trainer = RecordingTrainer(logger)
     trainer.global_step = 1
@@ -161,6 +183,8 @@ def test_system_telemetry_callback_logs_metrics_and_csv(
 
 
 def test_model_tensorboard_callback_logs_model_text_and_graph() -> None:
+    # The model-visualization callback should publish both a text view of the
+    # architecture and a graph trace when those features are enabled.
     logger = RecordingLogger()
     trainer = RecordingTrainer(logger)
     trainer.datamodule = StubDataModule(
@@ -187,6 +211,8 @@ def test_model_tensorboard_callback_logs_model_text_and_graph() -> None:
 
 
 def test_prediction_figure_callback_logs_one_validation_figure_per_epoch() -> None:
+    # Prediction figures are intentionally throttled per epoch to keep artifact
+    # volume bounded during long validation runs.
     pytest.importorskip("matplotlib")
 
     logger = RecordingLogger()

@@ -81,6 +81,14 @@ def build_default_config(
     tft_dropout: float = 0.1,
     quantiles: Sequence[float] = (0.1, 0.5, 0.9),
 ) -> Config:
+    """
+    Build the baseline top-level project config shared by the root script and notebook.
+
+    Context:
+    this helper is designed to produce one coherent "ready to run" starting
+    point, not to encode the final or universally best experiment recipe for
+    the project.
+    """
     # This builder intentionally returns a complete top-level config that is
     # "good enough to start" for the script and notebook entrypoints.
     #
@@ -169,6 +177,14 @@ def build_default_train_config(
     default_root_dir: Path | None = DEFAULT_OUTPUT_DIR,
     early_stopping_patience: int | None = 5,
 ) -> TrainConfig:
+    """
+    Build the baseline Lightning Trainer policy used by the top-level entrypoints.
+
+    Context:
+    these defaults are intentionally approachable and conservative so a first
+    local run succeeds without forcing the caller to reason about every Trainer
+    knob up front.
+    """
     # Trainer defaults prioritize an approachable local workflow:
     # - `devices="auto"` lets Lightning choose CPU/GPU when available
     # - `num_workers=0` remains in the data config by default to avoid the
@@ -223,6 +239,13 @@ def build_default_snapshot_config(
     save_last: bool = True,
     save_weights_only: bool = False,
 ) -> SnapshotConfig:
+    """
+    Build the default checkpoint snapshot policy for script and notebook runs.
+
+    Context:
+    this keeps checkpoint layout and ranking policy aligned across the repo's
+    main execution surfaces without repeating callback arguments manually.
+    """
     # Snapshotting is enabled by default because the top-level entrypoints are
     # meant to feel like full experiment surfaces rather than one-off scripts.
     #
@@ -282,6 +305,14 @@ def build_default_observability_config(
     torchview_roll: bool = True,
     torchview_expand_nested: bool = True,
 ) -> ObservabilityConfig:
+    """
+    Build the baseline observability policy for one repository run surface.
+
+    Context:
+    the helper bundles logger, telemetry, debug, export, and reporting defaults
+    so top-level call sites can opt into one mode-oriented policy instead of
+    rebuilding many small observability decisions manually.
+    """
     # This helper intentionally defines a "strong default visibility" profile
     # for normal experiments:
     # - TensorBoard stays on by default because Lightning already integrates

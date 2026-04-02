@@ -159,6 +159,14 @@ class DataConfig:
         return Path(self.processed_dir) / self.processed_file_name
 
     def __post_init__(self) -> None:
+        """
+        Normalize path inputs and validate the core data-pipeline contract.
+
+        Context:
+        this keeps obvious configuration mistakes close to construction time and
+        ensures downstream data code can assume normalized `Path` objects and a
+        coherent split/dataloader policy.
+        """
         # Normalize path-like inputs once so the rest of the
         # codebase can assume `Path` instances.
         self.raw_dir = Path(self.raw_dir)

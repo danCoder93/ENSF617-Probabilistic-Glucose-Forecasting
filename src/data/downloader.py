@@ -77,6 +77,14 @@ class AZT1DDownloader:
         user_agent: str = "Mozilla/5.0",
         timeout: int = 60,
     ) -> None:
+        """
+        Bind raw/cache/extract directories and initialize the reusable HTTP session.
+
+        Context:
+        the downloader owns only file acquisition concerns, so its constructor
+        sets up the local cache/extraction layout and the long-lived requests
+        session used by later downloads.
+        """
         self.raw_dir = Path(raw_dir)
         # `cache_dir` now has a real job: it stores temporary download artifacts
         # such as partial files. If the caller does not provide one, we fall back
@@ -186,6 +194,7 @@ class AZT1DDownloader:
         )
 
     def _build_file_path(self, url: str, filename: Optional[str]) -> Path:
+        """Choose the deterministic raw-file path for one requested download."""
         # A stable URL hash gives us deterministic cache keys even when the
         # caller does not provide a filename explicitly.
         if filename:
@@ -201,6 +210,14 @@ class AZT1DDownloader:
         explicit_filename: Optional[str],
         url: str,
     ) -> Path:
+        """
+        Refine the final raw filename from caller intent, HTTP metadata, or URL structure.
+
+        Context:
+        this helper keeps filename resolution policy explicit so cache behavior
+        is predictable and readable without leaking HTTP-header handling into the
+        main download loop.
+        """
         # Filename resolution order is:
         # 1. explicit caller-provided filename
         # 2. HTTP Content-Disposition filename
@@ -230,6 +247,7 @@ class AZT1DDownloader:
         return initial_path
 
     def _extract_if_needed(self, file_path: Path) -> Optional[Path]:
+        """Extract a downloaded ZIP archive into the configured extraction directory when applicable."""
         # Extraction stays inside the downloader because archive handling is part
         # of raw file acquisition, not preprocessing.
         if not zipfile.is_zipfile(file_path):

@@ -58,6 +58,200 @@ tests/
 
 Each of those areas exists for a specific reason.
 
+## Visual Guide To The Repository
+
+This document now includes both the hand-authored model diagrams already stored
+under `docs/assets/` and the generated static dependency graphs under
+`docs/dependency_graphs/`. Together they answer two different questions:
+
+- what the forecasting system is trying to model and predict
+- how the current codebase is organized to implement that system
+
+Interpret the dependency diagrams as static import relationships rather than a
+full runtime call trace. They are intended to reinforce the architecture
+sections below, not replace them.
+
+These generated artifacts are refreshed from the repository root with:
+
+```bash
+python scripts/generate_dependency_graphs.py
+```
+
+### Problem Context: The Time-Series Forecasting Setting
+
+![Time-series context illustration](assets/Time_Series.jpg)
+
+What this is:
+an external-facing visual reminder that this repository is solving a
+time-series forecasting problem rather than a one-shot tabular prediction task.
+
+What it is doing:
+it frames the forecasting problem as a sequence of historical observations used
+to predict future values over a horizon.
+
+Why it matters:
+many later architecture choices only make sense in a sequential setting, such
+as encoder and decoder windows, temporal feature grouping, causal convolutions,
+and horizon-aligned quantile outputs.
+
+How to use it while reading the code:
+keep this mental model in mind when reading `src/data/`, `src/models/tcn.py`,
+`src/models/tft.py`, and the evaluation package, because those areas are built
+around sequence structure rather than isolated rows.
+
+### High-Level Package Boundaries: What Major Areas Exist
+
+[![Package dependency graph](assets/codebase_dependency_packages.svg)](dependency_graphs/package_graph.svg)
+
+What this is:
+the top-level package dependency map for the repository's internal Python code.
+
+What it is doing:
+it shows how the stable entry surfaces (`main`, `defaults`) connect to the main
+subsystems (`config`, `data`, `environment`, `evaluation`, `models`,
+`observability`, `workflows`, and `train`).
+
+Why it matters:
+this is the fastest way to understand the current architectural boundary lines
+without reading every module in detail.
+
+Purpose:
+use this graph for onboarding, scoping refactors, and checking whether new
+imports are preserving the intended subsystem split.
+
+### Entrypoint-To-Orchestration Flow: How A Run Starts
+
+[![Entrypoint flow graph](dependency_graphs/entrypoint_flow_graph.svg)](dependency_graphs/entrypoint_flow_graph.svg)
+
+What this is:
+the static dependency view centered on the user-facing entry surfaces.
+
+What it is doing:
+it shows how `main.py` and `defaults.py` reach into the workflow, config,
+training, and runtime-environment layers.
+
+Why it matters:
+the repository deliberately keeps the root entrypoints thin, so this diagram
+helps clarify that the heavy orchestration lives below them rather than inside
+the root files themselves.
+
+Purpose:
+use this view when you want to understand where CLI behavior ends and reusable
+workflow logic begins.
+
+### Full Production Module Map: How The Internal Codebase Connects
+
+[![Production module graph](dependency_graphs/production_module_graph.svg)](dependency_graphs/production_module_graph.svg)
+
+What this is:
+the complete static module-level dependency graph for production code.
+
+What it is doing:
+it shows import relationships between `main.py`, `defaults.py`, and all Python
+modules under `src/`.
+
+Why it matters:
+this is the most detailed static picture of how the current implementation is
+wired together, including architectural hubs such as `workflows.training`,
+`data.datamodule`, `train`, and `models.fused_model`.
+
+Purpose:
+use this graph for impact analysis, refactor planning, and identifying highly
+connected modules that deserve extra care.
+
+### Test Coverage Shape: Which Production Areas Tests Touch
+
+[![Test dependency graph](dependency_graphs/test_dependency_graph.svg)](dependency_graphs/test_dependency_graph.svg)
+
+What this is:
+the test-to-production dependency view.
+
+What it is doing:
+it shows which production modules are imported by the current test suite.
+
+Why it matters:
+tests are intentionally split out from the main architecture graph so they do
+not drown the production structure, but they still matter when judging how
+well each subsystem is exercised.
+
+Purpose:
+use this graph when planning refactors or identifying parts of the repository
+that may need broader test coverage.
+
+### Hybrid Forecasting Model Overview: How The Main Model Fits Together
+
+[![Fused model architecture](assets/FusedModel_architecture.png)](assets/FusedModel_architecture.png)
+
+What this is:
+the high-level architecture diagram for the repository's main forecasting
+model, `FusedModel`.
+
+What it is doing:
+it shows how the repository combines multiple temporal processing branches into
+one forecasting pipeline rather than relying on a single sequence model.
+
+Why it matters:
+this diagram explains the repo's central modeling choice: combine a
+convolution-oriented temporal path with a transformer-oriented temporal path,
+then fuse their learned representations before producing quantile forecasts.
+
+Purpose:
+use this image first when reading `src/models/fused_model.py`, because it gives
+the conceptual skeleton for the code-level forward pass.
+
+### Temporal Convolution Branch: What The TCN Path Contributes
+
+[![TCN architecture](assets/TCN_architecture.png)](assets/TCN_architecture.png)
+
+What this is:
+the architecture view for the temporal convolution branch used inside the fused
+model.
+
+What it is doing:
+it emphasizes causal convolution, residual processing, and local
+pattern extraction over the historical window.
+
+Why it matters:
+the TCN branch is the part of the model that is especially good at capturing
+shorter-range local temporal structure and multi-scale history patterns.
+
+Purpose:
+use this diagram when reading `src/models/tcn.py` and the TCN-related sections
+of `src/models/fused_model.py` so the code maps back to the intended temporal
+feature extractor.
+
+### Temporal Fusion Transformer Branch: What The TFT Path Contributes
+
+[![TFT architecture](assets/TFT_architecture.PNG)](assets/TFT_architecture.PNG)
+
+What this is:
+the architecture view for the Temporal Fusion Transformer branch.
+
+What it is doing:
+it highlights the richer feature-group-aware path that combines static inputs,
+historical inputs, and future-known inputs through the TFT-style processing
+stack.
+
+Why it matters:
+the TFT branch is the part of the model designed to capture longer-range
+context, feature-role distinctions, and horizon-aware sequence reasoning.
+
+Purpose:
+use this diagram when reading `src/models/tft.py`, `src/data/schema.py`, and
+runtime-bound feature metadata code, because that path depends heavily on
+semantic feature grouping.
+
+### Graph Artifact Index
+
+For convenience, the full static artifact set is linked here as well:
+
+- [Package graph](dependency_graphs/package_graph.svg)
+- [Production module graph](dependency_graphs/production_module_graph.svg)
+- [Entrypoint flow graph](dependency_graphs/entrypoint_flow_graph.svg)
+- [Test dependency graph](dependency_graphs/test_dependency_graph.svg)
+- [Dependency summary](dependency_graphs/summary.md)
+- [Canonical graph JSON](dependency_graphs/dependency_graph.json)
+
 ## Repository Map By Responsibility
 
 For day-to-day navigation, the most useful way to think about the repository is
@@ -153,6 +347,9 @@ The current architecture is built around a few stable principles:
 - root-level entrypoints should stay thin and user-facing
 - documentation should explain intent and boundaries, not only APIs
 
+The generated dependency graphs are a lightweight way to validate whether the
+current import structure still reflects those intended boundaries.
+
 ## End-To-End Runtime Flow
 
 The normal run path through the repository is:
@@ -193,6 +390,10 @@ The normal run path through the repository is:
 That same underlying workflow is shared by the notebook path. `main.ipynb`
 reuses the same Python surfaces rather than keeping its own independent
 training logic.
+
+The [entrypoint flow graph](dependency_graphs/entrypoint_flow_graph.svg)
+provides a static visual companion to this runtime path by showing how the
+top-level entry surfaces reach the orchestration layers below them.
 
 ## Data Flow
 

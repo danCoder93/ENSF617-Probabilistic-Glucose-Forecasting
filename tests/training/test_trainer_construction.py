@@ -1,5 +1,20 @@
 from __future__ import annotations
 
+"""
+AI-assisted maintenance note:
+These tests protect the trainer wrapper's construction-time responsibilities.
+
+Purpose:
+- verify runtime data metadata is bound into the model config before model creation
+- verify callback and Trainer assembly reflect the typed runtime configuration
+- verify dataloader settings are preserved where they materially affect runtime behavior
+
+Context:
+these tests focus on setup and construction policy, not on the actual epoch
+loop. Execution-path behavior lives in the companion `test_trainer_execution.py`
+module.
+"""
+
 import importlib.util
 from pathlib import Path
 
@@ -34,6 +49,9 @@ def test_build_model_binds_runtime_tft_metadata(
     write_processed_csv,
     build_data_config,
 ) -> None:
+    # The trainer wrapper must bind runtime-discovered categorical metadata into
+    # the TFT config before the model is instantiated. If that contract breaks,
+    # the model and DataModule no longer agree on feature cardinalities.
     csv_path = write_processed_csv(subject_ids=("subject_a", "subject_b"), steps_per_subject=40)
     data_config = build_data_config(csv_path, batch_size=2)
     datamodule = AZT1DDataModule(data_config)
@@ -56,6 +74,8 @@ def test_has_validation_and_test_data_reflect_prepared_splits(
     write_processed_csv,
     build_data_config,
 ) -> None:
+    # Split-availability helpers are thin, but they encode the wrapper's policy
+    # of eagerly preparing the DataModule before answering "does this split exist?"
     csv_path = write_processed_csv(steps_per_subject=80)
     data_config = build_data_config(csv_path)
     datamodule = AZT1DDataModule(data_config)
@@ -66,6 +86,8 @@ def test_has_validation_and_test_data_reflect_prepared_splits(
 
 
 def test_build_callbacks_monitor_validation_loss_when_validation_exists() -> None:
+    # With validation data available, checkpointing and early stopping should
+    # both key off the validation-loss contract used elsewhere in the repo.
     trainer = FusedModelTrainer(
         build_base_config(build_minimal_data_config()),
         trainer_config=TrainConfig(early_stopping_patience=3),
@@ -104,6 +126,9 @@ def test_build_callbacks_monitor_validation_loss_when_validation_exists() -> Non
 
 
 def test_build_callbacks_can_snapshot_weights_only_without_validation() -> None:
+    # Without validation data, the wrapper should downgrade from ranked
+    # checkpointing to simple "last snapshot" semantics rather than pretending a
+    # meaningful monitored best checkpoint exists.
     trainer = FusedModelTrainer(
         build_base_config(build_minimal_data_config()),
         snapshot_config=SnapshotConfig(
@@ -131,6 +156,9 @@ def test_build_callbacks_can_snapshot_weights_only_without_validation() -> None:
 def test_build_trainer_passes_runtime_tuning_kwargs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # This test treats the Trainer constructor as a translation boundary from
+    # typed repo config to Lightning kwargs. A fake Trainer keeps that mapping
+    # easy to inspect directly.
     observed_kwargs: dict[str, object] = {}
 
     class FakeTrainer:
@@ -175,6 +203,8 @@ def test_datamodule_includes_prefetch_factor_only_when_workers_are_enabled(
     write_processed_csv,
     build_data_config,
 ) -> None:
+    # Prefetch-related loader kwargs are only valid when workers are enabled.
+    # This test protects that contract on the real DataModule output.
     csv_path = write_processed_csv()
     data_config = build_data_config(
         csv_path,
