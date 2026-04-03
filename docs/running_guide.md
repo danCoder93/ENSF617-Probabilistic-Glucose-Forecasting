@@ -22,7 +22,7 @@ This guide provides step-by-step instructions for running the ENSF617 Probabilis
 Alternatively, clone the repository:
 
 ```bash
-!git clone https://github.com/your-org/ENSF617-Probabilistic-Glucose-Forecasting.git
+!git clone https://github.com/danCoder93/ENSF617-Probabilistic-Glucose-Forecasting.git -b danish/dev
 %cd ENSF617-Probabilistic-Glucose-Forecasting
 ```
 
@@ -76,7 +76,15 @@ drive.mount('/content/drive')
 1. Run with output directory on Drive:
 
 ```bash
-!python main.py --output-dir /content/drive/MyDrive/ENSF617/artifacts
+!python main.py \
+  --device-profile colab-cuda \
+  --max-epochs 10 \
+  --batch-size 64 \
+  --observability-mode debug \
+  --rich-progress-bar \
+  --device-stats \
+  --enable-activation-stats \
+  --output-dir /content/drive/MyDrive/ENSF617/artifacts
 ```
 
 #### Viewing Logs
@@ -89,7 +97,7 @@ drive.mount('/content/drive')
 
 ```python
 %load_ext tensorboard
-%tensorboard --logdir artifacts/main_run/logs
+%tensorboard --logdir /content/drive/MyDrive/ENSF617/artifacts/main_run/logs
 ```
 
 #### Colab File Browser
