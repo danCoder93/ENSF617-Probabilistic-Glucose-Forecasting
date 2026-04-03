@@ -367,7 +367,7 @@ This is one of the central architectural themes of the repository: later layers 
 
 ## 7. System Flow
 
-Yes, a vertical flow diagram is a useful addition here because the repository is fundamentally staged. A top-to-bottom representation matches the real dependency structure better than a left-to-right sketch.
+A top-to-bottom representation matches the real dependency structure.
 
 ```mermaid
 flowchart TB
