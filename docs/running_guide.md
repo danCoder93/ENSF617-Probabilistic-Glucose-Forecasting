@@ -223,6 +223,21 @@ cd ENSF617-Probabilistic-Glucose-Forecasting
 
 ### 2. Setup Environment
 
+Install your environment if not installed (using conda):
+
+#### Create env with Python 3.11 and proper channel order
+
+```bash
+conda create -y -n pytorch python=3.11 -c pytorch -c nvidia -c conda-forge
+conda activate pytorch
+```
+
+#### Enforce strict channel priority for this env
+
+```bash
+conda config --env --set channel_priority strict
+```
+
 Load your environment (example using conda):
 
 ```bash
@@ -233,8 +248,8 @@ conda activate pytorch
 Install dependencies (if needed):
 
 ```bash
-conda install --file requirements.txt \
-  -c pytorch -c nvidia -c conda-forge --override-channels
+cd ~/projects/ENSF617-Probabilistic-Glucose-Forecasting
+conda install -y pytorch torchvision torchaudio tensorboard tensorflow torchmetrics torchview transformers scikit-learn matplotlib numpy pandas plotly psutil pytorch-lightning pytest requests pytorch-cuda=12.1 -c pytorch -c nvidia -c conda-forge --override-channels
 ```
 
 ---
