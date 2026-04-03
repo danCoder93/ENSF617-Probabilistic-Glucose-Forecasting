@@ -160,7 +160,7 @@ python main.py \
   --device-profile apple-silicon \
   --max-epochs 5 \
   --batch-size 128 \
-  -- num-workers 1 \
+  --num-workers 1 \
   --observability-mode debug \
   --rich-progress-bar \
   --device-stats \
