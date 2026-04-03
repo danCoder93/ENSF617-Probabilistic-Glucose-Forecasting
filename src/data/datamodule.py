@@ -43,13 +43,18 @@ from utils.tft_utils import DataTypes, FeatureSpec, InputTypes
 if TYPE_CHECKING:
     from pytorch_lightning import LightningDataModule as _LightningDataModuleBase
 else:
+    _LIGHTNING_IMPORT_ERROR: Exception | None = None
     try:
         from pytorch_lightning import LightningDataModule as _LightningDataModuleBase
-    except ImportError:  # pragma: no cover - lightweight compatibility fallback
+    except Exception as exc:  # pragma: no cover - lightweight compatibility fallback
+        _LIGHTNING_IMPORT_ERROR = exc
+
         class _LightningDataModuleBase:
             # The fallback base is intentionally minimal. Its purpose is not to
             # emulate Lightning fully, but simply to keep local imports and basic
-            # scripts from crashing immediately when Lightning is absent.
+            # scripts from crashing immediately when Lightning is absent or its
+            # dependency stack is installed in a broken state (for example, a
+            # `torch` / `torchvision` mismatch surfaced during import).
             def __init__(self, *args: Any, **kwargs: Any) -> None:
                 super().__init__()
 

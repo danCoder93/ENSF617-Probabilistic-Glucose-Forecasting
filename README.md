@@ -468,12 +468,17 @@ Local:
 pip install -r requirements.txt
 ```
 
-Apple Silicon often benefits from installing Torch separately first:
+Apple Silicon often benefits from installing PyTorch separately first:
 
 ```bash
-pip install torch torchvision torchaudio
+pip install torch
 pip install -r requirements.txt
 ```
+
+`torchvision` and `torchaudio` are not required by this repository directly.
+If you choose to install them, make sure they match the exact PyTorch build in
+your active environment; mismatched `torch` / `torchvision` versions can fail
+during import before the project code runs.
 
 ### Run Tests
 
