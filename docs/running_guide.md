@@ -191,6 +191,100 @@ Then open <http://localhost:6006> in your browser
 - Reports: `artifacts/main_run/reports/` (HTML files)
 - Model visualizations: `artifacts/main_run/model_viz/`
 
+Ahh got it — you want a **clean Markdown block ONLY**, no extra formatting, no `id=`, no explanation. Just paste-ready.
+
+Here it is 👇
+
+---
+
+## 🖥️ TALC GPU (Slurm)
+
+Use this configuration to run the glucose project on the TALC GPU cluster.
+
+---
+
+### Standard Training Run
+
+```bash
+python main.py \
+  --device-profile slurm-cuda \
+  --batch-size 128 \
+  --max-epochs 20 \
+  --pin-memory \
+  --precision 16-mixed \
+  --observability-mode debug \
+  --rich-progress-bar \
+  --device-stats \
+  --enable-activation-stats \
+  --output-dir "$SLURM_SUBMIT_DIR/artifacts/slurm_run"
+````
+
+---
+
+### Fast Iteration Run (Debug / Short Jobs)
+
+```bash
+python main.py \
+  --device-profile slurm-cuda \
+  --batch-size 64 \
+  --max-epochs 5 \
+  --observability-mode minimal \
+  --num-sanity-val-steps 0 \
+  --log-every-n-steps 50 \
+  --skip-test \
+  --skip-predict \
+  --no-save-predictions \
+  --output-dir "$SLURM_SUBMIT_DIR/artifacts/slurm_quick"
+```
+
+---
+
+### Recommended Slurm Job Configuration
+
+```bash
+#SBATCH --partition=gpu
+#SBATCH --gpus-per-node=1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=3
+#SBATCH --time=08:00:00
+#SBATCH --output=%x-%j.out
+```
+
+Notes:
+
+* `cpus-per-task=4` → ~3 DataLoader workers (auto-derived)
+
+---
+
+### Scratch Storage (Recommended)
+
+```bash
+JOB_SCRATCH="/scratch/${SLURM_JOB_ID}"
+
+python main.py \
+  --device-profile slurm-cuda \
+  --raw-dir "$JOB_SCRATCH/raw" \
+  --cache-dir "$JOB_SCRATCH/cache" \
+  --extracted-dir "$JOB_SCRATCH/extracted" \
+  --processed-dir "$JOB_SCRATCH/processed" \
+  --output-dir "$SLURM_SUBMIT_DIR/artifacts/slurm_run"
+```
+
+---
+
+### Avoid (Slows Down Training)
+
+```bash
+--observability-mode debug
+--enable-activation-stats
+--device-stats
+--rich-progress-bar
+```
+
+Use these only for local debugging, not cluster jobs.
+
+
 ## Understanding Logs and Telemetry
 
 ### Run Summary (JSON)
