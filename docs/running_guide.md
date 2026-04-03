@@ -238,63 +238,7 @@ pip install -r requirements.txt
 
 ---
 
-### 3. Create Slurm Job Script
-
-Create a file:
-
-```bash
-nano run_glucose.slurm
-```
-
-Paste the following:
-
-```bash
-#!/bin/bash
-#SBATCH --job-name=glucose_pred_t4
-#SBATCH --partition=gpu
-#SBATCH --gpus-per-node=1
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=3
-#SBATCH --time=08:00:00
-#SBATCH --output=%x-%j.out
-
-set -euo pipefail
-
-echo "Running on $(hostname)"
-echo "Job ID: ${SLURM_JOB_ID}"
-
-source ~/software/init-conda
-conda activate pytorch
-
-nvidia-smi
-
-JOB_SCRATCH="/scratch/${SLURM_JOB_ID}"
-mkdir -p "$JOB_SCRATCH"
-mkdir -p "${SLURM_SUBMIT_DIR}/artifacts"
-
-python main.py \
-  --device-profile slurm-cuda \
-  --batch-size 128 \
-  --max-epochs 20 \
-  --pin-memory \
-  --precision 16-mixed \
-  --observability-mode debug \
-  --rich-progress-bar \
-  --device-stats \
-  --enable-activation-stats \
-  --raw-dir "$JOB_SCRATCH/raw" \
-  --cache-dir "$JOB_SCRATCH/cache" \
-  --extracted-dir "$JOB_SCRATCH/extracted" \
-  --processed-dir "$JOB_SCRATCH/processed" \
-  --output-dir "${SLURM_SUBMIT_DIR}/artifacts/glucose_${SLURM_JOB_ID}"
-```
-
-Save and exit.
-
----
-
-### 4. Submit the Job
+### 3. Submit the Job
 
 ```bash
 sbatch run_glucose.slurm
@@ -308,7 +252,7 @@ squeue -u $USER
 
 ---
 
-### 5. Run Quick Debug Jobs
+### 4. Run Quick Debug Jobs
 
 For faster iteration, modify the command inside the script:
 
@@ -328,7 +272,7 @@ python main.py \
 
 ---
 
-### 6. Access Logs and Outputs
+### 5. Access Logs and Outputs
 
 After the job completes:
 
@@ -348,7 +292,7 @@ Includes:
 
 ---
 
-### 8. Avoid Slow Configurations
+### 6. Avoid Slow Configurations
 
 Do NOT use these on the cluster:
 
@@ -363,7 +307,7 @@ These significantly slow down training due to logging and synchronization overhe
 
 ---
 
-### 9. Resource Optimization
+### 7. Resource Optimization
 
 After your first run:
 
@@ -374,7 +318,7 @@ sacct -j <job_id>
 
 ---
 
-### 10. Scratch Storage
+### 8. Scratch Storage
 
 Use fast local storage during jobs:
 
