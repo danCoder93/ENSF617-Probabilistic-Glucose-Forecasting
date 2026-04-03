@@ -78,8 +78,12 @@ drive.mount('/content/drive')
 ```bash
 !python main.py \
   --device-profile colab-cuda \
-  --max-epochs 10 \
-  --batch-size 64 \
+  --max-epochs 5 \
+  --batch-size 128 \
+  --num-workers 4 \
+  --pin-memory \
+  --persistent-workers \
+  --precision 16-mixed \
   --observability-mode debug \
   --rich-progress-bar \
   --device-stats \
@@ -155,7 +159,8 @@ For explicit profile selection:
 python main.py \
   --device-profile apple-silicon \
   --max-epochs 5 \
-  --batch-size 64 \
+  --batch-size 128 \
+  -- num-workers 1 \
   --observability-mode debug \
   --rich-progress-bar \
   --device-stats \
