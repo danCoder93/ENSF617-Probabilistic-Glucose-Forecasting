@@ -233,7 +233,8 @@ conda activate pytorch
 Install dependencies (if needed):
 
 ```bash
-pip install -r requirements.txt
+conda install --file requirements.txt \
+  -c pytorch -c nvidia -c conda-forge --override-channels
 ```
 
 ---
