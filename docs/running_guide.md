@@ -196,14 +196,117 @@ Ahh got it — you want a **clean Markdown block ONLY**, no extra formatting, no
 Here it is 👇
 
 ---
+## TALC GPU Cluster Setup (Slurm)
 
-## 🖥️ TALC GPU (Slurm)
+### 1. Connect to TALC
 
-Use this configuration to run the glucose project on the TALC GPU cluster.
+SSH into the cluster:
+
+```bash
+ssh your_username@talc.ucalgary.ca
+```
+
+Navigate to your working directory:
+
+```bash
+cd ~/projects
+```
+
+Clone the repository (if not already done):
+
+```bash
+git clone https://github.com/danCoder93/ENSF617-Probabilistic-Glucose-Forecasting.git -b danish/dev
+cd ENSF617-Probabilistic-Glucose-Forecasting
+```
 
 ---
 
-### Standard Training Run
+### 2. Setup Environment
+
+Load your environment (example using conda):
+
+```bash
+source ~/software/init-conda
+conda activate pytorch
+```
+
+Install dependencies (if needed):
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+### 3. Create Slurm Job Script
+
+Create a file:
+
+```bash
+nano run_glucose.slurm
+```
+
+Paste the following:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=glucose_t4
+#SBATCH --partition=gpu
+#SBATCH --gpus-per-node=1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
+#SBATCH --time=08:00:00
+#SBATCH --output=%x-%j.out
+
+set -euo pipefail
+
+echo "Running on $(hostname)"
+echo "Job ID: ${SLURM_JOB_ID}"
+
+source ~/software/init-conda
+conda activate pytorch
+
+nvidia-smi
+
+JOB_SCRATCH="/scratch/${SLURM_JOB_ID}"
+mkdir -p "$JOB_SCRATCH"
+mkdir -p "${SLURM_SUBMIT_DIR}/artifacts"
+
+python main.py \
+  --device-profile slurm-cuda \
+  --batch-size 64 \
+  --max-epochs 20 \
+  --observability-mode minimal \
+  --raw-dir "$JOB_SCRATCH/raw" \
+  --cache-dir "$JOB_SCRATCH/cache" \
+  --extracted-dir "$JOB_SCRATCH/extracted" \
+  --processed-dir "$JOB_SCRATCH/processed" \
+  --output-dir "${SLURM_SUBMIT_DIR}/artifacts/glucose_${SLURM_JOB_ID}"
+```
+
+Save and exit.
+
+---
+
+### 4. Submit the Job
+
+```bash
+sbatch run_glucose.slurm
+```
+
+Check job status:
+
+```bash
+squeue -u $USER
+```
+
+---
+
+### 5. Run Quick Debug Jobs
+
+For faster iteration, modify the command inside the script:
 
 ```bash
 python main.py \
@@ -217,63 +320,33 @@ python main.py \
   --device-stats \
   --enable-activation-stats \
   --output-dir "$SLURM_SUBMIT_DIR/artifacts/slurm_run"
-````
-
----
-
-### Fast Iteration Run (Debug / Short Jobs)
-
-```bash
-python main.py \
-  --device-profile slurm-cuda \
-  --batch-size 64 \
-  --max-epochs 5 \
-  --observability-mode minimal \
-  --num-sanity-val-steps 0 \
-  --log-every-n-steps 50 \
-  --skip-test \
-  --skip-predict \
-  --no-save-predictions \
-  --output-dir "$SLURM_SUBMIT_DIR/artifacts/slurm_quick"
 ```
 
 ---
 
-### Recommended Slurm Job Configuration
+### 6. Access Logs and Outputs
 
-```bash
-#SBATCH --partition=gpu
-#SBATCH --gpus-per-node=1
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=3
-#SBATCH --time=08:00:00
-#SBATCH --output=%x-%j.out
-```
+After the job completes:
 
-Notes:
+* **Console output**: `glucose_t4-<job_id>.out`
+* **Artifacts**:
 
-* `cpus-per-task=4` → ~3 DataLoader workers (auto-derived)
+  ```
+  artifacts/glucose_<job_id>/
+  ```
 
----
+Includes:
 
-### Scratch Storage (Recommended)
-
-```bash
-JOB_SCRATCH="/scratch/${SLURM_JOB_ID}"
-
-python main.py \
-  --device-profile slurm-cuda \
-  --raw-dir "$JOB_SCRATCH/raw" \
-  --cache-dir "$JOB_SCRATCH/cache" \
-  --extracted-dir "$JOB_SCRATCH/extracted" \
-  --processed-dir "$JOB_SCRATCH/processed" \
-  --output-dir "$SLURM_SUBMIT_DIR/artifacts/slurm_run"
-```
+* model checkpoints
+* logs
+* prediction outputs
+* telemetry CSV
 
 ---
 
-### Avoid (Slows Down Training)
+### 8. Avoid Slow Configurations
+
+Do NOT use these on the cluster:
 
 ```bash
 --observability-mode debug
@@ -282,8 +355,33 @@ python main.py \
 --rich-progress-bar
 ```
 
-Use these only for local debugging, not cluster jobs.
+These significantly slow down training due to logging and synchronization overhead.
 
+---
+
+### 9. Resource Optimization
+
+After your first run:
+
+```bash
+seff <job_id>
+sacct -j <job_id>
+```
+
+---
+
+### 10. Scratch Storage
+
+Use fast local storage during jobs:
+
+```bash
+/scratch/${SLURM_JOB_ID}
+```
+
+* Faster than network filesystem
+* Automatically cleaned after job completion
+
+-----
 
 ## Understanding Logs and Telemetry
 
