@@ -152,7 +152,14 @@ python main.py --max-epochs 5 --batch-size 32
 For explicit profile selection:
 
 ```bash
-python main.py --device-profile apple-silicon --max-epochs 10
+python main.py \
+  --device-profile apple-silicon \
+  --max-epochs 5 \
+  --batch-size 64 \
+  --observability-mode debug \
+  --rich-progress-bar \
+  --device-stats \
+  --enable-activation-stats
 ```
 
 ### 4. Access Logs and Telemetry
