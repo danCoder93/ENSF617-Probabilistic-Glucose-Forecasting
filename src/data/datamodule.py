@@ -22,6 +22,7 @@ from data.downloader import AZT1DDownloader
 from data.indexing import build_sequence_index, split_processed_frame
 from data.preprocessor import AZT1DPreprocessor
 from data.schema import FeatureGroups, build_feature_groups
+from data.statistics import describe_clean_frame
 from data.transforms import build_category_maps, load_processed_frame
 from config import Config, DataConfig
 from utils.tft_utils import DataTypes, FeatureSpec, InputTypes
@@ -100,6 +101,7 @@ class AZT1DDataModule(_LightningDataModuleBase):
         # Cardinalities are cached on the DataModule because they are model-facing
         # metadata derived from data preparation. Keeping them here makes it easy
         # for training code to configure embeddings after setup has run.
+        self.cleaned_dataframe: Any | None = None
 
         self.train_dataset: AZT1DSequenceDataset | None = None
         self.val_dataset: AZT1DSequenceDataset | None = None
@@ -166,6 +168,7 @@ class AZT1DDataModule(_LightningDataModuleBase):
             self.config,
             self.feature_groups,
         )
+        self.cleaned_dataframe = dataframe
 
         # Fit category vocabularies before split datasets are created so every
         # split shares the same ID mapping and embedding cardinalities.
@@ -314,6 +317,24 @@ class AZT1DDataModule(_LightningDataModuleBase):
                 for column in self.feature_groups.observed_categorical
             ],
         }
+
+    def describe_data(self) -> dict[str, Any]:
+        """
+        Return descriptive statistics for the cleaned dataset held by this DataModule.
+
+        Context:
+        once `setup()` has built the cleaned dataframe and split metadata, the
+        DataModule is the natural place for callers to ask high-level questions
+        about dataset size, feature distributions, and split/window counts.
+        """
+        if self.cleaned_dataframe is None:
+            raise RuntimeError("setup() must be called before describing the dataset.")
+
+        return describe_clean_frame(
+            self.cleaned_dataframe,
+            self.config,
+            self.feature_groups,
+        )
 
     def bind_model_config(self, config: Config) -> Config:
         """

@@ -40,6 +40,35 @@ def test_build_default_config_keeps_data_and_model_lengths_in_sync(tmp_path: Pat
     assert config.tft.quantiles == (0.1, 0.5, 0.9)
 
 
+def test_build_default_config_exposes_data_policy_overrides(tmp_path: Path) -> None:
+    # The root default builder should make the key data-policy assumptions
+    # explicit so callers do not have to know which `DataConfig` defaults are
+    # otherwise hidden inside it.
+    config = build_default_config(
+        dataset_url=None,
+        processed_dir=tmp_path / "processed",
+        processed_file_name="dataset.csv",
+        sampling_interval_minutes=15,
+        window_stride=3,
+        train_ratio=0.6,
+        val_ratio=0.2,
+        test_ratio=0.2,
+        split_by_subject=True,
+        split_within_subject=False,
+        num_workers=0,
+        pin_memory=False,
+        persistent_workers=False,
+    )
+
+    assert config.data.sampling_interval_minutes == 15
+    assert config.data.window_stride == 3
+    assert config.data.train_ratio == 0.6
+    assert config.data.val_ratio == 0.2
+    assert config.data.test_ratio == 0.2
+    assert config.data.split_by_subject is True
+    assert config.data.split_within_subject is False
+
+
 def test_build_default_train_snapshot_and_observability_configs_share_output_layout(
     tmp_path: Path,
 ) -> None:

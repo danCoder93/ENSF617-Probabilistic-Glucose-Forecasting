@@ -63,8 +63,15 @@ def build_default_config(
     extracted_dir: Path = ROOT_DIR / "data" / "extracted",
     processed_dir: Path = ROOT_DIR / "data" / "processed",
     processed_file_name: str = "azt1d_processed.csv",
+    sampling_interval_minutes: int = 5,
     encoder_length: int = 168,
     prediction_length: int = 12,
+    window_stride: int = 1,
+    train_ratio: float = 0.70,
+    val_ratio: float = 0.15,
+    test_ratio: float = 0.15,
+    split_by_subject: bool = False,
+    split_within_subject: bool = True,
     batch_size: int = 64,
     num_workers: int = 0,
     pin_memory: bool = False,
@@ -95,6 +102,15 @@ def build_default_config(
     # It should be read as a baseline experiment recipe, not as the single
     # canonical or best-performing setup for every dataset slice or hardware
     # environment.
+    #
+    # The data defaults intentionally separate dataset facts from experiment
+    # policy:
+    # - `dataset_url`, repo-local folders, and
+    #   `sampling_interval_minutes=5` reflect the public AZT1D release and its
+    #   5-minute CGM cadence described in the dataset paper
+    # - `encoder_length`, `prediction_length`, `window_stride`, split ratios,
+    #   and split flags remain repository baseline choices for a first run
+    #   rather than dataset-mandated settings
     # Data defaults are chosen to make the first local run predictable:
     # - repository-relative folders keep artifacts contained inside the repo
     # - `num_workers=0` is conservative but avoids multiprocessing surprises
@@ -108,8 +124,15 @@ def build_default_config(
         extracted_dir=extracted_dir,
         processed_dir=processed_dir,
         processed_file_name=processed_file_name,
+        sampling_interval_minutes=sampling_interval_minutes,
         encoder_length=encoder_length,
         prediction_length=prediction_length,
+        window_stride=window_stride,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+        split_by_subject=split_by_subject,
+        split_within_subject=split_within_subject,
         batch_size=batch_size,
         num_workers=num_workers,
         pin_memory=pin_memory,

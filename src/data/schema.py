@@ -60,7 +60,11 @@ RAW_GLUCOSE_COLUMNS = ("CGM", "Readings (CGM / BGM)")
 # to normalize messy raw strings, and the dataset/data module use the same
 # ordering when they turn categories into integer IDs. Keeping the ordering in
 # one place is what prevents data/model cardinalities from silently drifting.
-DEVICE_MODE_CATEGORIES = ("none", "sleep", "exercise", "other")
+#
+# The AZT1D paper describes device mode as regular/sleep/exercise rather than as
+# a generic missing/none state, so the canonical vocabulary reflects those
+# semantics directly.
+DEVICE_MODE_CATEGORIES = ("regular", "sleep", "exercise", "other")
 BOLUS_TYPE_CATEGORIES = (
     "none",
     "automatic",

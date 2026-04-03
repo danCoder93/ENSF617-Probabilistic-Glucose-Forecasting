@@ -41,9 +41,10 @@ class DataConfig:
     # and future support of alternate dataset sources.
     dataset_name: str = "azt1d"
 
-    # Public download URL for the raw dataset archive/file.
-    # Set to `None` when the processed/raw files will already
-    # exist locally and no download should occur.
+    # Public download URL for the raw AZT1D release on
+    # Mendeley Data. Set to `None` when the processed/raw
+    # files will already exist locally and no download should
+    # occur.
     dataset_url: Optional[str] = (
         "https://data.mendeley.com/public-files/datasets/"
         "gk9m674wcx/files/b02a20be-27c4-4dd0-8bb5-9171c66262fb/file_downloaded"
@@ -85,16 +86,26 @@ class DataConfig:
     # --------------------------------------------------------
     # Expected spacing between cleaned samples after
     # preprocessing/standardization.
+    #
+    # This default is dataset-derived: the AZT1D paper
+    # describes the CSV glucose records as arriving on a
+    # 5-minute grid.
     sampling_interval_minutes: int = 5
 
     # Historical window length consumed by the model.
+    # This is a repository starter default, not a claim from
+    # the AZT1D paper.
     encoder_length: int = 168
 
     # Forecast horizon length emitted by the model.
+    # This is a repository starter default, not a
+    # dataset-mandated setting.
     prediction_length: int = 12
 
     # Sliding-window step size used when generating consecutive
     # sequence examples from a longer timeline.
+    # This controls example density for experiments; it is not
+    # encoded by the dataset itself.
     window_stride: int = 1
 
     # --------------------------------------------------------
@@ -102,15 +113,24 @@ class DataConfig:
     # --------------------------------------------------------
     # Ratios for train/validation/test. These are validated to
     # sum to 1.0.
+    #
+    # These defaults reflect the repository's baseline
+    # experiment policy rather than any train/validation/test
+    # split specified by the dataset paper.
     train_ratio: float = 0.70
     val_ratio: float = 0.15
     test_ratio: float = 0.15
 
     # If True, entire subjects are assigned to only one split.
+    # This is an evaluation choice, not a property of AZT1D.
     split_by_subject: bool = False
 
     # If True, each subject timeline is split chronologically
     # into train/validation/test segments.
+    #
+    # This default favors a within-subject forecasting baseline
+    # for the repository. It should not be read as a claim that
+    # the dataset paper prescribes this split policy.
     split_within_subject: bool = True
 
     # --------------------------------------------------------

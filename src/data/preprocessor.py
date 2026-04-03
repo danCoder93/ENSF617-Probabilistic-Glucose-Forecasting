@@ -27,6 +27,13 @@ from data.schema import RAW_GLUCOSE_COLUMNS, RAW_TO_INTERNAL_COLUMN_MAP
 # The processed file is intentionally narrow and canonical. It preserves the raw
 # measurements but strips away vendor-specific naming so every downstream stage
 # can load one stable table shape.
+#
+# Unit conventions:
+# - `glucose_mg_dl` is glucose concentration in mg/dL.
+# - `*_insulin_u` columns are insulin amounts in units.
+# - `carbs_g` is carbohydrate amount in grams.
+# - `meal_insulin_u` means the meal-directed portion of bolus insulin, not a
+#   count of meals.
 OUTPUT_COLUMNS = [
     "subject_id",
     "timestamp",

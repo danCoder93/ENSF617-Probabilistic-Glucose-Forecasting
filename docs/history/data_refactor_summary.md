@@ -97,6 +97,41 @@ categorical-cardinality gap between the data layer and the TFT config.
 These methods allow the training/bootstrap layer to bind discovered category
 sizes and feature metadata into `Config.tft` before constructing the model.
 
+## Later Data-Semantics Follow-Up
+
+After the initial refactor, the data layer received a semantics-focused cleanup
+driven by comparison with the AZT1D dataset paper and inspection of the local
+raw export files.
+
+That follow-up kept the same module boundaries but refined the normalization
+policy inside `src/data/transforms.py` and the schema vocabulary in
+`src/data/schema.py`.
+
+Important current behavior now includes:
+
+- preserving explicit unit-bearing canonical names such as
+  `glucose_mg_dl`, `basal_insulin_u`, `bolus_insulin_u`,
+  `correction_insulin_u`, `meal_insulin_u`, and `carbs_g`
+- treating `meal_insulin_u` as meal-directed insulin amount in units rather
+  than as a meal count
+- dropping exact duplicate rows before later cleanup
+- collapsing same-subject/same-timestamp collisions to one cleaned row before
+  sequence indexing
+- treating `basal_insulin_u` as a carried state on the 5-minute grid rather
+  than zero-filling it like a sparse event feature
+- continuing to treat bolus, correction, meal-insulin, and carbohydrate values
+  as sparse event quantities that become zeros when absent
+- normalizing `device_mode` to the paper-aligned vocabulary
+  `regular` / `sleep` / `exercise` / `other`
+- treating `bolus_type` as event-local instead of forward-filling it across
+  later rows
+- exposing JSON-ready descriptive statistics for the cleaned dataframe and the
+  split/window layout through the data layer
+
+This later follow-up did not change the main architectural split introduced by
+the refactor. It clarified the semantics of the cleaned dataframe contract that
+those layers operate on.
+
 ## Testing and Tooling
 
 The refactor also introduced pytest-based test support for the data layer.

@@ -136,6 +136,14 @@ The defaults are explicitly documented as:
 - not claims of optimal performance
 - not a clinically validated forecasting configuration
 
+Later follow-up work also made the data-policy boundary more explicit:
+
+- the public AZT1D download URL and the 5-minute sampling cadence are treated
+  as dataset-derived defaults
+- sequence lengths, window stride, split ratios, and split mode are exposed as
+  overrideable baseline experiment choices rather than hidden dataset
+  assumptions
+
 ## `main.py`
 
 The new root-level `main.py` is the main repository entrypoint for running the

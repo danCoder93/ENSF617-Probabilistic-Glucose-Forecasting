@@ -343,6 +343,34 @@ The data contract is intentionally semantic rather than purely positional. The
 system distinguishes static, known, observed, and target features so that the
 data layer and model layer can agree on what each feature means.
 
+Current normalization semantics worth knowing:
+
+- raw AZT1D field names are rewritten into canonical columns such as
+  `glucose_mg_dl`, `basal_insulin_u`, `bolus_insulin_u`,
+  `correction_insulin_u`, `meal_insulin_u`, and `carbs_g`
+- `*_insulin_u` columns represent insulin amounts in units, and `carbs_g`
+  represents carbohydrate grams
+- exact duplicate rows are dropped before later cleanup
+- same-subject/same-timestamp collisions are collapsed into one cleaned row so
+  sequence indexing can assume one observation per subject and timestamp
+- `basal_insulin_u` is treated as a carried state on the shared 5-minute grid
+  and is forward/back filled within each subject
+- bolus, correction, meal-insulin, and carbohydrate features are treated as
+  sparse event quantities and are zero-filled when no event is present
+- `device_mode` is normalized to `regular`, `sleep`, `exercise`, or `other`
+- `bolus_type` is treated as event-local rather than stateful and is not
+  forward-filled across future rows
+- the data layer can now produce JSON-ready descriptive statistics for the
+  cleaned dataframe and split/window layout
+
+Current config-default semantics worth knowing:
+
+- the public AZT1D download URL and the 5-minute sampling interval are treated
+  as dataset-derived defaults
+- sequence lengths, split ratios, split mode, and window stride remain
+  repository baseline experiment defaults rather than claims from the dataset
+  paper
+
 Practical default locations:
 
 - raw downloads: `data/raw/`

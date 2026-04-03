@@ -81,37 +81,56 @@ def load_processed_frame(
     dataframe = dataframe.sort_values(
         [feature_groups.subject_id_column, feature_groups.time_column]
     ).reset_index(drop=True)
+    dataframe = _deduplicate_exact_rows(dataframe)
+    dataframe = _collapse_duplicate_timestamps(dataframe, feature_groups)
 
-    continuous_columns = tuple(
-        column
-        for column in feature_groups.continuous_columns
-        if column != feature_groups.target_column
+    # The AZT1D paper treats basal insulin as a carried state on the unified
+    # 5-minute grid, while bolus/correction/meal/carbohydrate values behave like
+    # sparse events that should become zeros when no event was recorded.
+    if "basal_insulin_u" in dataframe.columns:
+        dataframe["basal_insulin_u"] = pd.to_numeric(
+            dataframe["basal_insulin_u"],
+            errors="coerce",
+        )
+        dataframe["basal_insulin_u"] = dataframe.groupby(feature_groups.subject_id_column)[
+            "basal_insulin_u"
+        ].ffill()
+        dataframe["basal_insulin_u"] = dataframe.groupby(feature_groups.subject_id_column)[
+            "basal_insulin_u"
+        ].bfill()
+        dataframe["basal_insulin_u"] = dataframe["basal_insulin_u"].fillna(0.0)
+
+    event_continuous_columns = (
+        "bolus_insulin_u",
+        "correction_insulin_u",
+        "meal_insulin_u",
+        "carbs_g",
     )
-    # Operational features such as insulin and carb events behave like sparse
-    # signals in this dataset, so missing values are interpreted as "no event"
-    # and filled with zeros after numeric coercion.
-    for column in continuous_columns:
+    # Event-style quantities are sparse by nature in AZT1D. Once the table is on
+    # the shared 5-minute grid, a missing value means no event was recorded for
+    # that interval, so zero is the correct semantic fill.
+    for column in event_continuous_columns:
         if column in dataframe.columns:
             dataframe[column] = pd.to_numeric(dataframe[column], errors="coerce").fillna(0.0)
 
     if "device_mode" in dataframe.columns:
         dataframe["device_mode"] = _prepare_text_column(dataframe["device_mode"])
-        dataframe["device_mode"] = dataframe["device_mode"].replace({"": pd.NA, "0": pd.NA})
-        # Device mode is forward-filled within each subject because these states
-        # often persist until the device reports a new one. Filling across
-        # subjects would be nonsensical, which is why the groupby key matters.
+        dataframe["device_mode"] = dataframe["device_mode"].replace(
+            {"0": "regular", "0.0": "regular", "": pd.NA}
+        )
+        # Device mode is a persistent per-subject state in AZT1D. Blank rows mean
+        # "same mode as before", and leading gaps fall back to the paper's
+        # default regular mode rather than to an abstract missing category.
         dataframe["device_mode"] = dataframe.groupby(feature_groups.subject_id_column)["device_mode"].ffill()
-        dataframe["device_mode"] = dataframe["device_mode"].fillna("none")
+        dataframe["device_mode"] = dataframe["device_mode"].fillna("regular")
         dataframe["device_mode"] = dataframe["device_mode"].apply(normalize_device_mode)
 
     if "bolus_type" in dataframe.columns:
         dataframe["bolus_type"] = _prepare_text_column(dataframe["bolus_type"])
-        dataframe["bolus_type"] = dataframe["bolus_type"].replace({"": pd.NA, "0": pd.NA})
-        # Bolus type is handled the same way: within-subject forward-fill treats
-        # missing raw entries as "same event context as the previous row" when
-        # the export omits repeated text values.
-        dataframe["bolus_type"] = dataframe.groupby(feature_groups.subject_id_column)["bolus_type"].ffill()
-        dataframe["bolus_type"] = dataframe["bolus_type"].fillna("none")
+        # Bolus type is event-local rather than stateful. Missing values should
+        # stay tied to "no bolus event here" instead of being propagated across
+        # later timesteps by forward-fill.
+        dataframe["bolus_type"] = dataframe["bolus_type"].replace({"0": "", "none": ""})
         dataframe["bolus_type"] = dataframe["bolus_type"].apply(normalize_bolus_type)
 
     dataframe = _add_time_features(dataframe, feature_groups.time_column)
@@ -161,11 +180,11 @@ def normalize_device_mode(value: object) -> str:
     # a small controlled vocabulary. That keeps category IDs stable and reduces
     # the chance that the model learns spurious distinctions from export noise.
     if pd.isna(cast(Any, value)):
-        return "none"
+        return "regular"
 
     normalized = str(value).strip().lower()
-    if normalized in {"", "0", "none"}:
-        return "none"
+    if normalized in {"", "0", "0.0", "none", "regular"}:
+        return "regular"
     if normalized == "sleepsleep":
         return "sleep"
     if normalized in {"sleep", "exercise"}:
@@ -185,7 +204,7 @@ def normalize_bolus_type(value: object) -> str:
         return "none"
 
     normalized = str(value).strip().lower()
-    if normalized in {"", "0", "none"}:
+    if normalized in {"", "0", "0.0", "none"}:
         return "none"
     if "automatic bolus" in normalized:
         return "automatic"
@@ -204,6 +223,65 @@ def normalize_bolus_type(value: object) -> str:
     if normalized.startswith("extended"):
         return "extended"
     return "other"
+
+
+def _deduplicate_exact_rows(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remove exact duplicate rows before any timestamp-level aggregation.
+
+    Context:
+    this behavior is based on inspection of the extracted AZT1D files used in
+    this repo, not on a claim from the paper itself. Some subject CSVs contain
+    repeated rows that are identical across every column. Dropping those copies
+    first prevents later timestamp-collision logic from accidentally treating a
+    pure file-level duplication artifact as multiple true events.
+    """
+    return dataframe.drop_duplicates(ignore_index=True)
+
+
+def _collapse_duplicate_timestamps(
+    dataframe: pd.DataFrame,
+    feature_groups: FeatureGroups,
+) -> pd.DataFrame:
+    """
+    Collapse same-subject/same-timestamp collisions into one representative row.
+
+    Context:
+    after exact-duplicate removal, the remaining same-subject/same-timestamp
+    collisions observed in the local AZT1D files are mostly conflicting glucose
+    readings or overlapping basal values at the same minute. We reduce those to
+    one row so the later indexing logic can safely assume one observation per
+    subject and timestamp.
+    """
+    group_columns = [feature_groups.subject_id_column, feature_groups.time_column]
+    if not dataframe.duplicated(group_columns).any():
+        return dataframe
+
+    reduced_rows: list[dict[str, Any]] = []
+    for _, group in dataframe.groupby(group_columns, sort=False, dropna=False):
+        row = group.iloc[-1].to_dict()
+
+        if feature_groups.target_column in group.columns:
+            row[feature_groups.target_column] = _median_non_null(group[feature_groups.target_column])
+
+        if "basal_insulin_u" in group.columns:
+            row["basal_insulin_u"] = _most_common_non_null(group["basal_insulin_u"])
+
+        for column in (
+            "bolus_insulin_u",
+            "correction_insulin_u",
+            "meal_insulin_u",
+            "carbs_g",
+            "device_mode",
+            "bolus_type",
+            "source_file",
+        ):
+            if column in group.columns:
+                row[column] = _last_non_null(group[column])
+
+        reduced_rows.append(row)
+
+    return pd.DataFrame(reduced_rows, columns=dataframe.columns)
 
 
 def _add_time_features(dataframe: pd.DataFrame, time_column: str) -> pd.DataFrame:
@@ -304,6 +382,71 @@ def _prepare_text_column(series: pd.Series) -> pd.Series:
     representation before they apply controlled-vocabulary cleanup.
     """
     return series.fillna("").astype(str).str.strip()
+
+
+# ============================================================
+# Duplicate-timestamp reduction helpers
+# ============================================================
+# Purpose:
+#   Reduce one same-subject/same-timestamp collision group into
+#   a single cleaned scalar per column.
+#
+# Why these helpers live here instead of in `data.statistics`:
+#   They are part of the normalization policy used to build the
+#   cleaned modeling dataframe. They do summarize a small group
+#   of values, but they are not user-facing descriptive stats.
+# ============================================================
+
+def _median_non_null(series: pd.Series) -> float | None:
+    """
+    Return the median of a numeric series after dropping missing values.
+
+    Context:
+    same-minute glucose collisions in AZT1D can contain differing readings. The
+    median is a robust way to keep one representative value without always
+    trusting the first or last raw row.
+    """
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    if numeric.empty:
+        return None
+    return float(numeric.median())
+
+
+def _most_common_non_null(series: pd.Series) -> float | None:
+    """
+    Return the most common numeric value in a series, preserving source-order ties.
+
+    Context:
+    overlapping basal values at one timestamp are usually duplicates of one
+    prevailing rate with occasional alternatives. Choosing the modal value is a
+    better fit for that cleanup step than averaging two competing basal rates.
+    """
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    if numeric.empty:
+        return None
+
+    counts = numeric.value_counts(sort=False)
+    max_count = counts.max()
+    candidates = set(counts[counts == max_count].index.tolist())
+    for value in numeric:
+        if value in candidates:
+            return float(value)
+    return float(numeric.iloc[-1])
+
+
+def _last_non_null(series: pd.Series) -> object:
+    """
+    Return the last non-missing scalar from a series, or `None` if none exist.
+
+    Context:
+    event/categorical columns in a duplicate-timestamp group are usually either
+    identical or sparsely populated. Taking the last non-null value preserves a
+    concrete observed label without inventing a new merged category.
+    """
+    values = series.dropna()
+    if values.empty:
+        return None
+    return values.iloc[-1]
 
 
 def _sin_from_period(values: pd.Series, period: float) -> pd.Series:

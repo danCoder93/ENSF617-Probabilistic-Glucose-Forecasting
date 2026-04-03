@@ -417,6 +417,22 @@ The important architectural point is that the data is progressively made more
 structured as it moves through the system. The repo does not jump directly from
 downloaded files to model tensors in one opaque step.
 
+Current normalization details that matter operationally:
+
+- raw vendor names are rewritten to canonical modeling columns with explicit
+  unit-bearing names such as `glucose_mg_dl`, `basal_insulin_u`,
+  `bolus_insulin_u`, `correction_insulin_u`, `meal_insulin_u`, and `carbs_g`
+- exact duplicate rows are dropped before timestamp-level cleanup
+- same-subject/same-timestamp collisions are reduced to one representative row
+  before sequence indexing
+- `basal_insulin_u` is treated as a carried rate on the shared 5-minute grid
+  rather than as a sparse event signal
+- bolus, correction, meal-insulin, and carbohydrate quantities are treated as
+  sparse event variables and zero-filled when absent
+- `device_mode` is normalized to the paper-aligned vocabulary
+  `regular` / `sleep` / `exercise` / `other`
+- `bolus_type` is treated as event-local and is intentionally not forward-filled
+
 ## Config Flow
 
 The repository has two important config states:
@@ -434,6 +450,11 @@ It expresses the intended run setup:
 - Trainer policy
 - snapshot policy
 - observability policy
+
+For the AZT1D data defaults specifically, the code now treats only the public
+dataset location and the 5-minute sampling cadence as dataset-derived
+assumptions. Sequence lengths, split ratios, split mode, and window stride are
+kept as repository baseline experiment policy.
 
 ### Runtime-bound config
 
@@ -695,7 +716,8 @@ The data pipeline is organized around `AZT1DDataModule`.
 - `schema.py`
   define feature groups, category vocabularies, and model-facing schema rules
 - `transforms.py`
-  load and normalize the processed dataframe
+  load and normalize the processed dataframe, resolve duplicate-timestamp
+  collisions, and apply missing-data policy by feature semantics
 - `indexing.py`
   build legal encoder/decoder windows and split-specific sample indices
 - `dataset.py`
@@ -749,6 +771,7 @@ After `setup()`, it can provide:
 - categorical embedding cardinalities in TFT order
 - fallback feature specs when explicit feature specs are absent
 - sequence lengths aligned with the actual prepared dataset
+- descriptive statistics for the cleaned dataframe and split/window layout
 
 `bind_model_config(...)` returns a new config rather than mutating the original
 in place. That is an intentional design choice:
