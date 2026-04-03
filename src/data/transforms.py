@@ -116,7 +116,7 @@ def load_processed_frame(
     if "device_mode" in dataframe.columns:
         dataframe["device_mode"] = _prepare_text_column(dataframe["device_mode"])
         dataframe["device_mode"] = dataframe["device_mode"].replace(
-            {"0": "regular", "0.0": "regular", "": pd.NA}
+            cast(Any, {"0": "regular", "0.0": "regular", "": pd.NA})
         )
         # Device mode is a persistent per-subject state in AZT1D. Blank rows mean
         # "same mode as before", and leading gaps fall back to the paper's
@@ -259,7 +259,7 @@ def _collapse_duplicate_timestamps(
 
     reduced_rows: list[dict[str, Any]] = []
     for _, group in dataframe.groupby(group_columns, sort=False, dropna=False):
-        row = group.iloc[-1].to_dict()
+        row = cast(dict[str, Any], group.iloc[-1].to_dict())
 
         if feature_groups.target_column in group.columns:
             row[feature_groups.target_column] = _median_non_null(group[feature_groups.target_column])
@@ -430,7 +430,7 @@ def _most_common_non_null(series: pd.Series) -> float | None:
     candidates = set(counts[counts == max_count].index.tolist())
     for value in numeric:
         if value in candidates:
-            return float(value)
+            return float(cast(Any, value))
     return float(numeric.iloc[-1])
 
 

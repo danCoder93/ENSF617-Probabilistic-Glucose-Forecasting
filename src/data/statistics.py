@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -161,13 +161,13 @@ def _describe_categorical_series(series: pd.Series) -> dict[str, Any]:
 
 def _optional_float(value: object) -> float | None:
     """Convert a scalar to float unless it is missing/NaN."""
-    if pd.isna(value):
+    if pd.isna(cast(Any, value)):
         return None
-    return float(value)
+    return float(cast(Any, value))
 
 
 def _optional_timestamp(value: object) -> str | None:
     """Convert a timestamp-like scalar to ISO format unless it is missing."""
-    if pd.isna(value):
+    if pd.isna(cast(Any, value)):
         return None
-    return pd.Timestamp(value).isoformat()
+    return pd.Timestamp(cast(Any, value)).isoformat()
