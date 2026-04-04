@@ -250,7 +250,7 @@ conda activate pytorch
 ##### 2.3.1. Core PyTorch (install in sequence)
 
 ```bash
-conda install -y pytorch=2.5 -c pytorch
+conda install -y pytorch -c pytorch
 ```
 
 ```bash
