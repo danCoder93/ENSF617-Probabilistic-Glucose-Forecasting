@@ -26,7 +26,6 @@ python main.py \
   --device-profile slurm-cuda \
   --batch-size 256 \
   --max-epochs 10 \
-  --pin-memory \
   --observability-mode debug \
   --device-stats \
   --enable-activation-stats \
