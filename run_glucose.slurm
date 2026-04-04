@@ -25,10 +25,9 @@ mkdir -p "${SLURM_SUBMIT_DIR}/artifacts"
 python main.py \
   --device-profile slurm-cuda \
   --batch-size 256 \
-  --max-epochs 20 \
+  --max-epochs 10 \
   --pin-memory \
-  --precision 16-mixed \
-  --observability-mode trace \
+  --observability-mode debug \
   --device-stats \
   --enable-activation-stats \
   --raw-dir "$JOB_SCRATCH/raw" \
