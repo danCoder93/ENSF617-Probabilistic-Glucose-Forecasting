@@ -30,8 +30,6 @@ python main.py \
   --pin-memory \
   --precision 16-mixed \
   --observability-mode debug \
-  --progress-bar \
-  --rich-progress-bar \
   --device-stats \
   --enable-activation-stats \
   --raw-dir "$JOB_SCRATCH/raw" \
