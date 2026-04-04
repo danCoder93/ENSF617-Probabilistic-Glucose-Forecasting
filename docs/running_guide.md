@@ -278,7 +278,7 @@ pip install pytorch-lightning torchmetrics torchview transformers tensorflow
 ##### 2.3.5. Verify Installation
 
 ```bash
-python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
+python -c "import torch; print('Torch:', torch.__version__, '| CUDA runtime:', torch.version.cuda)"
 ```
 
 ---
