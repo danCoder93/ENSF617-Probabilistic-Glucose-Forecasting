@@ -27,6 +27,8 @@ from config import (
     SnapshotConfig,
     TrainConfig,
     config_to_dict,
+    validate_runtime_configuration,
+    ConfigurationValidationError
 )
 from defaults import (
     DEFAULT_OUTPUT_DIR,
@@ -594,6 +596,22 @@ def run_training_workflow(
             f"{effective_resolved_device_profile}.\n"
             f"{format_runtime_diagnostics(effective_preflight_diagnostics)}"
         )
+    
+    try:
+        validate_runtime_configuration(
+            train_config=effective_train_config,
+            data_config=effective_config.data,
+            observability_config=effective_observability_config,
+            snapshot_config=effective_snapshot_config,
+            resolved_profile=effective_resolved_device_profile,
+            has_validation_data=None,
+        )
+    except ConfigurationValidationError as exc:
+        raise RuntimeError(
+            "Training workflow failed during configuration validation "
+            f"for device profile {requested_device_profile} -> "
+            f"{effective_resolved_device_profile}.\n{exc}"
+        ) from exc
 
     import torch
 

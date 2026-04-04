@@ -58,6 +58,17 @@ from config.serde import (
     tft_config_to_dict,
 )
 from config.types import PathInput
+# ------------------------------------------------------------------
+# Cross-configuration validation exports
+# ------------------------------------------------------------------
+# These are intentionally limited to the public-facing validation API.
+# Internal helpers (e.g., issue collectors) are not exported to avoid
+# coupling external code to internal validation mechanics.
+
+from config.validation import (
+    ConfigurationValidationError,
+    validate_runtime_configuration,
+)
 
 
 # `__all__` is the contract for the package-level facade above. Keeping it
@@ -80,4 +91,7 @@ __all__ = [
     "tcn_config_to_dict",
     "tft_config_from_dict",
     "tft_config_to_dict",
+    # existing exports...
+    "ConfigurationValidationError",
+    "validate_runtime_configuration",
 ]

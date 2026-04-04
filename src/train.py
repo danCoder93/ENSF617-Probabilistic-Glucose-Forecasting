@@ -45,6 +45,7 @@ from config import (
     SnapshotConfig,
     TrainConfig,
     config_to_dict,
+    validate_runtime_configuration
 )
 
 
@@ -538,6 +539,16 @@ class FusedModelTrainer:
         # checkpoint loading and in-memory fallback semantics stay predictable.
         has_validation_data = _dataset_size(datamodule.val_dataset) > 0
         has_test_data = _dataset_size(datamodule.test_dataset) > 0
+
+        validate_runtime_configuration(
+                train_config=self.trainer_config,
+                data_config=datamodule.config,
+                observability_config=self.observability_config,
+                snapshot_config=self.snapshot_config,
+                resolved_profile=None,
+                has_validation_data=has_validation_data,
+            )
+         
         trainer = self.build_trainer(has_validation_data=has_validation_data)
         # Log the effective runtime contract right before training starts so
         # TensorBoard's hparams view reflects the final bound config and the

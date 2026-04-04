@@ -660,8 +660,7 @@ def main(
             or "Training workflow failed during " in message
         ):
             print(message, file=sys.stderr)
-            raise
-            #raise SystemExit(1) from exc
+            raise SystemExit(1) from exc
         raise
 
     # The returned artifact bundle is the same shape notebooks and tests

@@ -26,9 +26,11 @@ python main.py \
   --device-profile slurm-cuda \
   --batch-size 128 \
   --max-epochs 20 \
+  --num-workers 2 \
   --pin-memory \
   --precision 16-mixed \
   --observability-mode debug \
+  --progress-bar \
   --rich-progress-bar \
   --device-stats \
   --enable-activation-stats \
