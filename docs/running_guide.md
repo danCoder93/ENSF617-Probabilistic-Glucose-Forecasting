@@ -251,13 +251,7 @@ conda activate pytorch
 
 ```bash
 conda install -y pytorch -c pytorch
-```
-
-```bash
 conda install -y pytorch-cuda=12.1 -c nvidia -c pytorch
-```
-
-```bash
 conda install -y torchvision torchaudio -c pytorch
 ```
 
@@ -265,31 +259,23 @@ conda install -y torchvision torchaudio -c pytorch
 
 ```bash
 conda install -y numpy pandas -c conda-forge
-```
-
-```bash
 conda install -y scikit-learn matplotlib -c conda-forge
 ```
 
-##### 2.3.3. Utilities & Logging
+##### 2.3.3. Utilities, Logging, & Visualization
 
 ```bash
 conda install -y tensorboard psutil requests pytest -c conda-forge
-```
-
-##### 2.3.4. Visualization
-
-```bash
 conda install -y plotly -c conda-forge
 ```
 
-##### 2.3.5. PyTorch Ecosystem (use pip to avoid solver issues)
+##### 2.3.4. PyTorch Ecosystem (use pip to avoid solver issues)
 
 ```bash
 pip install pytorch-lightning torchmetrics torchview transformers tensorflow
 ```
 
-##### 2.3.6. Verify Installation
+##### 2.3.5. Verify Installation
 
 ```bash
 python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
