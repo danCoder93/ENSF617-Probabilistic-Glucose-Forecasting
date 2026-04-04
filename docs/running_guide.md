@@ -223,33 +223,76 @@ cd ENSF617-Probabilistic-Glucose-Forecasting
 
 ### 2. Setup Environment
 
-Install your environment if not installed (using conda):
+#### 2.1 Install your environment if not installed (using conda):
 
-#### Create env with Python 3.11 and proper channel order
+##### Create env with Python 3.11 and proper channel order
 
 ```bash
 conda create -y -n pytorch python=3.11 -c pytorch -c nvidia -c conda-forge
 conda activate pytorch
 ```
 
-#### Enforce strict channel priority for this env
+##### Enforce strict channel priority for this env
 
 ```bash
 conda config --env --set channel_priority strict
 ```
 
-Load your environment (example using conda):
+#### 2.2 Load your environment (example using conda):
 
 ```bash
 source ~/software/init-conda
 conda activate pytorch
 ```
 
-Install dependencies (if needed):
+#### 2.3 Install dependencies (if needed):
+
+##### 2.3.1. Core PyTorch (install in sequence)
 
 ```bash
-cd ~/projects/ENSF617-Probabilistic-Glucose-Forecasting
-conda install -y pytorch torchvision torchaudio tensorboard tensorflow torchmetrics torchview transformers scikit-learn matplotlib numpy pandas plotly psutil pytorch-lightning pytest requests pytorch-cuda=12.1 -c pytorch -c nvidia -c conda-forge --override-channels
+conda install -y pytorch=2.5 -c pytorch
+```
+
+```bash
+conda install -y pytorch-cuda=12.1 -c nvidia -c pytorch
+```
+
+```bash
+conda install -y torchvision torchaudio -c pytorch
+```
+
+##### 2.3.2. Core Scientific Stack
+
+```bash
+conda install -y numpy pandas -c conda-forge
+```
+
+```bash
+conda install -y scikit-learn matplotlib -c conda-forge
+```
+
+##### 2.3.3. Utilities & Logging
+
+```bash
+conda install -y tensorboard psutil requests pytest -c conda-forge
+```
+
+##### 2.3.4. Visualization
+
+```bash
+conda install -y plotly -c conda-forge
+```
+
+##### 2.3.5. PyTorch Ecosystem (use pip to avoid solver issues)
+
+```bash
+pip install pytorch-lightning torchmetrics torchview transformers tensorflow
+```
+
+##### 2.3.6. Verify Installation
+
+```bash
+python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
 ```
 
 ---
