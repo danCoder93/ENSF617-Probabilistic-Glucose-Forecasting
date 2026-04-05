@@ -778,24 +778,19 @@ def run_training_workflow(
 
     datamodule = AZT1DDataModule(effective_config.data)
 
-    # CHANGE: Prepare and set up the datamodule early so we can capture
-    # a real data summary before training starts.
-    # Direct point here: the logic already exists, we are just wiring it so
-    # the run leaves behind something useful and readable.
-    datamodule.prepare_data()
-    datamodule.setup(stage="fit")
-
     data_summary: dict[str, Any] | None = None
     data_summary_path: Path | None = None
 
+    # CHANGE: Try to capture dataset observability early, but never let that
+    # block the run. Training is the primary path. Artifact collection is best-effort.
     try:
+        datamodule.prepare_data()
+        datamodule.setup(stage="fit")
         data_summary = datamodule.describe_data()
     except Exception:
         data_summary = None
 
-    # CHANGE: Save the dataset summary as its own artifact.
-    # This matters because even if training fails later, we still want a clean
-    # record of what data the run was built on.
+    # CHANGE: Save the dataset summary as its own artifact when available.
     if output_dir is not None and data_summary is not None:
         data_summary_path = output_dir / "data_summary.json"
         data_summary_path.write_text(
