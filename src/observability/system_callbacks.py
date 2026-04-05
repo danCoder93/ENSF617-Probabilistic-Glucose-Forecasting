@@ -490,7 +490,7 @@ class ModelTensorBoardCallback(Callback):
             warmup_visualization_model(graph_model, batch_on_device)
         except Exception as exc:
             if self.text_logger is not None:
-                self.text_logger.info("torchview warmup failed: %s", exc)
+                self.text_logger.exception("torchview warmup failed: %s", exc)
             return
 
         # Attempt to generate a torchview computational graph for the model.
@@ -548,7 +548,7 @@ class ModelTensorBoardCallback(Callback):
         #   - Visualization is optional, so we fail gracefully and continue training.
         except Exception as exc:
             if self.text_logger is not None:
-                self.text_logger.info("torchview rendering failed: %s", exc)
+                self.text_logger.exception("torchview rendering failed: %s", exc)
             return
 
 

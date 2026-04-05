@@ -82,12 +82,41 @@ class TorchviewFusedAdapter(torch.nn.Module):
         super().__init__()
         self.model = model
 
-    def forward(self, batch: Any) -> torch.Tensor:
+    def forward(self, *args: Any, **kwargs: Any) -> torch.Tensor:
+        """Normalize torchview inputs back into the model's real batch contract.
+
+        Torchview may call the wrapped module as `model(**batch_dict)`, but the
+        fused training model expects a single batch mapping argument. This adapter
+        rebuilds that single batch object before delegating to the real model.
+        """
+        if args and kwargs:
+            raise TypeError(
+                "TorchviewFusedAdapter.forward received both positional and "
+                "keyword inputs; expected exactly one batch representation."
+            )
+
+        if len(args) > 1:
+            raise TypeError(
+                "TorchviewFusedAdapter.forward expected at most one positional "
+                "batch argument."
+            )
+
+        if len(args) == 1:
+            batch = args[0]
+        elif kwargs:
+            batch = kwargs
+        else:
+            raise TypeError(
+                "TorchviewFusedAdapter.forward expected a batch argument."
+            )
+
         forward_for_visualization = getattr(
             self.model, "forward_for_visualization", None
         )
+
         if callable(forward_for_visualization):
             output = forward_for_visualization(batch)
         else:
             output = self.model(batch)
+
         return extract_trace_tensor(output)
