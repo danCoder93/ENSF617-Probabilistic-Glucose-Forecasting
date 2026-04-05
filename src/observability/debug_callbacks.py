@@ -126,6 +126,23 @@ _BRANCH_FAMILIES: dict[str, tuple[str, ...]] = {
 # - is the FCN head receiving healthy gradients from upstream fusion?
 
 
+# Fusion-interpretation thresholds are kept local to this module because they
+# are currently debugging heuristics rather than public configuration surfaces.
+#
+# Why define them once at module scope?
+# - the same thresholds can be reused across gradient and activation summaries
+# - keeping them together makes the intended interpretation easier to audit
+# - future config wiring can lift these values out without changing callback
+#   logic
+#
+# These values are intentionally conservative: they should surface obviously
+# suspicious imbalance or collapse without overreacting to normal training
+# variation.
+_FUSION_DOMINANCE_WARN_RATIO = 10.0
+_BRANCH_NEAR_DEAD_STD_THRESHOLD = 1e-6
+_BRANCH_NEAR_DEAD_NEAR_ZERO_THRESHOLD = 0.95
+
+
 def _module_family_for_parameter_name(parameter_name: str) -> str | None:
     """Map one parameter name to the high-level architectural family it belongs to.
 
@@ -194,6 +211,61 @@ def _safe_ratio(numerator: float, denominator: float) -> float:
     if denominator == 0.0:
         return 0.0
     return numerator / denominator
+
+
+def _tensor_energy_stats(tensor: Tensor) -> dict[str, float]:
+    """Compute a small set of energy-style summaries for one tensor.
+
+    Purpose:
+        Complement `_tensor_stats(...)` with magnitude summaries that are more
+        directly useful for branch-dominance interpretation. Mean absolute value
+        and standard deviation are helpful, but they do not fully capture how
+        much *activation energy* a branch is carrying.
+
+    Returned metrics:
+        `energy`
+            Mean squared magnitude, i.e. `mean(x^2)`.
+
+        `rms`
+            Root-mean-square magnitude, i.e. `sqrt(mean(x^2))`. This is often a
+            convenient scale summary because it stays in the same units as the
+            original tensor while still emphasizing larger values.
+
+    Why compute this here instead of in `tensors.py`?
+        Energy-style summaries are currently only needed for the fusion-
+        interpretation layer in this file. Keeping the helper local avoids
+        widening the shared tensor-utils API until there is a broader need.
+    """
+    detached = tensor.detach()
+    # Squared magnitude is used rather than variance because we care about the
+    # total signal carried by the branch output, not only how much it varies
+    # around its mean.
+    energy = float(torch.mean(detached.float() ** 2).item())
+    rms = float(torch.sqrt(torch.tensor(energy, dtype=torch.float32)).item())
+    return {"energy": energy, "rms": rms}
+
+
+def _branch_is_near_dead(stats: dict[str, float]) -> bool:
+    """Heuristically flag a branch output as near-dead.
+
+    Purpose:
+        Surface branches that are producing overwhelmingly near-zero outputs
+        with almost no variation. This is not a formal proof that the branch is
+        mathematically useless, but it is a strong debugging hint that the
+        branch may be inactive, over-masked, or numerically collapsed.
+
+    Why this combines two conditions:
+        - a high near-zero fraction alone can happen legitimately in sparse or
+          masked representations
+        - a tiny standard deviation alone can happen when a tensor is nearly
+          constant but not necessarily small
+
+        Requiring both conditions makes the warning more specific.
+    """
+    return (
+        stats.get("near_zero_fraction", 0.0) >= _BRANCH_NEAR_DEAD_NEAR_ZERO_THRESHOLD
+        and stats.get("std", 0.0) <= _BRANCH_NEAR_DEAD_STD_THRESHOLD
+    )
 
 
 # ============================================================================
@@ -604,6 +676,34 @@ class GradientStatsCallback(Callback):
             metrics["debug/grn_grad_total_norm"],
         )
 
+        # The fusion-interpretation layer complements the raw branch norms with
+        # compact imbalance signals. These metrics are designed to answer
+        # questions such as: "is TFT dominating the TCN ensemble?" and "is one
+        # major branch receiving much more gradient signal than the others?"
+        gradient_dominance_families = ("tcn3", "tcn5", "tcn7", "tft")
+        gradient_dominance_values = [
+            metrics[f"debug/{family_name}_grad_total_norm"]
+            for family_name in gradient_dominance_families
+        ]
+        metrics["debug/tft_to_tcn_max_grad_norm_ratio"] = _safe_ratio(
+            metrics["debug/tft_grad_total_norm"],
+            metrics["debug/tcn_branch_grad_norm_max"],
+        )
+        metrics["debug/tcn_branch_grad_norm_spread_ratio"] = _safe_ratio(
+            metrics["debug/tcn_branch_grad_norm_max"],
+            metrics["debug/tcn_branch_grad_norm_min"],
+        )
+        metrics["debug/fusion_branch_grad_dominance_ratio"] = _safe_ratio(
+            max(gradient_dominance_values),
+            min(gradient_dominance_values),
+        )
+        metrics["debug/fusion_branch_grad_dominance_warning"] = (
+            1.0
+            if metrics["debug/fusion_branch_grad_dominance_ratio"]
+            >= _FUSION_DOMINANCE_WARN_RATIO
+            else 0.0
+        )
+
         log_metrics_to_loggers(trainer, metrics, step=trainer.global_step)
 
 
@@ -682,7 +782,12 @@ class ActivationStatsCallback(Callback):
             These are intentionally heuristic flags, not formal proofs of a bug.
             Their job is to make suspicious steps easy to find later.
         """
-        stats = _tensor_stats(tensor)
+        stats = dict(_tensor_stats(tensor))
+
+        # Energy-style summaries make branch comparisons more interpretable for
+        # fused models because they describe how much signal a branch is
+        # carrying, not just how dispersed or non-zero it is.
+        stats.update(_tensor_energy_stats(tensor))
         self._latest_module_stats[module_name] = stats
 
         for stat_name, value in stats.items():
@@ -691,9 +796,10 @@ class ActivationStatsCallback(Callback):
         # A high near-zero fraction alone is not enough to call an activation
         # dead, because some layers or masks may legitimately produce many small
         # values. We therefore also require an extremely small standard
-        # deviation before raising the deadness indicator.
+        # deviation before raising the deadness indicator. The helper keeps the
+        # policy shared with the later branch-level fusion summary.
         self._pending_metrics[f"activation/{module_name}_deadness_indicator"] = (
-            1.0 if stats["near_zero_fraction"] >= 0.95 and stats["std"] <= 1e-6 else 0.0
+            1.0 if _branch_is_near_dead(stats) else 0.0
         )
 
         # Non-finite outputs are always worth surfacing directly because they
@@ -716,6 +822,7 @@ class ActivationStatsCallback(Callback):
             - "is TFT much stronger than the TCN side?"
             - "is GRN shrinking the representation too aggressively?"
             - "is the FCN head operating at a very different scale than fusion?"
+            - "is one branch becoming numerically dominant or effectively dead?"
 
         Why missing modules simply skip comparisons:
             For observability, missing evidence should not be fabricated into
@@ -731,6 +838,14 @@ class ActivationStatsCallback(Callback):
                 self._latest_module_stats[name]["std"]
                 for name in required_tcn_modules
             ]
+            tcn_energies = [
+                self._latest_module_stats[name]["energy"]
+                for name in required_tcn_modules
+            ]
+            tcn_rms_values = [
+                self._latest_module_stats[name]["rms"]
+                for name in required_tcn_modules
+            ]
 
             self._pending_metrics["activation/tcn_abs_mean_mean"] = (
                 sum(tcn_abs_means) / float(len(tcn_abs_means))
@@ -743,7 +858,28 @@ class ActivationStatsCallback(Callback):
             self._pending_metrics["activation/tcn_std_max"] = max(tcn_stds)
             self._pending_metrics["activation/tcn_std_min"] = min(tcn_stds)
 
-        if "tft" in self._latest_module_stats and "activation/tcn_abs_mean_mean" in self._pending_metrics:
+            # Energy and RMS summaries provide a stronger signal for fusion
+            # interpretation than abs-mean alone because they more directly
+            # reflect the magnitude carried by each branch representation.
+            self._pending_metrics["activation/tcn_energy_mean"] = (
+                sum(tcn_energies) / float(len(tcn_energies))
+            )
+            self._pending_metrics["activation/tcn_energy_max"] = max(tcn_energies)
+            self._pending_metrics["activation/tcn_energy_min"] = min(tcn_energies)
+            self._pending_metrics["activation/tcn_rms_mean"] = (
+                sum(tcn_rms_values) / float(len(tcn_rms_values))
+            )
+            self._pending_metrics["activation/tcn_rms_max"] = max(tcn_rms_values)
+            self._pending_metrics["activation/tcn_rms_min"] = min(tcn_rms_values)
+            self._pending_metrics["activation/tcn_energy_spread_ratio"] = _safe_ratio(
+                self._pending_metrics["activation/tcn_energy_max"],
+                self._pending_metrics["activation/tcn_energy_min"],
+            )
+
+        if (
+            "tft" in self._latest_module_stats
+            and "activation/tcn_abs_mean_mean" in self._pending_metrics
+        ):
             self._pending_metrics["activation/tft_to_tcn_abs_mean_ratio"] = _safe_ratio(
                 self._latest_module_stats["tft"]["abs_mean"],
                 self._pending_metrics["activation/tcn_abs_mean_mean"],
@@ -751,6 +887,14 @@ class ActivationStatsCallback(Callback):
             self._pending_metrics["activation/tft_to_tcn_std_ratio"] = _safe_ratio(
                 self._latest_module_stats["tft"]["std"],
                 self._pending_metrics["activation/tcn_std_mean"],
+            )
+            self._pending_metrics["activation/tft_to_tcn_energy_ratio"] = _safe_ratio(
+                self._latest_module_stats["tft"]["energy"],
+                self._pending_metrics["activation/tcn_energy_mean"],
+            )
+            self._pending_metrics["activation/tft_to_tcn_rms_ratio"] = _safe_ratio(
+                self._latest_module_stats["tft"]["rms"],
+                self._pending_metrics["activation/tcn_rms_mean"],
             )
 
         if "grn" in self._latest_module_stats and "tft" in self._latest_module_stats:
@@ -762,6 +906,14 @@ class ActivationStatsCallback(Callback):
                 self._latest_module_stats["grn"]["std"],
                 self._latest_module_stats["tft"]["std"],
             )
+            self._pending_metrics["activation/grn_to_tft_energy_ratio"] = _safe_ratio(
+                self._latest_module_stats["grn"]["energy"],
+                self._latest_module_stats["tft"]["energy"],
+            )
+            self._pending_metrics["activation/grn_to_tft_rms_ratio"] = _safe_ratio(
+                self._latest_module_stats["grn"]["rms"],
+                self._latest_module_stats["tft"]["rms"],
+            )
 
         if "fcn" in self._latest_module_stats and "grn" in self._latest_module_stats:
             self._pending_metrics["activation/fcn_to_grn_abs_mean_ratio"] = _safe_ratio(
@@ -771,6 +923,80 @@ class ActivationStatsCallback(Callback):
             self._pending_metrics["activation/fcn_to_grn_std_ratio"] = _safe_ratio(
                 self._latest_module_stats["fcn"]["std"],
                 self._latest_module_stats["grn"]["std"],
+            )
+            self._pending_metrics["activation/fcn_to_grn_energy_ratio"] = _safe_ratio(
+                self._latest_module_stats["fcn"]["energy"],
+                self._latest_module_stats["grn"]["energy"],
+            )
+            self._pending_metrics["activation/fcn_to_grn_rms_ratio"] = _safe_ratio(
+                self._latest_module_stats["fcn"]["rms"],
+                self._latest_module_stats["grn"]["rms"],
+            )
+
+        # Branch-deadness summaries are computed at the architectural-family
+        # level so that later log review can answer questions like "did one TCN
+        # branch collapse even though the rest of the model looked healthy?"
+        dead_branch_count = 0.0
+        for module_name in ("tcn3", "tcn5", "tcn7", "tft", "grn", "fcn"):
+            if module_name not in self._latest_module_stats:
+                continue
+
+            is_near_dead = _branch_is_near_dead(self._latest_module_stats[module_name])
+            self._pending_metrics[f"activation/{module_name}_near_dead_indicator"] = (
+                1.0 if is_near_dead else 0.0
+            )
+            dead_branch_count += 1.0 if is_near_dead else 0.0
+
+        self._pending_metrics["activation/near_dead_branch_count"] = dead_branch_count
+        self._pending_metrics["activation/near_dead_branch_warning"] = (
+            1.0 if dead_branch_count > 0.0 else 0.0
+        )
+
+        # Dominance metrics compress a potentially large set of branch magnitudes
+        # into compact signals that are easy to scan in TensorBoard or CSV
+        # exports. We intentionally use energy-based comparisons here because
+        # they reflect branch signal strength more directly than mean alone.
+        dominance_modules = tuple(
+            module_name
+            for module_name in ("tcn3", "tcn5", "tcn7", "tft")
+            if module_name in self._latest_module_stats
+        )
+        if dominance_modules:
+            dominance_energies = [
+                self._latest_module_stats[module_name]["energy"]
+                for module_name in dominance_modules
+            ]
+            self._pending_metrics["activation/fusion_branch_energy_max"] = max(
+                dominance_energies
+            )
+            self._pending_metrics["activation/fusion_branch_energy_min"] = min(
+                dominance_energies
+            )
+            self._pending_metrics["activation/fusion_branch_dominance_ratio"] = _safe_ratio(
+                self._pending_metrics["activation/fusion_branch_energy_max"],
+                self._pending_metrics["activation/fusion_branch_energy_min"],
+            )
+            self._pending_metrics["activation/fusion_branch_dominance_warning"] = (
+                1.0
+                if self._pending_metrics["activation/fusion_branch_dominance_ratio"]
+                >= _FUSION_DOMINANCE_WARN_RATIO
+                else 0.0
+            )
+
+        if "tft" in self._latest_module_stats and all(
+            name in self._latest_module_stats for name in required_tcn_modules
+        ):
+            tcn_branch_energies = [
+                self._latest_module_stats[name]["energy"]
+                for name in required_tcn_modules
+            ]
+            self._pending_metrics["activation/tft_to_tcn_max_energy_ratio"] = _safe_ratio(
+                self._latest_module_stats["tft"]["energy"],
+                max(tcn_branch_energies),
+            )
+            self._pending_metrics["activation/tft_to_tcn_min_energy_ratio"] = _safe_ratio(
+                self._latest_module_stats["tft"]["energy"],
+                min(tcn_branch_energies),
             )
 
     def _register_hook(self, pl_module: Any, module_name: str) -> None:
