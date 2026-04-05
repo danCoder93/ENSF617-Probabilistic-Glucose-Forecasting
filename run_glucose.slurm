@@ -23,11 +23,14 @@ JOB_SCRATCH="/scratch/${SLURM_JOB_ID}"
 mkdir -p "$JOB_SCRATCH"
 mkdir -p "${SLURM_SUBMIT_DIR}/artifacts"
 
+ARTIFACTS_PATH= "${SLURM_SUBMIT_DIR}/artifacts/glucose_${SLURM_JOB_ID}"
+echo "Artifacts File: ${ARTIFACTS_PATH}"
+
 python main.py \
   --device-profile slurm-cuda \
-  --batch-size 256 \
-  --max-epochs 5 \
+  --batch-size 128 \
+  --max-epochs 20 \
   --observability-mode debug \
   --device-stats \
   --enable-activation-stats \
-  --output-dir "${SLURM_SUBMIT_DIR}/artifacts/glucose_${SLURM_JOB_ID}"
+  --output-dir "${ARTIFACTS_PATH}"
