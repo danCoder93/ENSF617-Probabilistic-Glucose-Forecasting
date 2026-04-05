@@ -29,8 +29,4 @@ python main.py \
   --observability-mode debug \
   --device-stats \
   --enable-activation-stats \
-  --raw-dir "$JOB_SCRATCH/raw" \
-  --cache-dir "$JOB_SCRATCH/cache" \
-  --extract-dir "$JOB_SCRATCH/extracted" \
-  --processed-dir "$JOB_SCRATCH/processed" \
   --output-dir "${SLURM_SUBMIT_DIR}/artifacts/glucose_${SLURM_JOB_ID}"
