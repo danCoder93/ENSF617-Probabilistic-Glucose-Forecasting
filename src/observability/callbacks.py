@@ -17,6 +17,7 @@ from __future__ import annotations
 # - system/run-level instrumentation
 # - debug-oriented numerical-health instrumentation
 # - parameter-distribution instrumentation
+# - prediction-semantic instrumentation
 # - qualitative prediction visualization
 #
 # If callback assembly were scattered across training code, it would become much
@@ -38,6 +39,13 @@ from __future__ import annotations
 # - own model architecture or data-module behavior
 #
 # In other words, the job of this file is orchestration, not instrumentation.
+#
+# AI generation disclaimer:
+# This file was generated and refined with AI assistance, then reviewed and
+# adapted for this repository's observability structure. The intent is to keep
+# the code readable, explicit, and maintainable, but maintainers should still
+# review callback selection policy carefully whenever new observability features
+# are added or existing config flags change.
 
 import logging
 
@@ -58,7 +66,10 @@ from observability.parameter_callbacks import (
     ParameterHistogramCallback,
     ParameterScalarTelemetryCallback,
 )
-from observability.prediction_callbacks import PredictionFigureCallback
+from observability.prediction_callbacks import (
+    PredictionFigureCallback,
+    PredictionSanityCallback,
+)
 from observability.system_callbacks import (
     ModelTensorBoardCallback,
     SystemTelemetryCallback,
@@ -97,10 +108,10 @@ from observability.utils import _has_module
 #    These inspect batches, gradients, activations, and numerical health.
 # 4. parameter-state callbacks
 #    These provide more detailed parameter/gradient distribution views.
-# 5. qualitative prediction callbacks
-#    These are typically more presentation-oriented and benefit from living
-#    later in the stack conceptually, even if strict ordering is rarely
-#    required for correctness.
+# 5. prediction-semantic callbacks
+#    These inspect whether produced forecasts themselves look numerically sane.
+# 6. qualitative prediction callbacks
+#    These help humans visually inspect forecast behavior and interval shape.
 #
 # That ordering is chosen for human reasoning first, with technical correctness
 # as the guardrail. The goal is that when someone reads the resulting callback
@@ -164,7 +175,6 @@ def build_observability_callbacks(
     # - model text
     # - TensorBoard graph logging
     # - torchview export
-    # - system telemetry
     #
     # We place the model-structure callback first because it establishes the
     # "what model is this run actually using?" context before deeper debugging
@@ -219,11 +229,12 @@ def build_observability_callbacks(
     # 3. Debug-oriented callbacks
     # ---------------------------------------------------------------------
     #
-    # These callbacks are where we inspect the actual runtime behavior of the
-    # training pipeline:
-    # - batch contract / schema
-    # - gradient health
-    # - activation health
+    # These callbacks inspect the actual runtime behavior of the training
+    # pipeline:
+    # - batch contract / schema visibility
+    # - gradient health visibility
+    # - activation health visibility
+    # - system telemetry that helps contextualize numerical behavior
     #
     # They sit after the broad run/model-surface callbacks because they are
     # narrower and more intrusive conceptually: they are about "what is the
@@ -231,7 +242,8 @@ def build_observability_callbacks(
     #
     # We keep these separate from parameter histogram callbacks because their
     # purpose is different:
-    # - debug callbacks try to surface actionable numerical-health signals
+    # - debug callbacks try to surface compact actionable numerical-health
+    #   signals for fast diagnosis
     # - parameter callbacks provide richer but often heavier distribution views
     if config.enable_batch_audit:
         callbacks.append(BatchAuditCallback(config, text_logger=text_logger))
@@ -239,11 +251,10 @@ def build_observability_callbacks(
     if config.enable_gradient_stats:
         callbacks.append(GradientStatsCallback(config))
 
-    # System telemetry is grouped with the debug-oriented block here rather than
-    # at the very end because, in practice, it helps interpret numerical issues
-    # in context. For example, unusual gradients or training instability are
-    # easier to reason about if the same run also logged system pressure,
-    # device-memory behavior, and step-level resource usage.
+    # System telemetry is grouped near the debug-oriented block because, in
+    # practice, resource behavior helps explain numerical behavior. Gradient or
+    # activation anomalies are easier to interpret when the same run also logs
+    # memory pressure, device utilization, and step-level system context.
     if config.enable_system_telemetry:
         callbacks.append(SystemTelemetryCallback(config, text_logger=text_logger))
 
@@ -272,7 +283,45 @@ def build_observability_callbacks(
         callbacks.append(ParameterHistogramCallback(config))
 
     # ---------------------------------------------------------------------
-    # 5. Prediction-visualization callbacks
+    # 5. Prediction-semantic callbacks
+    # ---------------------------------------------------------------------
+    #
+    # This block is the natural home for callbacks that inspect the *meaningful
+    # numerical behavior* of model outputs rather than just internal model state.
+    #
+    # What this layer is trying to answer:
+    # - Are predictions finite?
+    # - Are quantiles ordered correctly?
+    # - Are intervals collapsing toward zero width?
+    # - Are predictions becoming nearly constant?
+    # - Is forecast scale drifting away from target scale?
+    #
+    # Why this belongs after activation/gradient/parameter callbacks:
+    # - activations and gradients tell us whether the model appears alive
+    # - parameter telemetry tells us whether weights look stable
+    # - prediction sanity tells us whether the produced forecast tensor itself
+    #   still looks plausible
+    #
+    # Why this belongs before qualitative figure export:
+    # - scalar sanity metrics are easier to aggregate and compare across runs
+    # - if prediction figures look strange, these metrics help explain *why*
+    # - it keeps the conceptual flow as:
+    #   internals first -> prediction semantics second -> visualization last
+    #
+    # Backward-compatibility note:
+    # The config may not yet expose an `enable_prediction_sanity` flag on all
+    # local branches. We therefore treat the feature as enabled by default via
+    # `getattr(..., True)` so that:
+    # - newer branches can explicitly toggle it
+    # - older branches do not crash due to a missing config field
+    #
+    # If you later formalize the flag in `ObservabilityConfig`, keeping the same
+    # line below preserves behavior while making the policy explicit.
+    if getattr(config, "enable_prediction_sanity", True):
+        callbacks.append(PredictionSanityCallback(config, text_logger=text_logger))
+
+    # ---------------------------------------------------------------------
+    # 6. Prediction-visualization callbacks
     # ---------------------------------------------------------------------
     #
     # Prediction figures are valuable, but they are the most presentation-like
@@ -281,10 +330,18 @@ def build_observability_callbacks(
     # - confirming batch contract correctness
     # - checking gradients/activations
     # - confirming model and system state
+    # - verifying quantitative output sanity
     #
-    # Putting them later in the conceptual assembly order makes the callback
-    # stack easier to interpret as:
-    # first understand the run and internals, then inspect qualitative outputs.
+    # Keeping `PredictionFigureCallback` in this file is important because it is
+    # part of the repo's existing supported observability surface. The addition
+    # of prediction-sanity diagnostics should *extend* that surface, not replace
+    # the older qualitative figure path.
+    #
+    # Putting figure logging last in the conceptual assembly order makes the
+    # callback stack easier to interpret as:
+    # first understand the run and internals,
+    # then validate prediction semantics,
+    # and finally inspect qualitative outputs.
     if config.enable_prediction_figures:
         callbacks.append(PredictionFigureCallback(config))
 

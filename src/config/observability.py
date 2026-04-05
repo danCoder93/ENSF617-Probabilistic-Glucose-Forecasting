@@ -19,6 +19,7 @@ from __future__ import annotations
 # - system telemetry and model-structure artifacts
 # - parameter distribution tracking
 # - prediction figures and exported run reports
+# - prediction-semantic sanity checks
 #
 # As that surface grows, a single dedicated config object becomes important for
 # answering questions like:
@@ -41,6 +42,11 @@ from __future__ import annotations
 #
 # In other words, this file says what observability we want, not how each
 # callback achieves it.
+#
+# AI generation disclaimer:
+# This file was patched with AI assistance, but the patch is intentionally
+# conservative: it preserves the current repo structure and behavior while
+# adding one new callback-policy flag for prediction-semantic diagnostics.
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,10 +63,10 @@ class ObservabilityConfig:
         workflow.
 
     Context:
-        This config is deliberately separate from model/data architecture
-        config. Observability settings change how much evidence we collect about
-        a run, how often we collect it, and where we write it, but they should
-        not change the semantic meaning of the forecasting architecture itself.
+        This config is deliberately separate from model/data architecture config.
+        Observability settings change how much evidence we collect about a run,
+        how often we collect it, and where we write it, but they should not
+        change the semantic meaning of the forecasting architecture itself.
 
     Why a dedicated config object is useful:
         The repo has outgrown a handful of ad hoc logging flags. We now need one
@@ -95,7 +101,8 @@ class ObservabilityConfig:
     # ------------------------------------------------------------------
     #
     # This field is intentionally lightweight and descriptive rather than
-    # magical. It acts as a human-readable declaration of observability intent:
+    # magical. It acts as a human-readable declaration of observability
+    # intent:
     # - baseline: normal experiment logging with reasonable signal density
     # - debug: heavier numerical introspection during development
     # - trace: the heaviest expected observability posture in this repo
@@ -112,22 +119,23 @@ class ObservabilityConfig:
     # Core logging surfaces
     # ------------------------------------------------------------------
     #
-    # These fields control the broadest "where does observability go?" surfaces.
+    # These fields control the broadest "where does observability go?"
+    # surfaces.
     #
     # `enable_tensorboard`
-    #     Enables TensorBoard-backed logging when the surrounding workflow wires
-    #     a TensorBoard logger. This is the main structured surface for scalar
-    #     metrics, text summaries, model graphs, and images.
+    # Enables TensorBoard-backed logging when the surrounding workflow wires
+    # a TensorBoard logger. This is the main structured surface for scalar
+    # metrics, text summaries, model graphs, and images.
     #
     # `enable_text_logging`
-    #     Enables plain-text log emission for human-readable event streams and
-    #     structured JSON/text payloads that are easier to inspect directly in
-    #     terminal logs or saved text files.
+    # Enables plain-text log emission for human-readable event streams and
+    # structured JSON/text payloads that are easier to inspect directly in
+    # terminal logs or saved text files.
     #
     # `enable_csv_fallback_logger`
-    #     Enables CSV-style fallback logging surfaces where the repo supports
-    #     them. This is especially useful when richer tracking backends are not
-    #     available or when simple spreadsheet-style inspection is preferred.
+    # Enables CSV-style fallback logging surfaces where the repo supports
+    # them. This is especially useful when richer tracking backends are not
+    # available or when simple spreadsheet-style inspection is preferred.
     enable_tensorboard: bool = True
     enable_text_logging: bool = True
     enable_csv_fallback_logger: bool = True
@@ -150,54 +158,66 @@ class ObservabilityConfig:
     # package.
     #
     # `enable_learning_rate_monitor`
-    #     Adds Lightning's LR monitor. This is a simple but high-value signal
-    #     for optimizer schedule sanity.
+    # Adds Lightning's LR monitor. This is a simple but high-value signal
+    # for optimizer schedule sanity.
     #
     # `enable_device_stats`
-    #     Adds Lightning's device stats monitor where supported. This complements
-    #     but does not replace the repo's custom system telemetry callback.
+    # Adds Lightning's device stats monitor where supported. This complements
+    # but does not replace the repo's custom system telemetry callback.
     #
     # `enable_rich_progress_bar`
-    #     Enables the richer terminal progress UI for interactive runs. This is
-    #     mostly a usability feature, but it still improves local visibility
-    #     into run progress.
+    # Enables the richer terminal progress UI for interactive runs. This is
+    # mostly a usability feature, but it still improves local visibility
+    # into run progress.
     #
     # `enable_system_telemetry`
-    #     Enables the repo's custom host/device telemetry callback, which writes
-    #     resource metrics into logger backends and CSV/text artifacts.
+    # Enables the repo's custom host/device telemetry callback, which writes
+    # resource metrics into logger backends and CSV/text artifacts.
     #
     # `enable_parameter_histograms`
-    #     Enables heavier parameter/gradient histogram logging. Useful for deep
-    #     inspection, but potentially noisy and more expensive.
+    # Enables heavier parameter/gradient histogram logging. Useful for deep
+    # inspection, but potentially noisy and more expensive.
     #
     # `enable_parameter_scalars`
-    #     Enables lighter-weight per-parameter scalar summaries such as norms.
+    # Enables lighter-weight per-parameter scalar summaries such as norms.
+    #
+    # `enable_prediction_sanity`
+    # Enables sampled prediction-semantic diagnostics that check whether the
+    # model's actual forecast tensor looks numerically sane. This extends the
+    # existing observability surface without replacing qualitative prediction
+    # figures. Typical signals include:
+    # - quantile crossing
+    # - collapsed / near-constant predictions
+    # - non-finite forecast values
+    # - suspicious interval-width behavior
+    # - scale mismatch between predictions and targets
     #
     # `enable_prediction_figures`
-    #     Enables sampled qualitative forecast figures. These are especially
-    #     useful for quickly judging whether model outputs look plausible.
+    # Enables sampled qualitative forecast figures. These are especially
+    # useful for quickly judging whether model outputs look plausible.
     #
     # `enable_model_graph`
-    #     Enables TensorBoard-native graph logging when possible.
+    # Enables TensorBoard-native graph logging when possible.
     #
     # `enable_model_text`
-    #     Enables plain-text model architecture dumps, usually via `repr(model)`.
+    # Enables plain-text model architecture dumps, usually via `repr(model)`.
     #
     # `enable_torchview`
-    #     Enables the static torchview/Graphviz export path. This is useful for
-    #     architecture visualization, but it is intentionally best-effort and
-    #     separate from actual runtime training logic.
+    # Enables the static torchview/Graphviz export path. This is useful for
+    # architecture visualization, but it is intentionally best-effort and
+    # separate from actual runtime training logic.
     #
     # `enable_profiler`
-    #     Enables profiler integration when the broader workflow supports it.
-    #     Profiling is generally more intrusive than normal observability and is
-    #     therefore kept as a distinct explicit switch.
+    # Enables profiler integration when the broader workflow supports it.
+    # Profiling is generally more intrusive than normal observability and is
+    # therefore kept as a distinct explicit switch.
     enable_learning_rate_monitor: bool = True
     enable_device_stats: bool = True
     enable_rich_progress_bar: bool = True
     enable_system_telemetry: bool = True
     enable_parameter_histograms: bool = True
     enable_parameter_scalars: bool = True
+    enable_prediction_sanity: bool = True
     enable_prediction_figures: bool = True
     enable_model_graph: bool = True
     enable_model_text: bool = True
@@ -212,19 +232,19 @@ class ObservabilityConfig:
     # observability stack.
     #
     # `enable_gradient_stats`
-    #     Enables sampled gradient-health summaries. In the current repo this is
-    #     especially valuable for confirming that major fused-model branches are
-    #     actually receiving gradient signal.
+    # Enables sampled gradient-health summaries. In the current repo this is
+    # especially valuable for confirming that major fused-model branches are
+    # actually receiving gradient signal.
     #
     # `enable_activation_stats`
-    #     Enables sampled activation summaries from selected high-level modules.
-    #     This is intentionally off by default in some configurations because
-    #     forward-hook-based logging can add extra runtime cost and noise.
+    # Enables sampled activation summaries from selected high-level modules.
+    # This is intentionally off by default in some configurations because
+    # forward-hook-based logging can add extra runtime cost and noise.
     #
     # `enable_batch_audit`
-    #     Enables one-time or capped batch schema / contract summaries. This is
-    #     one of the highest-value debugging signals for catching silent data
-    #     contract issues early.
+    # Enables one-time or capped batch schema / contract summaries. This is
+    # one of the highest-value debugging signals for catching silent data
+    # contract issues early.
     enable_gradient_stats: bool = True
     enable_activation_stats: bool = False
     enable_batch_audit: bool = True
@@ -237,12 +257,12 @@ class ObservabilityConfig:
     # live scalar logging.
     #
     # `enable_prediction_exports`
-    #     Enables writing tabular prediction outputs that can later be inspected
-    #     offline or passed into downstream analysis/reporting steps.
+    # Enables writing tabular prediction outputs that can later be inspected
+    # offline or passed into downstream analysis/reporting steps.
     #
     # `enable_plot_reports`
-    #     Enables saved report plots and richer visual run summaries where the
-    #     workflow supports them.
+    # Enables saved report plots and richer visual run summaries where the
+    # workflow supports them.
     enable_prediction_exports: bool = True
     enable_plot_reports: bool = True
 
@@ -255,31 +275,31 @@ class ObservabilityConfig:
     #
     # Why path normalization happens in `__post_init__`:
     # Configs may be created from CLI strings, YAML values, or already-created
-    # `Path` objects. Normalizing once here lets the rest of the codebase assume
-    # path semantics consistently instead of re-checking types at every call
-    # site.
+    # `Path` objects. Normalizing once here lets the rest of the codebase
+    # assume path semantics consistently instead of re-checking types at every
+    # call site.
     #
     # `log_dir`
-    #     Base directory for run logging outputs when the broader workflow needs
-    #     one.
+    # Base directory for run logging outputs when the broader workflow needs
+    # one.
     #
     # `text_log_path`
-    #     Optional plain-text log destination.
+    # Optional plain-text log destination.
     #
     # `telemetry_path`
-    #     Optional CSV or tabular path for system telemetry snapshots.
+    # Optional CSV or tabular path for system telemetry snapshots.
     #
     # `prediction_table_path`
-    #     Optional output path for exported prediction tables.
+    # Optional output path for exported prediction tables.
     #
     # `report_dir`
-    #     Optional directory for saved report artifacts such as plots.
+    # Optional directory for saved report artifacts such as plots.
     #
     # `profiler_path`
-    #     Optional output path or directory for profiler artifacts.
+    # Optional output path or directory for profiler artifacts.
     #
     # `torchview_path`
-    #     Optional base path for the rendered torchview artifact.
+    # Optional base path for the rendered torchview artifact.
     log_dir: PathInput | None = None
     text_log_path: PathInput | None = None
     telemetry_path: PathInput | None = None
@@ -296,52 +316,52 @@ class ObservabilityConfig:
     # instrumentation should fire.
     #
     # Why these controls are important:
-    # Deep observability is only useful if it remains operationally manageable.
-    # Without explicit limits, debugging callbacks can:
+    # Deep observability is only useful if it remains operationally
+    # manageable. Without explicit limits, debugging callbacks can:
     # - swamp TensorBoard with too many points
     # - create huge text artifacts
     # - slow down training
     # - make later analysis harder because signal is buried in repetition
     #
     # `debug_every_n_steps`
-    #     Global sampling cadence for step-based debug callbacks such as
-    #     gradient and activation stats.
+    # Global sampling cadence for step-based debug callbacks such as
+    # gradient and activation stats.
     #
     # `telemetry_every_n_steps`
-    #     Sampling cadence for system telemetry snapshots.
+    # Sampling cadence for system telemetry snapshots.
     #
     # `batch_audit_limit`
-    #     Maximum number of batches per stage that should receive detailed batch
-    #     audit logging.
+    # Maximum number of batches per stage that should receive detailed batch
+    # audit logging.
     #
     # `max_forecast_subjects_per_report`
-    #     Cap on the number of forecast subjects surfaced in saved reports so
-    #     qualitative artifacts remain readable.
+    # Cap on the number of forecast subjects surfaced in saved reports so
+    # qualitative artifacts remain readable.
     #
     # `histogram_every_n_epochs`
-    #     Epoch cadence for heavier parameter/gradient histogram emission.
+    # Epoch cadence for heavier parameter/gradient histogram emission.
     #
     # `parameter_scalar_every_n_epochs`
-    #     Epoch cadence for lighter parameter scalar telemetry.
+    # Epoch cadence for lighter parameter scalar telemetry.
     #
     # `figure_every_n_epochs`
-    #     Epoch cadence for prediction figure generation.
+    # Epoch cadence for prediction figure generation.
     #
     # `max_prediction_plots`
-    #     Maximum number of prediction plots to save per reporting interval.
+    # Maximum number of prediction plots to save per reporting interval.
     #
     # `profiler_type`
-    #     Which profiler backend/mode the workflow should request when profiling
-    #     is enabled.
+    # Which profiler backend/mode the workflow should request when profiling
+    # is enabled.
     #
     # `torchview_depth`
-    #     How deep the static torchview graph expansion should go.
+    # How deep the static torchview graph expansion should go.
     #
     # `torchview_roll`
-    #     Whether torchview should roll repeated structures where supported.
+    # Whether torchview should roll repeated structures where supported.
     #
     # `torchview_expand_nested`
-    #     Whether nested modules should be expanded in the torchview artifact.
+    # Whether nested modules should be expanded in the torchview artifact.
     debug_every_n_steps: int = 10
     telemetry_every_n_steps: int = 10
     batch_audit_limit: int = 1
@@ -427,25 +447,18 @@ class ObservabilityConfig:
         # such as callbacks never firing or artifact loops misbehaving.
         if self.debug_every_n_steps <= 0:
             raise ValueError("debug_every_n_steps must be > 0")
-
         if self.telemetry_every_n_steps <= 0:
             raise ValueError("telemetry_every_n_steps must be > 0")
-
         if self.batch_audit_limit <= 0:
             raise ValueError("batch_audit_limit must be > 0")
-
         if self.max_forecast_subjects_per_report <= 0:
             raise ValueError("max_forecast_subjects_per_report must be > 0")
-
         if self.histogram_every_n_epochs <= 0:
             raise ValueError("histogram_every_n_epochs must be > 0")
-
         if self.parameter_scalar_every_n_epochs <= 0:
             raise ValueError("parameter_scalar_every_n_epochs must be > 0")
-
         if self.figure_every_n_epochs <= 0:
             raise ValueError("figure_every_n_epochs must be > 0")
-
         if self.max_prediction_plots <= 0:
             raise ValueError("max_prediction_plots must be > 0")
 

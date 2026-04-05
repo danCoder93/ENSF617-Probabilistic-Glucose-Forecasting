@@ -51,6 +51,7 @@ from observability.callbacks import (
     ParameterHistogramCallback,
     ParameterScalarTelemetryCallback,
     PredictionFigureCallback,
+    PredictionSanityCallback,
     SystemTelemetryCallback,
     build_observability_callbacks,
 )
@@ -70,7 +71,6 @@ from observability.runtime import (
     setup_text_logger,
 )
 
-
 # `__all__` is the stable import contract for package-level callers like
 # `train.py`, `main.py`, and the observability-focused tests.
 __all__ = [
@@ -82,6 +82,7 @@ __all__ = [
     "ParameterHistogramCallback",
     "ParameterScalarTelemetryCallback",
     "PredictionFigureCallback",
+    "PredictionSanityCallback",
     "SystemTelemetryCallback",
     "build_lightning_logger",
     "build_observability_callbacks",
