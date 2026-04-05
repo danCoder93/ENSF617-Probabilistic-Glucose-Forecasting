@@ -108,6 +108,7 @@ def _build_run_summary(
     data_summary_path: Path | None = None,
     metrics_summary_path: Path | None = None,
     grouped_metrics_paths: Mapping[str, Path] | None = None,
+    report_index_path: Path | None = None,
 ) -> dict[str, Any]:
     """
     Build the compact JSON-ready summary for one workflow execution.
@@ -209,6 +210,9 @@ def _build_run_summary(
                 str(observability_config.profiler_path)
                 if observability_config.profiler_path is not None
                 else None
+            ),
+            "report_index_path": (
+                str(report_index_path) if report_index_path is not None else None
             ),
             "report_paths": {name: str(path) for name, path in report_paths.items()},
         },
@@ -843,6 +847,7 @@ def run_training_workflow(
     predictions_path: Path | None = None
     prediction_table_path: Path | None = None
     metrics_summary_path: Path | None = None
+    report_index_path: Path | None = None
     grouped_metrics_paths: dict[str, Path] = {}
     report_paths: dict[str, Path] = {}
 
@@ -974,6 +979,59 @@ def run_training_workflow(
             if written_path is not None:
                 grouped_metrics_paths[artifact_name] = written_path
 
+    # CHANGE: Write one artifact index so every important output from the run
+    # can be found from a single file. This keeps reporting and debugging cleaner.
+    report_index: dict[str, Any] | None = None
+    if output_dir is not None:
+        report_index = {
+            "timestamp": datetime.now().astimezone().isoformat(),
+            "output_dir": str(output_dir),
+            "run_summary_path": str(output_dir / "run_summary.json"),
+            "data_summary_path": (
+                str(data_summary_path) if data_summary_path is not None else None
+            ),
+            "metrics_summary_path": (
+                str(metrics_summary_path) if metrics_summary_path is not None else None
+            ),
+            "grouped_metrics_paths": {
+                name: str(path) for name, path in grouped_metrics_paths.items()
+            },
+            "prediction_artifacts": {
+                "predictions_path": (
+                    str(predictions_path) if predictions_path is not None else None
+                ),
+                "prediction_table_path": (
+                    str(prediction_table_path)
+                    if prediction_table_path is not None
+                    else None
+                ),
+            },
+            "report_paths": {name: str(path) for name, path in report_paths.items()},
+            "observability": {
+                "logger_dir": (
+                    str(getattr(trainer_observability, "logger_dir", None))
+                    if getattr(trainer_observability, "logger_dir", None) is not None
+                    else None
+                ),
+                "text_log_path": (
+                    str(getattr(trainer_observability, "text_log_path", None))
+                    if getattr(trainer_observability, "text_log_path", None) is not None
+                    else None
+                ),
+                "telemetry_path": (
+                    str(getattr(trainer_observability, "telemetry_path", None))
+                    if getattr(trainer_observability, "telemetry_path", None) is not None
+                    else None
+                ),
+            },
+        }
+
+        report_index_path = output_dir / "report_index.json"
+        report_index_path.write_text(
+            json.dumps(report_index, indent=2),
+            encoding="utf-8",
+        )
+
     runtime_tuning_report = getattr(trainer, "runtime_tuning_report", None)
     runtime_tuning_applied = (
         dict(getattr(runtime_tuning_report, "applied", {}))
@@ -1020,6 +1078,7 @@ def run_training_workflow(
         data_summary_path=data_summary_path,
         metrics_summary_path=metrics_summary_path,
         grouped_metrics_paths=grouped_metrics_paths,
+        report_index_path=report_index_path,
     )
 
     summary_path: Path | None = None
