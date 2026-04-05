@@ -28,7 +28,7 @@ from config import (
     TrainConfig,
     config_to_dict,
     validate_runtime_configuration,
-    ConfigurationValidationError
+    ConfigurationValidationError,
 )
 from defaults import (
     DEFAULT_OUTPUT_DIR,
@@ -105,6 +105,7 @@ def _build_run_summary(
     runtime_tuning: Mapping[str, Any] | None = None,
     data_summary: Mapping[str, Any] | None = None,
     data_summary_path: Path | None = None,
+    metrics_summary_path: Path | None = None,
 ) -> dict[str, Any]:
     """
     Build the compact JSON-ready summary for one workflow execution.
@@ -160,6 +161,15 @@ def _build_run_summary(
         "data": {
             "summary_path": str(data_summary_path) if data_summary_path is not None else None,
             "descriptive_stats": _json_ready(data_summary),
+        },
+        # CHANGE: Add a dedicated metrics section that points to the clean
+        # metrics artifact. Same idea as data: make results easy to find fast.
+        "metrics": {
+            "summary_path": (
+                str(metrics_summary_path) if metrics_summary_path is not None else None
+            ),
+            "test_metrics": _json_ready(test_metrics),
+            "test_evaluation": _json_ready(test_evaluation),
         },
         "fit": {
             "has_validation_data": fit_artifacts.has_validation_data,
@@ -605,7 +615,7 @@ def run_training_workflow(
             f"{effective_resolved_device_profile}.\n"
             f"{format_runtime_diagnostics(effective_preflight_diagnostics)}"
         )
-    
+
     try:
         validate_runtime_configuration(
             train_config=effective_train_config,
@@ -671,7 +681,6 @@ def run_training_workflow(
         snapshot_config=effective_snapshot_config,
         observability_config=effective_observability_config,
     )
-
     trainer_observability = getattr(trainer, "observability_artifacts", None)
     text_logger = getattr(trainer_observability, "text_logger", None)
     if text_logger is not None:
@@ -703,6 +712,7 @@ def run_training_workflow(
     test_predictions: list[torch.Tensor] | None = None
     predictions_path: Path | None = None
     prediction_table_path: Path | None = None
+    metrics_summary_path: Path | None = None
     report_paths: dict[str, Path] = {}
 
     if fit_artifacts.has_test_data and not skip_test:
@@ -779,7 +789,12 @@ def run_training_workflow(
                 output_path=effective_observability_config.prediction_table_path,
                 sampling_interval_minutes=effective_config.data.sampling_interval_minutes,
             )
-        if effective_observability_config.enable_plot_reports:
+        # CHANGE: Only generate Plotly reports if the prediction table actually exists.
+        # Direct point here: reporting should be robust, not optimistic.
+        if (
+            effective_observability_config.enable_plot_reports
+            and prediction_table_path is not None
+        ):
             # Plotly reports are generated from the flat prediction table so the
             # reporting path stays decoupled from the in-memory prediction
             # tensor structure.
@@ -789,6 +804,34 @@ def run_training_workflow(
                 max_subjects=effective_observability_config.max_forecast_subjects_per_report,
                 evaluation_result=test_evaluation,
             )
+
+    # CHANGE: Write a clean metrics artifact so results are easy to inspect
+    # without digging through the full run summary.
+    metrics_summary: dict[str, Any] | None = None
+    if test_metrics is not None or test_evaluation is not None:
+        metrics_summary = {
+            "timestamp": datetime.now().astimezone().isoformat(),
+            "resolved_eval_ckpt_path": (
+                str(resolved_eval_ckpt_path)
+                if resolved_eval_ckpt_path not in (None, "best", "last")
+                else resolved_eval_ckpt_path
+            ),
+            "test_metrics": _json_ready(test_metrics),
+            "test_evaluation": _json_ready(test_evaluation),
+            "prediction_table_path": (
+                str(prediction_table_path)
+                if prediction_table_path is not None
+                else None
+            ),
+            "report_paths": {name: str(path) for name, path in report_paths.items()},
+        }
+
+    if output_dir is not None and metrics_summary is not None:
+        metrics_summary_path = output_dir / "metrics_summary.json"
+        metrics_summary_path.write_text(
+            json.dumps(metrics_summary, indent=2),
+            encoding="utf-8",
+        )
 
     runtime_tuning_report = getattr(trainer, "runtime_tuning_report", None)
     runtime_tuning_applied = (
@@ -834,6 +877,7 @@ def run_training_workflow(
         runtime_tuning=runtime_tuning_summary,
         data_summary=data_summary,
         data_summary_path=data_summary_path,
+        metrics_summary_path=metrics_summary_path,
     )
 
     summary_path: Path | None = None
