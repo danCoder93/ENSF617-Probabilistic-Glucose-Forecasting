@@ -14,6 +14,7 @@ from __future__ import annotations
 # - low-level Trainer assembly details
 # - model forward/loss/optimizer behavior
 
+import csv
 import json
 from dataclasses import replace
 from datetime import datetime
@@ -106,6 +107,7 @@ def _build_run_summary(
     data_summary: Mapping[str, Any] | None = None,
     data_summary_path: Path | None = None,
     metrics_summary_path: Path | None = None,
+    grouped_metrics_paths: Mapping[str, Path] | None = None,
 ) -> dict[str, Any]:
     """
     Build the compact JSON-ready summary for one workflow execution.
@@ -163,11 +165,15 @@ def _build_run_summary(
             "descriptive_stats": _json_ready(data_summary),
         },
         # CHANGE: Add a dedicated metrics section that points to the clean
-        # metrics artifact. Same idea as data: make results easy to find fast.
+        # metrics artifact and the grouped metric table exports.
         "metrics": {
             "summary_path": (
                 str(metrics_summary_path) if metrics_summary_path is not None else None
             ),
+            "grouped_paths": {
+                name: str(path)
+                for name, path in (grouped_metrics_paths or {}).items()
+            },
             "test_metrics": _json_ready(test_metrics),
             "test_evaluation": _json_ready(test_evaluation),
         },
@@ -313,6 +319,130 @@ def _collect_environment_benchmark_memory(
         pass
 
     return metrics
+
+
+def _coerce_table_rows(value: Any) -> list[dict[str, Any]]:
+    """
+    Convert a grouped evaluation payload into a flat list of row dictionaries.
+
+    Purpose:
+    make downstream CSV export simple even when the incoming evaluation structure
+    is nested, partially typed, or a mix of dataclasses and plain dictionaries.
+    """
+    value = _json_ready(value)
+
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        rows: list[dict[str, Any]] = []
+        for item in value:
+            if isinstance(item, dict):
+                rows.append(item)
+            else:
+                rows.append({"value": item})
+        return rows
+
+    if isinstance(value, dict):
+        rows: list[dict[str, Any]] = []
+        scalar_keys = {
+            key: val
+            for key, val in value.items()
+            if not isinstance(val, (dict, list))
+        }
+
+        nested_found = False
+        for key, val in value.items():
+            if isinstance(val, list):
+                nested_found = True
+                for item in val:
+                    if isinstance(item, dict):
+                        rows.append({"group": key, **scalar_keys, **item})
+                    else:
+                        rows.append({"group": key, **scalar_keys, "value": item})
+            elif isinstance(val, dict):
+                nested_found = True
+                rows.append({"group": key, **scalar_keys, **val})
+
+        if nested_found:
+            return rows
+
+        return [value]
+
+    return [{"value": value}]
+
+
+def _write_csv_rows(output_path: Path, rows: Sequence[Mapping[str, Any]]) -> Path | None:
+    """
+    Write a sequence of dictionaries to CSV.
+
+    Purpose:
+    keep artifact export lightweight and dependency-free so the workflow can
+    persist report-friendly tables without introducing a pandas requirement here.
+    """
+    if not rows:
+        return None
+
+    fieldnames: list[str] = []
+    for row in rows:
+        for key in row.keys():
+            if key not in fieldnames:
+                fieldnames.append(str(key))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(
+                {
+                    key: json.dumps(value)
+                    if isinstance(value, (dict, list))
+                    else value
+                    for key, value in row.items()
+                }
+            )
+
+    return output_path
+
+
+def _extract_grouped_evaluation_tables(
+    evaluation_result: EvaluationResult | None,
+) -> dict[str, list[dict[str, Any]]]:
+    """
+    Pull grouped evaluation sections into flat row tables.
+
+    Purpose:
+    turn structured evaluation outputs into report-friendly tables that can be
+    exported directly as CSV artifacts.
+    """
+    if evaluation_result is None:
+        return {}
+
+    payload = _json_ready(evaluation_result)
+    if not isinstance(payload, dict):
+        return {}
+
+    candidate_keys = {
+        "metrics_by_horizon": "metrics_by_horizon",
+        "by_horizon": "metrics_by_horizon",
+        "horizon_metrics": "metrics_by_horizon",
+        "metrics_by_subject": "metrics_by_subject",
+        "by_subject": "metrics_by_subject",
+        "subject_metrics": "metrics_by_subject",
+        "metrics_by_glucose_range": "metrics_by_glucose_range",
+        "by_glucose_range": "metrics_by_glucose_range",
+        "glucose_range_metrics": "metrics_by_glucose_range",
+    }
+
+    extracted: dict[str, list[dict[str, Any]]] = {}
+    for incoming_key, artifact_name in candidate_keys.items():
+        if incoming_key in payload:
+            rows = _coerce_table_rows(payload[incoming_key])
+            if rows:
+                extracted[artifact_name] = rows
+
+    return extracted
 
 
 def run_environment_benchmark_workflow(
@@ -713,6 +843,7 @@ def run_training_workflow(
     predictions_path: Path | None = None
     prediction_table_path: Path | None = None
     metrics_summary_path: Path | None = None
+    grouped_metrics_paths: dict[str, Path] = {}
     report_paths: dict[str, Path] = {}
 
     if fit_artifacts.has_test_data and not skip_test:
@@ -833,6 +964,16 @@ def run_training_workflow(
             encoding="utf-8",
         )
 
+    # CHANGE: Export grouped evaluation tables as flat CSV files so the results
+    # are easier to inspect, plot, and reuse in the report.
+    grouped_metric_tables = _extract_grouped_evaluation_tables(test_evaluation)
+    if output_dir is not None and grouped_metric_tables:
+        for artifact_name, rows in grouped_metric_tables.items():
+            output_path = output_dir / f"{artifact_name}.csv"
+            written_path = _write_csv_rows(output_path, rows)
+            if written_path is not None:
+                grouped_metrics_paths[artifact_name] = written_path
+
     runtime_tuning_report = getattr(trainer, "runtime_tuning_report", None)
     runtime_tuning_applied = (
         dict(getattr(runtime_tuning_report, "applied", {}))
@@ -878,6 +1019,7 @@ def run_training_workflow(
         data_summary=data_summary,
         data_summary_path=data_summary_path,
         metrics_summary_path=metrics_summary_path,
+        grouped_metrics_paths=grouped_metrics_paths,
     )
 
     summary_path: Path | None = None
