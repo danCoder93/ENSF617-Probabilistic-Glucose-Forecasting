@@ -103,6 +103,8 @@ def _build_run_summary(
     text_log_path: Path | None,
     telemetry_path: Path | None,
     runtime_tuning: Mapping[str, Any] | None = None,
+    data_summary: Mapping[str, Any] | None = None,
+    data_summary_path: Path | None = None,
 ) -> dict[str, Any]:
     """
     Build the compact JSON-ready summary for one workflow execution.
@@ -151,6 +153,13 @@ def _build_run_summary(
             "runtime": _json_ready(runtime_environment),
             "preflight_diagnostics": _json_ready(tuple(preflight_diagnostics)),
             "runtime_tuning": _json_ready(dict(runtime_tuning or {})),
+        },
+        # CHANGE: Put the dataset summary directly in the run summary.
+        # Clear idea here: if someone opens one JSON file, they should immediately
+        # understand what data the run actually used.
+        "data": {
+            "summary_path": str(data_summary_path) if data_summary_path is not None else None,
+            "descriptive_stats": _json_ready(data_summary),
         },
         "fit": {
             "has_validation_data": fit_artifacts.has_validation_data,
@@ -624,6 +633,32 @@ def run_training_workflow(
         trainer_class = DefaultFusedModelTrainer
 
     datamodule = AZT1DDataModule(effective_config.data)
+
+    # CHANGE: Prepare and set up the datamodule early so we can capture
+    # a real data summary before training starts.
+    # Direct point here: the logic already exists, we are just wiring it so
+    # the run leaves behind something useful and readable.
+    datamodule.prepare_data()
+    datamodule.setup(stage="fit")
+
+    data_summary: dict[str, Any] | None = None
+    data_summary_path: Path | None = None
+
+    try:
+        data_summary = datamodule.describe_data()
+    except Exception:
+        data_summary = None
+
+    # CHANGE: Save the dataset summary as its own artifact.
+    # This matters because even if training fails later, we still want a clean
+    # record of what data the run was built on.
+    if output_dir is not None and data_summary is not None:
+        data_summary_path = output_dir / "data_summary.json"
+        data_summary_path.write_text(
+            json.dumps(_json_ready(data_summary), indent=2),
+            encoding="utf-8",
+        )
+
     # The training wrapper deliberately sits between the top-level workflow and
     # Lightning. That keeps this module focused on orchestration while
     # `src/train.py` owns fit/test/predict policy.
@@ -636,6 +671,7 @@ def run_training_workflow(
         snapshot_config=effective_snapshot_config,
         observability_config=effective_observability_config,
     )
+
     trainer_observability = getattr(trainer, "observability_artifacts", None)
     text_logger = getattr(trainer_observability, "text_logger", None)
     if text_logger is not None:
@@ -796,6 +832,8 @@ def run_training_workflow(
         text_log_path=getattr(trainer_observability, "text_log_path", None),
         telemetry_path=getattr(trainer_observability, "telemetry_path", None),
         runtime_tuning=runtime_tuning_summary,
+        data_summary=data_summary,
+        data_summary_path=data_summary_path,
     )
 
     summary_path: Path | None = None
