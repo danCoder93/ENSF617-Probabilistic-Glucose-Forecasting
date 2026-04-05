@@ -25,7 +25,7 @@ mkdir -p "${SLURM_SUBMIT_DIR}/artifacts"
 python main.py \
   --device-profile slurm-cuda \
   --batch-size 256 \
-  --max-epochs 10 \
+  --max-epochs 5 \
   --observability-mode debug \
   --device-stats \
   --enable-activation-stats \

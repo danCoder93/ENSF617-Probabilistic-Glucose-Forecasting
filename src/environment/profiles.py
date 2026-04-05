@@ -37,6 +37,7 @@ from environment.types import DeviceProfileResolution, RuntimeEnvironment
 # 2. Apple Silicon MPS
 # 3. local CUDA
 # 4. plain local CPU
+#
 # This keeps explicit special environments from being mistaken for generic
 # local runs.
 def infer_device_profile(
@@ -47,20 +48,34 @@ def infer_device_profile(
     Resolve `auto` into one concrete device profile for the current environment.
     """
 
+    # Explicit profile requests always win over auto-detection.
     if requested_profile != "auto":
         return requested_profile
 
+    # Hosted notebook environments are checked before generic local hardware so
+    # their profile-specific policies are preserved.
     if environment.is_colab:
         return "colab-cuda" if environment.cuda_available else "colab-cpu"
+
+    # Scheduler-managed jobs are checked before generic local CUDA / CPU so the
+    # resolved profile reflects the batch-execution environment.
     if environment.is_slurm:
         return "slurm-cuda" if environment.cuda_available else "slurm-cpu"
+
+    # Apple Silicon gets its own profile because MPS has different memory and
+    # runtime tradeoffs than CUDA and plain CPU execution.
     if (
         environment.accelerator_type == "mps"
         or (environment.mps_available and environment.is_apple_silicon)
     ):
         return "apple-silicon"
+
+    # If CUDA is available outside Colab / Slurm, treat the machine as a local
+    # CUDA environment.
     if environment.accelerator_type == "cuda" or environment.cuda_available:
         return "local-cuda"
+
+    # Fall back to a generic local CPU profile.
     return "local-cpu"
 
 
@@ -72,7 +87,7 @@ def _slurm_worker_default(environment: RuntimeEnvironment) -> int:
     # process is less likely to consume every allocated core with DataLoader
     # workers alone.
     if environment.slurm_cpus_per_task is None:
-        return 4
+        return 2 # smaller value is safer for general slurms
     return max(0, min(environment.slurm_cpus_per_task - 1, 8))
 
 
@@ -126,7 +141,7 @@ def _prefetch_factor_default(num_workers: int, *, accelerator: str) -> int | Non
     """Choose the default DataLoader prefetch depth for the current accelerator class."""
     # `prefetch_factor` only matters when multiprocessing workers are active.
     # GPU runs get a deeper queue because keeping the device fed is usually the
-    # higher priority, while CPU/MPS paths stay more conservative.
+    # higher priority, while CPU / MPS paths stay more conservative.
     if num_workers <= 0:
         return None
     if accelerator == "gpu":
@@ -134,12 +149,47 @@ def _prefetch_factor_default(num_workers: int, *, accelerator: str) -> int | Non
     return 2
 
 
+def _cuda_compute_capability_major(environment: RuntimeEnvironment) -> int:
+    """
+    Extract the CUDA compute capability major version from strings like "7.5" or "8.0".
+
+    Returns 0 when the value is unavailable or malformed so downstream policy
+    stays conservative.
+    """
+    capability = environment.cuda_capability
+    if not capability:
+        return 0
+
+    try:
+        major_text, *_ = capability.split(".")
+        return int(major_text)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _cuda_can_use_bf16(environment: RuntimeEnvironment) -> bool:
+    """
+    BF16 should only be used when both:
+    - PyTorch reports support, and
+    - the GPU architecture is Ampere+ (sm_80 or newer).
+
+    This avoids selecting bf16 on older GPUs such as Tesla T4 (sm_75),
+    which can still reach code paths that fail during Triton/PTX compilation.
+    """
+    return (
+        environment.cuda_supports_bf16
+        and _cuda_compute_capability_major(environment) >= 8
+    )
+
+
 def _cuda_precision_default(environment: RuntimeEnvironment) -> str:
-    """Choose the preferred mixed-precision policy for CUDA-capable runs."""
-    # BF16 is preferred when the CUDA stack reports support because it usually
-    # gives the mixed-precision benefits we want with fewer numeric edge cases
-    # than FP16. The fallback to `16-mixed` keeps older or narrower GPUs fast.
-    return "bf16-mixed" if environment.cuda_supports_bf16 else "16-mixed"
+    """
+    Choose the preferred mixed-precision policy for CUDA-capable runs.
+
+    BF16 is preferred only on Ampere+ GPUs with confirmed runtime support.
+    Older CUDA GPUs fall back to FP16 mixed precision.
+    """
+    return "bf16-mixed" if _cuda_can_use_bf16(environment) else "16-mixed"
 
 
 def _cpu_precision_default(environment: RuntimeEnvironment) -> int | str:
@@ -165,15 +215,32 @@ def _cpu_interop_threads_default(environment: RuntimeEnvironment) -> int:
     return max(1, min(_cpu_parallelism_budget(environment) // 2, 4))
 
 
-def _compile_defaults_for_profile(profile: str) -> tuple[bool, str | None]:
+def _compile_defaults_for_profile(
+    profile: str,
+    environment: RuntimeEnvironment,
+) -> tuple[bool, str | None]:
     """Return whether `torch.compile` should be enabled by default for the given profile."""
     # Compilation is treated as a profile-sensitive throughput experiment, not
-    # a universal truth. CPU and CUDA local runs get the most useful defaults,
-    # while the other profiles stay more conservative unless the caller opts in.
-    if profile in {"local-cuda", "slurm-cuda"}:
+    # a universal truth. Local CUDA gets the most aggressive default because
+    # hardware is usually known and controlled. Slurm CUDA stays more cautious
+    # because cluster jobs may land on heterogeneous or older GPUs.
+
+    # Local CUDA → keep aggressive (you control hardware)
+    if profile == "local-cuda":
         return True, "default"
+
+    # Slurm CUDA → be conservative (heterogeneous GPUs)
+    # Only enable compile by default on Ampere+ GPUs where the CUDA backend is
+    # less likely to trip older-hardware compiler issues.
+    if profile == "slurm-cuda":
+        if _cuda_compute_capability_major(environment) >= 8:  # Ampere+
+            return True, "default"
+        return False, None  # Disable compile on T4, etc.
+
+    # CPU
     if profile == "local-cpu":
         return True, "reduce-overhead"
+
     return False, None
 
 
@@ -197,6 +264,9 @@ def resolve_device_profile(
 
     overrides = explicit_overrides or set()
     resolved_profile = infer_device_profile(requested_profile, environment)
+
+    # These dictionaries collect only the fields that this profile wants to
+    # change. They are later applied with `dataclasses.replace(...)`.
     train_updates: dict[str, Any] = {}
     data_updates: dict[str, Any] = {}
     observability_updates: dict[str, Any] = {}
@@ -234,106 +304,206 @@ def resolve_device_profile(
     # stability heuristics, not immutable truths.
     if resolved_profile == "local-cpu":
         num_workers = _local_cpu_worker_default(environment)
-        compile_model, compile_mode = _compile_defaults_for_profile(resolved_profile)
+        compile_model, compile_mode = _compile_defaults_for_profile(
+            resolved_profile,
+            environment,
+        )
+
         # Local CPU defaults lean conservative on memory movement and slightly
         # more aggressive on thread tuning. The goal is to help a workstation
         # or laptop make decent use of host compute without pretending it is a
         # GPU-first throughput environment.
+
+        # Run all training and inference work on the CPU.
         maybe_update(train_updates, "accelerator", "cpu")
+
+        # Use one device because this profile is not a distributed CPU policy.
         maybe_update(train_updates, "devices", 1)
+
+        # Prefer BF16 mixed precision on CPU only when the runtime reports
+        # support. Otherwise stay with full FP32.
         maybe_update(train_updates, "precision", _cpu_precision_default(environment))
+
+        # Hint PyTorch toward higher internal matmul precision heuristics.
         maybe_update(train_updates, "matmul_precision", "high")
+
+        # Limit how many host threads one operator may use.
         maybe_update(
             train_updates,
             "intraop_threads",
             _cpu_intraop_threads_default(environment),
         )
+
+        # Limit how many separate operators may execute in parallel.
         maybe_update(
             train_updates,
             "interop_threads",
             _cpu_interop_threads_default(environment),
         )
+
+        # Enable or disable `torch.compile` according to profile policy.
         maybe_update(train_updates, "compile_model", compile_model)
+
+        # Choose the compile strategy when compilation is enabled.
         maybe_update(train_updates, "compile_mode", compile_mode)
+
+        # Number of multiprocessing DataLoader workers.
         maybe_update(data_updates, "num_workers", num_workers)
+
+        # Pinned memory mainly benefits host-to-GPU transfer, so keep it off on CPU.
         maybe_update(data_updates, "pin_memory", False)
+
+        # Keep workers alive across epochs only when workers exist.
         maybe_update(
             data_updates,
             "persistent_workers",
             _persistent_workers_enabled(num_workers),
         )
+
+        # Queue a modest number of prefetched batches per worker.
         maybe_update(
             data_updates,
             "prefetch_factor",
             _prefetch_factor_default(num_workers, accelerator="cpu"),
         )
+
     elif resolved_profile == "local-cuda":
         num_workers = _local_cuda_worker_default(environment)
-        compile_model, compile_mode = _compile_defaults_for_profile(resolved_profile)
+        compile_model, compile_mode = _compile_defaults_for_profile(
+            resolved_profile,
+            environment,
+        )
+
         # Local CUDA is the profile where throughput-oriented defaults are most
         # justified: pinned memory, deeper prefetching, TF32, and optional
         # compile all exist to reduce the chance that the GPU waits on the host.
+
+        # Run training on CUDA.
         maybe_update(train_updates, "accelerator", "gpu")
+
+        # Use one GPU by default for this profile.
         maybe_update(train_updates, "devices", 1)
+
+        # Prefer BF16 on Ampere+ when safe; otherwise use FP16 mixed precision.
         maybe_update(train_updates, "precision", _cuda_precision_default(environment))
+
+        # Hint PyTorch toward higher internal matmul precision heuristics.
         maybe_update(train_updates, "matmul_precision", "high")
+
+        # Allow TF32 on supported NVIDIA GPUs for faster matmul / convolution paths.
         maybe_update(train_updates, "allow_tf32", True)
-        maybe_update(train_updates, "cudnn_benchmark", not train_config.deterministic)
+
+        # Let cuDNN benchmark kernels when deterministic mode is not required.
+        maybe_update(
+            train_updates,
+            "cudnn_benchmark",
+            not train_config.deterministic,
+        )
+
+        # Enable or disable `torch.compile` according to profile policy.
         maybe_update(train_updates, "compile_model", compile_model)
+
+        # Choose the compile strategy when compilation is enabled.
         maybe_update(train_updates, "compile_mode", compile_mode)
+
+        # Number of multiprocessing DataLoader workers.
         maybe_update(data_updates, "num_workers", num_workers)
+
+        # Enable pinned host memory to accelerate host-to-GPU batch transfer.
         maybe_update(data_updates, "pin_memory", True)
+
+        # Keep workers alive across epochs to reduce worker startup overhead.
         maybe_update(
             data_updates,
             "persistent_workers",
             _persistent_workers_enabled(num_workers),
         )
+
+        # Use deeper prefetching to reduce the chance of starving the GPU.
         maybe_update(
             data_updates,
             "prefetch_factor",
             _prefetch_factor_default(num_workers, accelerator="gpu"),
         )
+
     elif resolved_profile == "colab-cpu":
         # Colab CPU sessions are usually smaller, more volatile notebook
         # environments. Keeping workers at zero and disabling heavier extras
         # tends to be a safer "works out of the box" starting point.
+
         maybe_update(train_updates, "accelerator", "cpu")
         maybe_update(train_updates, "devices", 1)
         maybe_update(train_updates, "precision", _cpu_precision_default(environment))
         maybe_update(train_updates, "matmul_precision", "high")
+
+        # Zero workers reduces multiprocessing friction in notebook runtimes.
         maybe_update(data_updates, "num_workers", 0)
+
+        # No GPU transfer path here, so pinned memory is unnecessary.
         maybe_update(data_updates, "pin_memory", False)
+
+        # With zero workers, persistent workers have no meaning.
         maybe_update(data_updates, "persistent_workers", False)
+
+        # Prefetching is also irrelevant with zero workers.
         maybe_update(data_updates, "prefetch_factor", None)
+
+        # Disable heavier model visualization extras by default in Colab CPU.
         maybe_update(observability_updates, "enable_torchview", False)
+
     elif resolved_profile == "colab-cuda":
         # Colab CUDA gets some GPU-friendly defaults, but remains more cautious
         # than a tuned local workstation because notebook kernels and hosted
         # VMs can be more sensitive to aggressive worker counts.
+
         maybe_update(train_updates, "accelerator", "gpu")
         maybe_update(train_updates, "devices", 1)
         maybe_update(train_updates, "precision", _cuda_precision_default(environment))
         maybe_update(train_updates, "matmul_precision", "high")
         maybe_update(train_updates, "allow_tf32", True)
-        maybe_update(train_updates, "cudnn_benchmark", not train_config.deterministic)
+
+        # Benchmark cuDNN kernels only when deterministic mode is not required.
+        maybe_update(
+            train_updates,
+            "cudnn_benchmark",
+            not train_config.deterministic,
+        )
+
+        # Modest worker count for notebook-hosted GPU sessions.
         maybe_update(data_updates, "num_workers", 2)
+
+        # Pinned memory helps CPU-to-GPU transfer.
         maybe_update(data_updates, "pin_memory", True)
+
+        # Reuse workers across epochs when multiprocessing is enabled.
         maybe_update(data_updates, "persistent_workers", True)
+
+        # Mildly deeper prefetching to keep the GPU fed.
         maybe_update(
             data_updates,
             "prefetch_factor",
             _prefetch_factor_default(2, accelerator="gpu"),
         )
+
+        # Disable heavier visualization extras by default in Colab.
         maybe_update(observability_updates, "enable_torchview", False)
+
     elif resolved_profile == "slurm-cpu":
         num_workers = _slurm_worker_default(environment)
+
         # Scheduler-backed CPU jobs are where it makes the most sense to trust
         # the allocation shape and disable chatty interactive UX by default.
+
         maybe_update(train_updates, "accelerator", "cpu")
         maybe_update(train_updates, "devices", 1)
         maybe_update(train_updates, "precision", _cpu_precision_default(environment))
+
+        # Hide Lightning's interactive progress bar in batch-job logs.
         maybe_update(train_updates, "enable_progress_bar", False)
+
+        # Favor higher internal matmul precision heuristics when supported.
         maybe_update(train_updates, "matmul_precision", "high")
+
         maybe_update(
             train_updates,
             "intraop_threads",
@@ -344,56 +514,103 @@ def resolve_device_profile(
             "interop_threads",
             _cpu_interop_threads_default(environment),
         )
+
         maybe_update(data_updates, "num_workers", num_workers)
         maybe_update(data_updates, "pin_memory", False)
+
         maybe_update(
             data_updates,
             "persistent_workers",
             _persistent_workers_enabled(num_workers),
         )
+
+        # Queue a modest number of prefetched batches per worker.
         maybe_update(
             data_updates,
             "prefetch_factor",
             _prefetch_factor_default(num_workers, accelerator="cpu"),
         )
+
+        # Disable richer terminal progress UI for non-interactive scheduler logs.
         maybe_update(observability_updates, "enable_rich_progress_bar", False)
+
     elif resolved_profile == "slurm-cuda":
         num_workers = _slurm_worker_default(environment)
-        compile_model, compile_mode = _compile_defaults_for_profile(resolved_profile)
+        compile_model, compile_mode = _compile_defaults_for_profile(
+            resolved_profile,
+            environment,
+        )
+
         # Slurm CUDA keeps the throughput-oriented GPU defaults but also bakes
         # in batch-job ergonomics such as muted progress output.
+
+        # Run training on CUDA.
         maybe_update(train_updates, "accelerator", "gpu")
+
+        # Use one GPU by default for this profile.
         maybe_update(train_updates, "devices", 1)
+
+        # Prefer BF16 only on safe Ampere+ hardware; otherwise use FP16 mixed precision.
         maybe_update(train_updates, "precision", _cuda_precision_default(environment))
+
+        # Disable interactive progress output in scheduler logs.
         maybe_update(train_updates, "enable_progress_bar", False)
+
         maybe_update(train_updates, "matmul_precision", "high")
+
+        # Allow TF32 on supported NVIDIA hardware.
         maybe_update(train_updates, "allow_tf32", True)
-        maybe_update(train_updates, "cudnn_benchmark", not train_config.deterministic)
+
+        # Let cuDNN benchmark kernels only when determinism is not required.
+        maybe_update(
+            train_updates,
+            "cudnn_benchmark",
+            not train_config.deterministic,
+        )
+
+        # Enable or disable `torch.compile` according to profile policy.
         maybe_update(train_updates, "compile_model", compile_model)
+
+        # Choose the compile strategy when compilation is enabled.
         maybe_update(train_updates, "compile_mode", compile_mode)
+
         maybe_update(data_updates, "num_workers", num_workers)
+
+        # Pinned memory improves host-to-GPU transfer in batch jobs too.
         maybe_update(data_updates, "pin_memory", True)
+
         maybe_update(
             data_updates,
             "persistent_workers",
             _persistent_workers_enabled(num_workers),
         )
+
+        # Use deeper prefetching to reduce the chance of starving the GPU.
         maybe_update(
             data_updates,
             "prefetch_factor",
             _prefetch_factor_default(num_workers, accelerator="gpu"),
         )
+
+        # Rich terminal progress UI is usually noisy in Slurm logs.
         maybe_update(observability_updates, "enable_rich_progress_bar", False)
+
     elif resolved_profile == "apple-silicon":
         num_workers = _apple_silicon_worker_default(environment)
+
         # Apple Silicon is intentionally treated as its own profile rather than
         # "CPU with different accelerator name". MPS has different mixed-
         # precision, memory, and loader-behavior tradeoffs, so it deserves a
         # separate default table.
+
         maybe_update(train_updates, "accelerator", "mps")
         maybe_update(train_updates, "devices", 1)
+
+        # Stay in FP32 by default because MPS precision tradeoffs differ from CUDA.
         maybe_update(train_updates, "precision", 32)
+
         maybe_update(train_updates, "matmul_precision", "high")
+
         maybe_update(
             train_updates,
             "intraop_threads",
@@ -404,21 +621,34 @@ def resolve_device_profile(
             "interop_threads",
             _cpu_interop_threads_default(environment),
         )
+
+        # Upper memory watermark ratio for MPS allocator behavior.
         maybe_update(train_updates, "mps_high_watermark_ratio", 1.3)
+
+        # Lower memory watermark ratio for MPS allocator behavior.
         maybe_update(train_updates, "mps_low_watermark_ratio", 1.0)
+
+        # Allow unsupported ops to fall back when the MPS backend cannot handle them.
         maybe_update(train_updates, "enable_mps_fallback", True)
+
         maybe_update(data_updates, "num_workers", num_workers)
+
+        # Pinned memory is primarily for CUDA transfer, so keep it off on MPS.
         maybe_update(data_updates, "pin_memory", False)
+
         maybe_update(
             data_updates,
             "persistent_workers",
             _persistent_workers_enabled(num_workers),
         )
+
         maybe_update(
             data_updates,
             "prefetch_factor",
             _prefetch_factor_default(num_workers, accelerator="mps"),
         )
+
+        # Device stats can be noisier or less useful on MPS in this repo.
         maybe_update(observability_updates, "enable_device_stats", False)
 
     resolved_train_config = (
