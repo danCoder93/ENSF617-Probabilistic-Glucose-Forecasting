@@ -35,12 +35,16 @@ from typing import Any, Mapping
 import psutil
 import torch
 from pytorch_lightning.callbacks import Callback
-from observability.model_visualization import TorchviewFusedAdapter, warmup_visualization_model
 
 from config import ObservabilityConfig
 from observability.logging_utils import (
     _tensorboard_experiments,
     log_metrics_to_loggers,
+)
+from observability.model_visualization import (
+    SemanticTorchviewAdapter,
+    TorchviewFusedAdapter,
+    warmup_visualization_model,
 )
 from observability.tensors import (
     _move_batch_to_device,
@@ -401,6 +405,34 @@ class ModelTensorBoardCallback(Callback):
         #   device as the model so tracing does not fail due to device mismatch
         return batch_on_device
 
+    def _build_torchview_model(self, pl_module: Any) -> torch.nn.Module:
+        """Select the graph surface used for the main torchview artifact.
+
+        Why this helper exists:
+            The repo now distinguishes between two related but different
+            visualization goals:
+
+            1. a debugging-oriented trace surface that preserves the model's
+               real internal graph as faithfully as possible
+            2. a cleaner, presentation-oriented semantic surface that groups the
+               fused architecture into a smaller number of human-readable stages
+
+        Current Phase 1 policy:
+            Use the semantic adapter as the primary torchview export so the
+            default artifact is easier to read, while keeping the low-level
+            adapter available in the codebase for future debugging or deeper
+            visualization paths.
+
+        Important boundary:
+            This helper changes only the visualization *surface*, not the real
+            training or inference logic. The wrapped Lightning module remains
+            untouched.
+        """
+        # Phase 1 intentionally makes the clean semantic graph the main
+        # torchview artifact. This improves readability without requiring model
+        # refactors or trainer changes.
+        return SemanticTorchviewAdapter(pl_module).to(pl_module.device)
+
     def _log_torchview(
         self,
         trainer: Any,
@@ -410,7 +442,7 @@ class ModelTensorBoardCallback(Callback):
         """Render the optional torchview artifact and surface it into loggers.
 
         What this path does:
-            - wraps the model in a thin visualization adapter
+            - wraps the model in a visualization adapter
             - runs a single graph-building pass using one sampled batch
             - renders a PNG via Graphviz
             - optionally mirrors the result into TensorBoard as text/image
@@ -424,11 +456,11 @@ class ModelTensorBoardCallback(Callback):
             Either one may succeed when the other fails, so they are attempted
             independently.
 
-        Why the adapter is used:
+        Why an adapter is used:
             The wrapped Lightning module may be a more complicated tracing
             surface than visualization tools prefer. The adapter presents a
-            narrower plain-`nn.Module` surface without changing real model
-            behavior.
+            narrower and more intentional `nn.Module` surface without changing
+            real model behavior.
 
         Failure behavior:
             This path is strictly best-effort:
@@ -436,7 +468,7 @@ class ModelTensorBoardCallback(Callback):
             - failures are logged for debugging
             - no exception is allowed to escape into training control flow
         """
-        # torchview is complementary to TensorBoard, not a replacement for it.
+        # Torchview is complementary to TensorBoard, not a replacement for it.
         # The goal here is to create one static architecture artifact per run
         # that can also be surfaced back into TensorBoard as an image/text pair.
         if not self.config.enable_torchview or self._torchview_logged:
@@ -457,35 +489,38 @@ class ModelTensorBoardCallback(Callback):
 
         base_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Wrap the Lightning module in a small visualization-facing adapter.
+        # Build the visualization-facing wrapper.
         #
-        # This keeps the actual model architecture untouched while giving
-        # torchview a simpler tracing surface. If tracing still fails after
-        # this point, the likely cause is the model/input contract itself
-        # rather than callback orchestration.
-        graph_model = TorchviewFusedAdapter(pl_module).to(pl_module.device)
+        # Design note:
+        # - Phase 1 prefers the semantic adapter so the saved diagram is easier
+        #   to understand at a glance
+        # - the underlying model, callbacks, metrics, and training path are not
+        #   modified
+        # - the low-level adapter still exists in the codebase as a future
+        #   debug-oriented surface if needed
+        graph_model = self._build_torchview_model(pl_module)
 
-        # Perform a one-time warmup forward pass before invoking torchview graph capture.
+        # Perform a one-time warmup forward pass before invoking torchview graph
+        # capture.
         #
         # Rationale:
-        #   - Some submodules (e.g., lazy layers or dynamically constructed components)
-        #     finalize their internal structure only after the first forward pass.
-        #   - Torchview internally traces the model multiple times and expects a stable
-        #     module graph across invocations. If the model mutates between those passes,
-        #     tracing fails with graph mismatch errors.
-        #   - Running an explicit warmup here ensures that any deferred initialization
-        #     happens *before* graph capture begins, improving trace stability.
+        #   - Some submodules (for example lazy layers or dynamically
+        #     constructed components) finalize their internal structure only
+        #     after the first forward pass.
+        #   - Torchview may internally traverse or trace the model multiple
+        #     times and expects that graph surface to remain stable.
+        #   - Running an explicit warmup here helps ensure that deferred
+        #     initialization happens before graph capture begins.
         #
         # Design notes:
-        #   - The warmup runs under torch.no_grad() and eval() mode inside the helper,
-        #     so it does not affect gradients, optimizer state, or training behavior.
-        #   - The original training/eval state is restored after the warmup completes.
+        #   - The warmup runs under `torch.no_grad()` and temporary `eval()` mode
+        #     inside the helper, so it does not affect gradients or optimizer
+        #     state.
+        #   - The helper restores the original training/eval mode afterward.
         #
         # Failure handling:
-        #   - Warmup is best-effort only. Any failure is logged and we skip visualization
-        #     entirely rather than interrupting training.
-        #   - This preserves the callback’s non-intrusive design: observability must
-        #     never break the training workflow.
+        #   - Warmup is best-effort only. If it fails, we log and skip
+        #     visualization rather than interrupting training.
         try:
             warmup_visualization_model(graph_model, batch_on_device)
         except Exception as exc:
@@ -493,50 +528,48 @@ class ModelTensorBoardCallback(Callback):
                 self.text_logger.exception("torchview warmup failed: %s", exc)
             return
 
-        # Attempt to generate a torchview computational graph for the model.
+        # Attempt to generate a torchview graph for the selected visualization
+        # surface.
         #
         # Rationale:
-        #   - draw_graph(...) performs a trace-based traversal of the model using the
-        #     provided example batch. It builds a visual representation of module
-        #     structure, tensor flow, and nested submodules.
-        #   - This complements text-based summaries by giving a structural view of how
-        #     inputs propagate through the model.
+        #   - `draw_graph(...)` traces the provided module using the sampled
+        #     batch and produces a Graphviz representation of the execution
+        #     structure.
+        #   - In this repo, the semantic adapter helps the resulting diagram read
+        #     more like a human architecture sketch and less like a raw
+        #     explosion of every nested operation.
         #
         # Important:
-        #   - This step depends on tracing stability. If the model contains dynamic
-        #     control flow, shape-dependent branching, or recently-initialized lazy
-        #     modules, graph capture may fail even after warmup.
-        #   - The adapter (TorchviewFusedAdapter) ensures a simplified output contract,
-        #     but does not eliminate all trace-time risks.
+        #   - graph capture still depends on tracing stability and backend
+        #     compatibility
+        #   - the adapter improves readability but does not make torchview
+        #     infallible
         try:
             graph = draw_graph(
                 graph_model,
                 input_data=batch_on_device,
-                depth=self.config.torchview_depth,          # limit traversal depth to control graph size/complexity
-                roll=self.config.torchview_roll,            # collapse repeated modules for readability
-                expand_nested=self.config.torchview_expand_nested,  # optionally expand nested modules in detail
-                device=str(pl_module.device),               # ensure tracing occurs on the correct device
+                depth=self.config.torchview_depth,
+                roll=self.config.torchview_roll,
+                expand_nested=self.config.torchview_expand_nested,
+                device=str(pl_module.device),
             )
 
             # Render the traced graph to a PNG file using Graphviz.
             #
             # Behavior:
-            #   - graph.visual_graph is a Graphviz Digraph object generated by torchview
-            #   - render(...) writes both the image and (temporarily) the source .dot file
-            #   - cleanup=True removes intermediate files after rendering
-            #
-            # Output:
-            #   - A PNG image is saved under the configured model_viz artifact directory
-            #   - The returned render_path points to the generated file
+            #   - `graph.visual_graph` is a Graphviz Digraph produced by
+            #     torchview
+            #   - `render(...)` writes the image and a temporary source file
+            #   - `cleanup=True` removes intermediate files after rendering
             render_path = graph.visual_graph.render(
-                filename=base_path.name,                    # base filename for the rendered artifact
-                directory=str(base_path.parent),            # target directory for model_viz artifacts
-                format="png",                              # output format (PNG for portability)
-                cleanup=True,                              # remove intermediate Graphviz files (.dot, etc.)
+                filename=base_path.name,
+                directory=str(base_path.parent),
+                format="png",
+                cleanup=True,
             )
 
-            # Mark visualization as successfully generated so it is not retried.
-            # The callback is designed to log the graph once per run to avoid redundant work.
+            # Mark visualization as successfully generated so the callback does
+            # not repeat the same work later in the run.
             self._torchview_logged = True
 
         # Failure handling:
@@ -544,13 +577,12 @@ class ModelTensorBoardCallback(Callback):
         #   - Common failure causes include:
         #       * unstable tracing graphs across invocations
         #       * unsupported Python control flow in forward(...)
-        #       * missing Graphviz backend (dot executable)
-        #   - Visualization is optional, so we fail gracefully and continue training.
+        #       * missing Graphviz backend (`dot` executable)
+        #   - Visualization is optional, so we fail gracefully and continue.
         except Exception as exc:
             if self.text_logger is not None:
                 self.text_logger.exception("torchview rendering failed: %s", exc)
             return
-
 
         # Normalize the render path to a Path object for downstream processing.
         png_path = Path(render_path)
@@ -558,12 +590,13 @@ class ModelTensorBoardCallback(Callback):
         # Extract raw Graphviz source (DOT format) if available.
         #
         # Purpose:
-        #   - Provides a text-based representation of the graph for debugging,
+        #   - Provides a text representation of the graph for debugging,
         #     reproducibility, or artifact logging alongside the PNG.
-        #   - Useful when visual rendering succeeds but deeper inspection is needed.
+        #   - Useful when visual rendering succeeds but deeper inspection is
+        #     still needed later.
         source_text = getattr(getattr(graph, "visual_graph", None), "source", None)
 
-        # We surface the torchview result back into TensorBoard in two forms:
+        # Surface the torchview result back into TensorBoard in two forms:
         # - DOT/source text for inspection and debugging
         # - rendered PNG image for quick visual browsing
         #

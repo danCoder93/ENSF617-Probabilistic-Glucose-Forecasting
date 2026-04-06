@@ -6,7 +6,8 @@ from __future__ import annotations
 #
 # Responsibility boundary:
 # - translate a prepared project config into one full run
-# - coordinate evaluation, prediction export, reports, and run summaries
+# - coordinate evaluation, shared post-run reporting, prediction export,
+#   reports, and run summaries
 # - keep CLI and notebook callers on one shared orchestration path
 #
 # What does *not* live here:
@@ -506,7 +507,8 @@ def run_training_workflow(
     # 3. build the DataModule and training wrapper
     # 4. fit the model
     # 5. optionally test and predict on the held-out split
-    # 6. persist a compact run summary plus optional prediction tensors
+    # 6. build the shared post-run report surface when predictions exist
+    # 7. persist a compact run summary plus optional prediction tensors
     if seed is not None and seed_everything is not None:
         seed_everything(seed, workers=True)
     # If Lightning is unavailable, we do not raise here ourselves. The later
@@ -596,7 +598,7 @@ def run_training_workflow(
             f"{effective_resolved_device_profile}.\n"
             f"{format_runtime_diagnostics(effective_preflight_diagnostics)}"
         )
-    
+
     try:
         validate_runtime_configuration(
             train_config=effective_train_config,
@@ -617,7 +619,11 @@ def run_training_workflow(
 
     from data.datamodule import AZT1DDataModule
     from evaluation import evaluate_prediction_batches
-    from observability import export_prediction_table, generate_plotly_reports
+    from observability import (
+        build_shared_report,
+        export_prediction_table,
+        generate_plotly_reports,
+    )
     from train import FusedModelTrainer as DefaultFusedModelTrainer
 
     if trainer_class is None:
@@ -668,6 +674,11 @@ def run_training_workflow(
     predictions_path: Path | None = None
     prediction_table_path: Path | None = None
     report_paths: dict[str, Path] = {}
+    # `shared_report` is the Phase 1 in-memory packaging layer for post-run
+    # reporting. It is intentionally optional here so the workflow can preserve
+    # the older artifact-only behavior when prediction generation is skipped or
+    # no held-out predictions are available.
+    shared_report = None
 
     if fit_artifacts.has_test_data and not skip_test:
         try:
@@ -722,6 +733,25 @@ def run_training_workflow(
             batches=datamodule.test_dataloader(),
             quantiles=quantiles,
         )
+        # Phase 1 shared-reporting integration:
+        # build the canonical in-memory post-run report once after detailed
+        # evaluation becomes available. This keeps the reporting architecture
+        # moving toward "evaluate once, package once, render many ways" without
+        # disturbing the surrounding workflow or changing existing artifact
+        # toggles.
+        #
+        # Important compatibility note:
+        # the workflow still preserves the long-standing raw prediction tensor
+        # save, CSV export, and Plotly HTML generation paths. The shared report
+        # is an enhancement layer underneath those sinks rather than a new
+        # mandatory artifact contract for callers.
+        shared_report = build_shared_report(
+            datamodule=datamodule,
+            predictions=test_predictions,
+            quantiles=quantiles,
+            sampling_interval_minutes=effective_config.data.sampling_interval_minutes,
+            evaluation_result=test_evaluation,
+        )
         if output_dir is not None and save_predictions:
             # Predictions are saved as raw tensors on purpose. That preserves
             # the model's direct output without forcing an opinionated export
@@ -742,16 +772,22 @@ def run_training_workflow(
                 quantiles=quantiles,
                 output_path=effective_observability_config.prediction_table_path,
                 sampling_interval_minutes=effective_config.data.sampling_interval_minutes,
+                evaluation_result=test_evaluation,
             )
         if effective_observability_config.enable_plot_reports:
-            # Plotly reports are generated from the flat prediction table so the
-            # reporting path stays decoupled from the in-memory prediction
-            # tensor structure.
+            # Plotly reporting now prefers the shared in-memory report when it
+            # is available. We still pass the prediction-table path for
+            # backwards compatibility and as a fallback for lighter workflows.
+            #
+            # This keeps current behavior intact while letting the HTML sink
+            # consume the same canonical report surface used elsewhere in the
+            # reporting stack.
             report_paths = generate_plotly_reports(
                 prediction_table_path,
                 report_dir=effective_observability_config.report_dir,
                 max_subjects=effective_observability_config.max_forecast_subjects_per_report,
                 evaluation_result=test_evaluation,
+                shared_report=shared_report,
             )
 
     runtime_tuning_report = getattr(trainer, "runtime_tuning_report", None)
