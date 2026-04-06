@@ -25,6 +25,21 @@ from __future__ import annotations
 #   run progressed?"
 # - `ModelTensorBoardCallback` answers: "what model did we run, and can we
 #   render its structure as text/graph artifacts?"
+#
+# Dashboard-first enhancement note:
+# Earlier revisions of this file already exposed valuable system and model-
+# structure artifacts, but several tag names were still closer to raw logging
+# implementation detail than to a readable TensorBoard hierarchy. The current
+# version preserves the same core behavior while making the namespace policy
+# clearer:
+# - machine/runtime telemetry now lives under `system/...`
+# - model-structure artifacts now live under `text/model/...` and
+#   `debug/model/...`
+#
+# Important compatibility rule:
+# This file still performs best-effort observability only. The enhancements
+# below reorganize presentation and comments, but they do not change training
+# behavior, model semantics, or evaluation truth.
 
 import csv
 import json
@@ -56,6 +71,28 @@ try:
     from torchview import draw_graph
 except ImportError:  # pragma: no cover - optional dependency until installed
     draw_graph = None  # type: ignore[assignment]
+
+
+def _system_tag(metric_name: str) -> str:
+    """Return the canonical namespace for one runtime/system telemetry metric.
+
+    Context:
+        System telemetry is useful and should remain visible, but it should not
+        be mixed into the same namespace as model-quality or per-parameter
+        debug metrics. Grouping it under `system/...` makes the TensorBoard
+        surface easier to browse and collapse.
+    """
+    return f"system/{metric_name}"
+
+
+def _model_text_tag(name: str) -> str:
+    """Return the canonical namespace for one model text artifact."""
+    return f"text/model/{name}"
+
+
+def _model_debug_tag(name: str) -> str:
+    """Return the canonical namespace for one model visualization artifact."""
+    return f"debug/model/{name}"
 
 
 class SystemTelemetryCallback(Callback):
@@ -156,28 +193,32 @@ class SystemTelemetryCallback(Callback):
                 getattr(mps_runtime, "driver_allocated_memory", lambda: 0)()
             )
             return {
-                "telemetry/gpu_memory_allocated_mb": allocated / (1024.0 * 1024.0),
-                "telemetry/gpu_memory_reserved_mb": reserved / (1024.0 * 1024.0),
-                "telemetry/gpu_utilization_percent": 0.0,
+                _system_tag("device/gpu_memory_allocated_mb"): (
+                    allocated / (1024.0 * 1024.0)
+                ),
+                _system_tag("device/gpu_memory_reserved_mb"): (
+                    reserved / (1024.0 * 1024.0)
+                ),
+                _system_tag("device/gpu_utilization_percent"): 0.0,
             }
 
         if not torch.cuda.is_available():
             # CPU-only runs should still produce a stable telemetry schema so
             # downstream dashboards and CSV readers do not need special cases.
             return {
-                "telemetry/gpu_memory_allocated_mb": 0.0,
-                "telemetry/gpu_memory_reserved_mb": 0.0,
-                "telemetry/gpu_utilization_percent": 0.0,
+                _system_tag("device/gpu_memory_allocated_mb"): 0.0,
+                _system_tag("device/gpu_memory_reserved_mb"): 0.0,
+                _system_tag("device/gpu_utilization_percent"): 0.0,
             }
 
         metrics = {
-            "telemetry/gpu_memory_allocated_mb": (
+            _system_tag("device/gpu_memory_allocated_mb"): (
                 torch.cuda.memory_allocated() / (1024.0 * 1024.0)
             ),
-            "telemetry/gpu_memory_reserved_mb": (
+            _system_tag("device/gpu_memory_reserved_mb"): (
                 torch.cuda.memory_reserved() / (1024.0 * 1024.0)
             ),
-            "telemetry/gpu_utilization_percent": 0.0,
+            _system_tag("device/gpu_utilization_percent"): 0.0,
         }
 
         if _has_module("pynvml"):
@@ -189,7 +230,9 @@ class SystemTelemetryCallback(Callback):
                     torch.cuda.current_device()
                 )
                 utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
-                metrics["telemetry/gpu_utilization_percent"] = float(utilization.gpu)
+                metrics[_system_tag("device/gpu_utilization_percent")] = float(
+                    utilization.gpu
+                )
             except Exception:
                 # NVML access should never be allowed to interrupt the run.
                 # Memory telemetry is still useful even without utilization.
@@ -275,11 +318,11 @@ class SystemTelemetryCallback(Callback):
 
         memory = psutil.virtual_memory()
         metrics = {
-            "telemetry/cpu_percent": float(psutil.cpu_percent(interval=None)),
-            "telemetry/ram_percent": float(memory.percent),
-            "telemetry/ram_used_gb": float(memory.used / (1024.0**3)),
-            "telemetry/global_step": float(trainer.global_step),
-            "telemetry/current_epoch": float(trainer.current_epoch),
+            _system_tag("host/cpu_percent"): float(psutil.cpu_percent(interval=None)),
+            _system_tag("host/ram_percent"): float(memory.percent),
+            _system_tag("host/ram_used_gb"): float(memory.used / (1024.0**3)),
+            _system_tag("runtime/global_step"): float(trainer.global_step),
+            _system_tag("runtime/current_epoch"): float(trainer.current_epoch),
         }
 
         # The metrics dictionary is intentionally a mix of host telemetry and
@@ -605,7 +648,7 @@ class ModelTensorBoardCallback(Callback):
         for experiment in _tensorboard_experiments(trainer):
             add_text = getattr(experiment, "add_text", None)
             if callable(add_text) and source_text is not None:
-                add_text("model/torchview_dot", source_text, global_step=0)
+                add_text(_model_debug_tag("torchview_dot"), source_text, global_step=0)
 
             add_image = getattr(experiment, "add_image", None)
             if callable(add_image) and _has_module("matplotlib"):
@@ -614,7 +657,7 @@ class ModelTensorBoardCallback(Callback):
 
                     image = mpimg.imread(png_path)
                     add_image(
-                        "model/torchview",
+                        _model_debug_tag("torchview"),
                         image,
                         global_step=0,
                         dataformats="HWC",
@@ -686,7 +729,7 @@ class ModelTensorBoardCallback(Callback):
             for experiment in experiments:
                 add_text = getattr(experiment, "add_text", None)
                 if callable(add_text):
-                    add_text("model/architecture", model_text, global_step=0)
+                    add_text(_model_text_tag("architecture"), model_text, global_step=0)
             if self.text_logger is not None:
                 self.text_logger.info("model architecture\n%s", model_text)
 

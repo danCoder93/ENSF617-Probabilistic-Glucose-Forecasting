@@ -566,6 +566,18 @@ def _add_observability_arguments(parser: argparse.ArgumentParser) -> None:
     Purpose:
     gather logging, telemetry, report, and visualization switches in one
     clearly observability-focused section.
+
+    Dashboard-first context:
+    The repository now organizes TensorBoard and reporting outputs into
+    distinct conceptual layers:
+
+    - dashboard/* : small, front-door summary metrics and health signals
+    - text/*      : interpretation and orientation panels
+    - debug/*     : detailed drill-down diagnostics (gradients, params, etc.)
+    - system/*    : runtime/device telemetry
+
+    The CLI flags below still control the same underlying features, but those
+    features are now surfaced in a more structured way inside TensorBoard.
     """
 
     # Overall observability preset or mode name.
@@ -576,6 +588,12 @@ def _add_observability_arguments(parser: argparse.ArgumentParser) -> None:
 
     # Whether TensorBoard logging should be disabled.
     # Expected value: flag presence only.
+    #
+    # When enabled, TensorBoard now contains multiple structured surfaces:
+    # - dashboard summaries (front-door view)
+    # - text panels (model + report interpretation)
+    # - debug metrics (gradients, parameters, activations)
+    # - system telemetry (CPU/GPU/memory/runtime signals)
     parser.add_argument("--disable-tensorboard", action="store_true")
 
     # Whether generated plot/report artifacts should be disabled.
@@ -584,43 +602,74 @@ def _add_observability_arguments(parser: argparse.ArgumentParser) -> None:
 
     # Whether system telemetry collection should be disabled.
     # Expected value: flag presence only.
-    # Disable this if run overhead or telemetry volume is undesirable.
+    #
+    # These signals are logged under `system/*` and include runtime/device
+    # metrics such as memory usage and execution behavior. Disable this if
+    # telemetry overhead or artifact volume is undesirable.
     parser.add_argument("--disable-system-telemetry", action="store_true")
 
     # Whether gradient statistics collection should be disabled.
     # Expected value: flag presence only.
+    #
+    # Gradient statistics are logged under `debug/gradients/*` and provide
+    # drill-down visibility into optimization health. These are not part of
+    # the front-door dashboard view.
     # Gradient stats are useful for debugging optimization behavior but may add
     # overhead and extra artifacts.
     parser.add_argument("--disable-gradient-stats", action="store_true")
 
     # Whether activation statistics should be enabled.
     # Expected value: flag presence only.
+    #
+    # Activation summaries are logged under `debug/activations/*` and are
+    # useful for deep debugging of internal model behavior. These are
+    # higher-cost, drill-down diagnostics.
     # This is useful for deeper debugging of internal model behavior and can add
     # runtime and storage overhead.
     parser.add_argument("--enable-activation-stats", action="store_true")
 
     # Whether parameter histogram logging should be disabled.
+    #
+    # Histograms are logged under `debug/parameters/*` and provide detailed
+    # distribution views of weights and gradients. These are drill-down
+    # diagnostics rather than dashboard summaries.
     # Expected value: flag presence only.
     parser.add_argument("--disable-parameter-histograms", action="store_true")
 
     # Whether parameter scalar logging should be disabled.
+    #
+    # Parameter scalars (e.g., norms) are logged under `debug/parameters/*`
+    # and are intended for drill-down inspection rather than front-door
+    # dashboard metrics.
     # Expected value: flag presence only.
     parser.add_argument("--disable-parameter-scalars", action="store_true")
 
     # Whether prediction figures should be disabled.
+    #
+    # Prediction figures provide qualitative forecast inspection and may
+    # feed both dashboard-level summaries and saved report artifacts.
     # Expected value: flag presence only.
     # Useful when numeric outputs are enough and figure generation is not needed.
     parser.add_argument("--disable-prediction-figures", action="store_true")
 
     # Whether model graph export/logging should be disabled.
+    #
+    # These are structural model visualizations and are not part of the
+    # dashboard summary. They complement deeper inspection workflows.
     # Expected value: flag presence only.
     parser.add_argument("--disable-model-graph", action="store_true")
 
     # Whether textual model summaries should be disabled.
+    #
+    # Model text summaries are typically logged under `text/model/*` and
+    # provide orientation into architecture structure.
     # Expected value: flag presence only.
     parser.add_argument("--disable-model-text", action="store_true")
 
     # Whether torchview diagram generation should be disabled.
+    #
+    # Torchview outputs are treated as `debug/model/*` artifacts and provide
+    # a static visualization of model structure for deeper inspection.
     # Expected value: flag presence only.
     # Torchview can be helpful for structure inspection but may be unnecessary in
     # fast iteration loops.

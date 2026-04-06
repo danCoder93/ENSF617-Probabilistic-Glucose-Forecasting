@@ -43,6 +43,22 @@ from __future__ import annotations
 #
 # These callbacks are therefore intentionally designed around *architecture-
 # level trust questions* rather than generic MLOps dashboards.
+#
+# Dashboard-first enhancement note:
+# Earlier revisions of this file logged many useful metrics, but the tag layout
+# was still closer to a raw telemetry dump than to a readable drill-down view.
+# The current version preserves the same underlying summaries while making two
+# presentation improvements:
+# - low-level metrics are grouped under clearer debug namespaces such as
+#   `debug/gradients/...` and `debug/activations/...`
+# - a *very small* set of aggregate health signals is duplicated into
+#   `dashboard/health/...` so the front-door TensorBoard surface can answer
+#   "is anything obviously wrong?" without forcing the user to inspect every
+#   branch-specific trace first
+#
+# Important compatibility rule:
+# The callbacks below are still observability helpers only. They do not change
+# training logic, backpropagation semantics, model outputs, or evaluation truth.
 
 import json
 import logging
@@ -183,7 +199,6 @@ def _module_family_for_parameter_name(parameter_name: str) -> str | None:
     return None
 
 
-
 def _safe_ratio(numerator: float, denominator: float) -> float:
     """Return a stable numeric ratio for observability metrics.
 
@@ -266,6 +281,43 @@ def _branch_is_near_dead(stats: dict[str, float]) -> bool:
         stats.get("near_zero_fraction", 0.0) >= _BRANCH_NEAR_DEAD_NEAR_ZERO_THRESHOLD
         and stats.get("std", 0.0) <= _BRANCH_NEAR_DEAD_STD_THRESHOLD
     )
+
+
+def _gradient_global_tag(metric_name: str) -> str:
+    """Return the canonical debug namespace for one global gradient metric.
+
+    Context:
+        Earlier versions of the callback emitted several useful metrics under a
+        flatter `debug/...` layout. The repository now prefers more explicit
+        drill-down namespaces so TensorBoard grouping is clearer.
+    """
+    return f"debug/gradients/global/{metric_name}"
+
+
+def _gradient_family_tag(family_name: str, metric_name: str) -> str:
+    """Return the canonical debug namespace for one family-level gradient metric."""
+    return f"debug/gradients/{family_name}/{metric_name}"
+
+
+def _activation_module_tag(module_name: str, metric_name: str) -> str:
+    """Return the canonical debug namespace for one module-level activation metric."""
+    return f"debug/activations/{module_name}/{metric_name}"
+
+
+def _activation_summary_tag(metric_name: str) -> str:
+    """Return the canonical debug namespace for one cross-module activation metric."""
+    return f"debug/activations/summary/{metric_name}"
+
+
+def _dashboard_health_tag(metric_name: str) -> str:
+    """Return the canonical dashboard namespace for one promoted health signal.
+
+    Context:
+        The dashboard surface should remain intentionally small. This helper is
+        therefore used only for a handful of aggregate "front door" metrics that
+        summarize health without exposing the full raw drill-down surface.
+    """
+    return f"dashboard/health/{metric_name}"
 
 
 # ============================================================================
@@ -604,13 +656,15 @@ class GradientStatsCallback(Callback):
                     family_stats[family_name]["nonfinite_grad_parameters"] += 1.0
 
         metrics = {
-            "debug/grad_total_norm": total_norm_sq ** 0.5,
-            "debug/grad_max_abs": max_abs,
-            "debug/nonfinite_grad_parameters": float(nonfinite_grad_parameters),
-            "debug/grad_parameter_count": float(grad_parameter_count),
-            "debug/parameter_total_norm": parameter_norm_sq ** 0.5,
-            "debug/parameter_max_abs": parameter_max_abs,
-            "debug/nonfinite_parameters": float(nonfinite_parameters),
+            _gradient_global_tag("total_norm"): total_norm_sq ** 0.5,
+            _gradient_global_tag("max_abs"): max_abs,
+            _gradient_global_tag("nonfinite_grad_parameters"): float(
+                nonfinite_grad_parameters
+            ),
+            _gradient_global_tag("grad_parameter_count"): float(grad_parameter_count),
+            _gradient_global_tag("parameter_total_norm"): parameter_norm_sq ** 0.5,
+            _gradient_global_tag("parameter_max_abs"): parameter_max_abs,
+            _gradient_global_tag("nonfinite_parameters"): float(nonfinite_parameters),
         }
 
         # Family metrics expose branch-level behavior that global metrics can
@@ -622,25 +676,31 @@ class GradientStatsCallback(Callback):
 
             metrics.update(
                 {
-                    f"debug/{family_name}_grad_total_norm": family_grad_total_norm,
-                    f"debug/{family_name}_grad_max_abs": stats["grad_max_abs"],
-                    f"debug/{family_name}_grad_parameter_count": stats[
+                    _gradient_family_tag(family_name, "total_norm"): (
+                        family_grad_total_norm
+                    ),
+                    _gradient_family_tag(family_name, "max_abs"): stats["grad_max_abs"],
+                    _gradient_family_tag(family_name, "grad_parameter_count"): stats[
                         "grad_parameter_count"
                     ],
-                    f"debug/{family_name}_nonfinite_grad_parameters": stats[
-                        "nonfinite_grad_parameters"
-                    ],
-                    f"debug/{family_name}_parameter_total_norm": (
+                    _gradient_family_tag(
+                        family_name, "nonfinite_grad_parameters"
+                    ): stats["nonfinite_grad_parameters"],
+                    _gradient_family_tag(family_name, "parameter_total_norm"): (
                         family_parameter_total_norm
                     ),
-                    f"debug/{family_name}_parameter_max_abs": stats[
+                    _gradient_family_tag(family_name, "parameter_max_abs"): stats[
                         "parameter_max_abs"
                     ],
-                    f"debug/{family_name}_parameter_count": stats["parameter_count"],
-                    f"debug/{family_name}_nonfinite_parameters": stats[
+                    _gradient_family_tag(family_name, "parameter_count"): stats[
+                        "parameter_count"
+                    ],
+                    _gradient_family_tag(family_name, "nonfinite_parameters"): stats[
                         "nonfinite_parameters"
                     ],
-                    f"debug/{family_name}_grad_to_parameter_norm_ratio": _safe_ratio(
+                    _gradient_family_tag(
+                        family_name, "grad_to_parameter_norm_ratio"
+                    ): _safe_ratio(
                         family_grad_total_norm,
                         family_parameter_total_norm,
                     ),
@@ -650,30 +710,34 @@ class GradientStatsCallback(Callback):
         # The TCN side has three branches, so a few aggregated TCN metrics make
         # it easier to compare the TCN ensemble against the TFT/fusion side.
         tcn_family_grad_norms = [
-            metrics["debug/tcn3_grad_total_norm"],
-            metrics["debug/tcn5_grad_total_norm"],
-            metrics["debug/tcn7_grad_total_norm"],
+            metrics[_gradient_family_tag("tcn3", "total_norm")],
+            metrics[_gradient_family_tag("tcn5", "total_norm")],
+            metrics[_gradient_family_tag("tcn7", "total_norm")],
         ]
-        metrics["debug/tcn_branch_grad_norm_mean"] = (
+        metrics[_gradient_global_tag("tcn_branch_norm_mean")] = (
             sum(tcn_family_grad_norms) / float(len(tcn_family_grad_norms))
         )
-        metrics["debug/tcn_branch_grad_norm_max"] = max(tcn_family_grad_norms)
-        metrics["debug/tcn_branch_grad_norm_min"] = min(tcn_family_grad_norms)
+        metrics[_gradient_global_tag("tcn_branch_norm_max")] = max(
+            tcn_family_grad_norms
+        )
+        metrics[_gradient_global_tag("tcn_branch_norm_min")] = min(
+            tcn_family_grad_norms
+        )
 
         # Cross-family ratios help turn raw magnitudes into more interpretable
         # comparisons. They are not proofs of correctness; they are compact
         # signals that make branch imbalance easier to spot later.
-        metrics["debug/tft_to_tcn_mean_grad_norm_ratio"] = _safe_ratio(
-            metrics["debug/tft_grad_total_norm"],
-            metrics["debug/tcn_branch_grad_norm_mean"],
+        metrics[_gradient_global_tag("tft_to_tcn_mean_norm_ratio")] = _safe_ratio(
+            metrics[_gradient_family_tag("tft", "total_norm")],
+            metrics[_gradient_global_tag("tcn_branch_norm_mean")],
         )
-        metrics["debug/grn_to_tft_grad_norm_ratio"] = _safe_ratio(
-            metrics["debug/grn_grad_total_norm"],
-            metrics["debug/tft_grad_total_norm"],
+        metrics[_gradient_global_tag("grn_to_tft_norm_ratio")] = _safe_ratio(
+            metrics[_gradient_family_tag("grn", "total_norm")],
+            metrics[_gradient_family_tag("tft", "total_norm")],
         )
-        metrics["debug/fcn_to_grn_grad_norm_ratio"] = _safe_ratio(
-            metrics["debug/fcn_grad_total_norm"],
-            metrics["debug/grn_grad_total_norm"],
+        metrics[_gradient_global_tag("fcn_to_grn_norm_ratio")] = _safe_ratio(
+            metrics[_gradient_family_tag("fcn", "total_norm")],
+            metrics[_gradient_family_tag("grn", "total_norm")],
         )
 
         # The fusion-interpretation layer complements the raw branch norms with
@@ -682,27 +746,43 @@ class GradientStatsCallback(Callback):
         # major branch receiving much more gradient signal than the others?"
         gradient_dominance_families = ("tcn3", "tcn5", "tcn7", "tft")
         gradient_dominance_values = [
-            metrics[f"debug/{family_name}_grad_total_norm"]
+            metrics[_gradient_family_tag(family_name, "total_norm")]
             for family_name in gradient_dominance_families
         ]
-        metrics["debug/tft_to_tcn_max_grad_norm_ratio"] = _safe_ratio(
-            metrics["debug/tft_grad_total_norm"],
-            metrics["debug/tcn_branch_grad_norm_max"],
+        metrics[_gradient_global_tag("tft_to_tcn_max_norm_ratio")] = _safe_ratio(
+            metrics[_gradient_family_tag("tft", "total_norm")],
+            metrics[_gradient_global_tag("tcn_branch_norm_max")],
         )
-        metrics["debug/tcn_branch_grad_norm_spread_ratio"] = _safe_ratio(
-            metrics["debug/tcn_branch_grad_norm_max"],
-            metrics["debug/tcn_branch_grad_norm_min"],
+        metrics[_gradient_global_tag("tcn_branch_norm_spread_ratio")] = _safe_ratio(
+            metrics[_gradient_global_tag("tcn_branch_norm_max")],
+            metrics[_gradient_global_tag("tcn_branch_norm_min")],
         )
-        metrics["debug/fusion_branch_grad_dominance_ratio"] = _safe_ratio(
+        metrics[_gradient_global_tag("fusion_branch_dominance_ratio")] = _safe_ratio(
             max(gradient_dominance_values),
             min(gradient_dominance_values),
         )
-        metrics["debug/fusion_branch_grad_dominance_warning"] = (
+        metrics[_gradient_global_tag("fusion_branch_dominance_warning")] = (
             1.0
-            if metrics["debug/fusion_branch_grad_dominance_ratio"]
+            if metrics[_gradient_global_tag("fusion_branch_dominance_ratio")]
             >= _FUSION_DOMINANCE_WARN_RATIO
             else 0.0
         )
+
+        # Promote only a very small set of aggregate health signals into the
+        # dashboard namespace. These are intended to answer "is anything
+        # obviously wrong?" without replacing the richer debug drill-down.
+        metrics[_dashboard_health_tag("grad_global_norm")] = metrics[
+            _gradient_global_tag("total_norm")
+        ]
+        metrics[_dashboard_health_tag("grad_nonfinite_parameters")] = metrics[
+            _gradient_global_tag("nonfinite_grad_parameters")
+        ]
+        metrics[_dashboard_health_tag("gradient_fusion_branch_dominance_ratio")] = (
+            metrics[_gradient_global_tag("fusion_branch_dominance_ratio")]
+        )
+        metrics[_dashboard_health_tag("gradient_fusion_branch_warning")] = metrics[
+            _gradient_global_tag("fusion_branch_dominance_warning")
+        ]
 
         log_metrics_to_loggers(trainer, metrics, step=trainer.global_step)
 
@@ -791,23 +871,23 @@ class ActivationStatsCallback(Callback):
         self._latest_module_stats[module_name] = stats
 
         for stat_name, value in stats.items():
-            self._pending_metrics[f"activation/{module_name}_{stat_name}"] = value
+            self._pending_metrics[_activation_module_tag(module_name, stat_name)] = value
 
         # A high near-zero fraction alone is not enough to call an activation
         # dead, because some layers or masks may legitimately produce many small
         # values. We therefore also require an extremely small standard
         # deviation before raising the deadness indicator. The helper keeps the
         # policy shared with the later branch-level fusion summary.
-        self._pending_metrics[f"activation/{module_name}_deadness_indicator"] = (
+        self._pending_metrics[_activation_module_tag(module_name, "deadness_indicator")] = (
             1.0 if _branch_is_near_dead(stats) else 0.0
         )
 
         # Non-finite outputs are always worth surfacing directly because they
         # are strong evidence of numerical instability, broken preprocessing, or
         # an invalid operation somewhere upstream.
-        self._pending_metrics[f"activation/{module_name}_nonfinite_indicator"] = (
-            1.0 if stats["finite_fraction"] < 1.0 else 0.0
-        )
+        self._pending_metrics[
+            _activation_module_tag(module_name, "nonfinite_indicator")
+        ] = (1.0 if stats["finite_fraction"] < 1.0 else 0.0)
 
     def _stage_branch_comparison_metrics(self) -> None:
         """Derive architecture-level comparison metrics from staged activations.
@@ -847,88 +927,130 @@ class ActivationStatsCallback(Callback):
                 for name in required_tcn_modules
             ]
 
-            self._pending_metrics["activation/tcn_abs_mean_mean"] = (
+            self._pending_metrics[_activation_summary_tag("tcn_abs_mean_mean")] = (
                 sum(tcn_abs_means) / float(len(tcn_abs_means))
             )
-            self._pending_metrics["activation/tcn_abs_mean_max"] = max(tcn_abs_means)
-            self._pending_metrics["activation/tcn_abs_mean_min"] = min(tcn_abs_means)
-            self._pending_metrics["activation/tcn_std_mean"] = (
+            self._pending_metrics[_activation_summary_tag("tcn_abs_mean_max")] = max(
+                tcn_abs_means
+            )
+            self._pending_metrics[_activation_summary_tag("tcn_abs_mean_min")] = min(
+                tcn_abs_means
+            )
+            self._pending_metrics[_activation_summary_tag("tcn_std_mean")] = (
                 sum(tcn_stds) / float(len(tcn_stds))
             )
-            self._pending_metrics["activation/tcn_std_max"] = max(tcn_stds)
-            self._pending_metrics["activation/tcn_std_min"] = min(tcn_stds)
+            self._pending_metrics[_activation_summary_tag("tcn_std_max")] = max(
+                tcn_stds
+            )
+            self._pending_metrics[_activation_summary_tag("tcn_std_min")] = min(
+                tcn_stds
+            )
 
             # Energy and RMS summaries provide a stronger signal for fusion
             # interpretation than abs-mean alone because they more directly
             # reflect the magnitude carried by each branch representation.
-            self._pending_metrics["activation/tcn_energy_mean"] = (
+            self._pending_metrics[_activation_summary_tag("tcn_energy_mean")] = (
                 sum(tcn_energies) / float(len(tcn_energies))
             )
-            self._pending_metrics["activation/tcn_energy_max"] = max(tcn_energies)
-            self._pending_metrics["activation/tcn_energy_min"] = min(tcn_energies)
-            self._pending_metrics["activation/tcn_rms_mean"] = (
+            self._pending_metrics[_activation_summary_tag("tcn_energy_max")] = max(
+                tcn_energies
+            )
+            self._pending_metrics[_activation_summary_tag("tcn_energy_min")] = min(
+                tcn_energies
+            )
+            self._pending_metrics[_activation_summary_tag("tcn_rms_mean")] = (
                 sum(tcn_rms_values) / float(len(tcn_rms_values))
             )
-            self._pending_metrics["activation/tcn_rms_max"] = max(tcn_rms_values)
-            self._pending_metrics["activation/tcn_rms_min"] = min(tcn_rms_values)
-            self._pending_metrics["activation/tcn_energy_spread_ratio"] = _safe_ratio(
-                self._pending_metrics["activation/tcn_energy_max"],
-                self._pending_metrics["activation/tcn_energy_min"],
+            self._pending_metrics[_activation_summary_tag("tcn_rms_max")] = max(
+                tcn_rms_values
+            )
+            self._pending_metrics[_activation_summary_tag("tcn_rms_min")] = min(
+                tcn_rms_values
+            )
+            self._pending_metrics[
+                _activation_summary_tag("tcn_energy_spread_ratio")
+            ] = _safe_ratio(
+                self._pending_metrics[_activation_summary_tag("tcn_energy_max")],
+                self._pending_metrics[_activation_summary_tag("tcn_energy_min")],
             )
 
         if (
             "tft" in self._latest_module_stats
-            and "activation/tcn_abs_mean_mean" in self._pending_metrics
+            and _activation_summary_tag("tcn_abs_mean_mean") in self._pending_metrics
         ):
-            self._pending_metrics["activation/tft_to_tcn_abs_mean_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("tft_to_tcn_abs_mean_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["tft"]["abs_mean"],
-                self._pending_metrics["activation/tcn_abs_mean_mean"],
+                self._pending_metrics[_activation_summary_tag("tcn_abs_mean_mean")],
             )
-            self._pending_metrics["activation/tft_to_tcn_std_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("tft_to_tcn_std_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["tft"]["std"],
-                self._pending_metrics["activation/tcn_std_mean"],
+                self._pending_metrics[_activation_summary_tag("tcn_std_mean")],
             )
-            self._pending_metrics["activation/tft_to_tcn_energy_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("tft_to_tcn_energy_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["tft"]["energy"],
-                self._pending_metrics["activation/tcn_energy_mean"],
+                self._pending_metrics[_activation_summary_tag("tcn_energy_mean")],
             )
-            self._pending_metrics["activation/tft_to_tcn_rms_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("tft_to_tcn_rms_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["tft"]["rms"],
-                self._pending_metrics["activation/tcn_rms_mean"],
+                self._pending_metrics[_activation_summary_tag("tcn_rms_mean")],
             )
 
         if "grn" in self._latest_module_stats and "tft" in self._latest_module_stats:
-            self._pending_metrics["activation/grn_to_tft_abs_mean_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("grn_to_tft_abs_mean_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["grn"]["abs_mean"],
                 self._latest_module_stats["tft"]["abs_mean"],
             )
-            self._pending_metrics["activation/grn_to_tft_std_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("grn_to_tft_std_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["grn"]["std"],
                 self._latest_module_stats["tft"]["std"],
             )
-            self._pending_metrics["activation/grn_to_tft_energy_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("grn_to_tft_energy_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["grn"]["energy"],
                 self._latest_module_stats["tft"]["energy"],
             )
-            self._pending_metrics["activation/grn_to_tft_rms_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("grn_to_tft_rms_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["grn"]["rms"],
                 self._latest_module_stats["tft"]["rms"],
             )
 
         if "fcn" in self._latest_module_stats and "grn" in self._latest_module_stats:
-            self._pending_metrics["activation/fcn_to_grn_abs_mean_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("fcn_to_grn_abs_mean_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["fcn"]["abs_mean"],
                 self._latest_module_stats["grn"]["abs_mean"],
             )
-            self._pending_metrics["activation/fcn_to_grn_std_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("fcn_to_grn_std_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["fcn"]["std"],
                 self._latest_module_stats["grn"]["std"],
             )
-            self._pending_metrics["activation/fcn_to_grn_energy_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("fcn_to_grn_energy_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["fcn"]["energy"],
                 self._latest_module_stats["grn"]["energy"],
             )
-            self._pending_metrics["activation/fcn_to_grn_rms_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("fcn_to_grn_rms_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["fcn"]["rms"],
                 self._latest_module_stats["grn"]["rms"],
             )
@@ -942,13 +1064,15 @@ class ActivationStatsCallback(Callback):
                 continue
 
             is_near_dead = _branch_is_near_dead(self._latest_module_stats[module_name])
-            self._pending_metrics[f"activation/{module_name}_near_dead_indicator"] = (
-                1.0 if is_near_dead else 0.0
-            )
+            self._pending_metrics[
+                _activation_module_tag(module_name, "near_dead_indicator")
+            ] = (1.0 if is_near_dead else 0.0)
             dead_branch_count += 1.0 if is_near_dead else 0.0
 
-        self._pending_metrics["activation/near_dead_branch_count"] = dead_branch_count
-        self._pending_metrics["activation/near_dead_branch_warning"] = (
+        self._pending_metrics[_activation_summary_tag("near_dead_branch_count")] = (
+            dead_branch_count
+        )
+        self._pending_metrics[_activation_summary_tag("near_dead_branch_warning")] = (
             1.0 if dead_branch_count > 0.0 else 0.0
         )
 
@@ -966,19 +1090,25 @@ class ActivationStatsCallback(Callback):
                 self._latest_module_stats[module_name]["energy"]
                 for module_name in dominance_modules
             ]
-            self._pending_metrics["activation/fusion_branch_energy_max"] = max(
+            self._pending_metrics[_activation_summary_tag("fusion_branch_energy_max")] = max(
                 dominance_energies
             )
-            self._pending_metrics["activation/fusion_branch_energy_min"] = min(
+            self._pending_metrics[_activation_summary_tag("fusion_branch_energy_min")] = min(
                 dominance_energies
             )
-            self._pending_metrics["activation/fusion_branch_dominance_ratio"] = _safe_ratio(
-                self._pending_metrics["activation/fusion_branch_energy_max"],
-                self._pending_metrics["activation/fusion_branch_energy_min"],
+            self._pending_metrics[
+                _activation_summary_tag("fusion_branch_dominance_ratio")
+            ] = _safe_ratio(
+                self._pending_metrics[_activation_summary_tag("fusion_branch_energy_max")],
+                self._pending_metrics[_activation_summary_tag("fusion_branch_energy_min")],
             )
-            self._pending_metrics["activation/fusion_branch_dominance_warning"] = (
+            self._pending_metrics[
+                _activation_summary_tag("fusion_branch_dominance_warning")
+            ] = (
                 1.0
-                if self._pending_metrics["activation/fusion_branch_dominance_ratio"]
+                if self._pending_metrics[
+                    _activation_summary_tag("fusion_branch_dominance_ratio")
+                ]
                 >= _FUSION_DOMINANCE_WARN_RATIO
                 else 0.0
             )
@@ -990,11 +1120,15 @@ class ActivationStatsCallback(Callback):
                 self._latest_module_stats[name]["energy"]
                 for name in required_tcn_modules
             ]
-            self._pending_metrics["activation/tft_to_tcn_max_energy_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("tft_to_tcn_max_energy_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["tft"]["energy"],
                 max(tcn_branch_energies),
             )
-            self._pending_metrics["activation/tft_to_tcn_min_energy_ratio"] = _safe_ratio(
+            self._pending_metrics[
+                _activation_summary_tag("tft_to_tcn_min_energy_ratio")
+            ] = _safe_ratio(
                 self._latest_module_stats["tft"]["energy"],
                 min(tcn_branch_energies),
             )
@@ -1075,6 +1209,30 @@ class ActivationStatsCallback(Callback):
             return
 
         self._stage_branch_comparison_metrics()
+
+        # Promote a very small number of activation health summaries into the
+        # dashboard namespace before flushing the broader debug payload. The aim
+        # is to preserve the rich activation drill-down while still surfacing
+        # obvious branch-collapse signals on the front door.
+        promoted_metrics = {
+            _dashboard_health_tag("activation_near_dead_branch_count"): self._pending_metrics.get(
+                _activation_summary_tag("near_dead_branch_count"),
+                0.0,
+            ),
+            _dashboard_health_tag("activation_near_dead_branch_warning"): self._pending_metrics.get(
+                _activation_summary_tag("near_dead_branch_warning"),
+                0.0,
+            ),
+            _dashboard_health_tag("activation_fusion_branch_dominance_ratio"): self._pending_metrics.get(
+                _activation_summary_tag("fusion_branch_dominance_ratio"),
+                0.0,
+            ),
+            _dashboard_health_tag("activation_fusion_branch_warning"): self._pending_metrics.get(
+                _activation_summary_tag("fusion_branch_dominance_warning"),
+                0.0,
+            ),
+        }
+        self._pending_metrics.update(promoted_metrics)
 
         log_metrics_to_loggers(trainer, self._pending_metrics, step=trainer.global_step)
 

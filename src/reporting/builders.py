@@ -24,6 +24,24 @@ from __future__ import annotations
 #
 # In other words, this file computes the canonical shared-report payload once,
 # and downstream sinks should consume that payload rather than recomputing it.
+#
+# Dashboard-first enhancement note:
+# Earlier revisions of this builder already produced the core report surfaces
+# needed by downstream sinks, but the scalar/text packaging was still closer to
+# "generic report payload" than to "dashboard-first shared payload". The current
+# version keeps the same evaluation truth and table-building logic while adding
+# slightly more sink-friendly packaging:
+# - a few more explicit top-level scalar summaries derived from the canonical
+#   prediction table
+# - a compact dashboard-oriented overview text block
+# - a compact health/warning text block based only on already-built report
+#   surfaces
+#
+# Important compatibility rule:
+# This file still does *not* become a second evaluation layer. Any new scalar or
+# text surface added here must be derived from already-canonical report inputs:
+# prediction rows, grouped evaluation tables, and the structured evaluation
+# summary.
 
 from typing import Any, Sequence
 
@@ -474,6 +492,135 @@ def _build_glucose_range_overview(by_glucose_range: pd.DataFrame) -> str:
     return text
 
 
+def _build_dashboard_overview_text(
+    *,
+    prediction_table: pd.DataFrame,
+    evaluation_result: EvaluationResult | None,
+    by_horizon: pd.DataFrame,
+) -> str:
+    """Build one compact dashboard-first orientation block.
+
+    Context:
+        Downstream sinks such as TensorBoard benefit from a single concise text
+        panel that answers the first-pass questions:
+        - how much data is represented?
+        - what are the top-line metrics?
+        - how does horizon behavior look at a glance?
+
+    Important design note:
+        This helper does not invent new truth. It simply composes already-built
+        report surfaces into one compact overview string.
+    """
+    sample_count = len(prediction_table)
+    subject_count = (
+        int(prediction_table["subject_id"].nunique())
+        if "subject_id" in prediction_table
+        else 0
+    )
+    horizon_count = (
+        int(prediction_table["horizon_index"].nunique())
+        if "horizon_index" in prediction_table
+        else 0
+    )
+
+    if evaluation_result is None:
+        return (
+            "Dashboard overview: "
+            f"{sample_count} forecast row(s), {subject_count} subject(s), and "
+            f"{horizon_count} horizon step(s) are available, but structured "
+            "evaluation metrics are unavailable for this run."
+        )
+
+    summary = evaluation_result.summary
+    text = (
+        "Dashboard overview: "
+        f"{sample_count} forecast row(s), {subject_count} subject(s), and "
+        f"{horizon_count} horizon step(s). "
+        f"Top-line MAE={_format_optional_metric(summary.mae)}, "
+        f"RMSE={_format_optional_metric(summary.rmse)}, "
+        f"bias={_format_optional_metric(summary.bias)}, "
+        f"mean_interval_width={_format_optional_metric(summary.mean_interval_width)}, "
+        f"empirical_interval_coverage={_format_optional_metric(summary.empirical_interval_coverage)}."
+    )
+
+    if not by_horizon.empty:
+        sorted_horizon = _sorted_grouped_frame(by_horizon)
+        first_row = sorted_horizon.iloc[0]
+        last_row = sorted_horizon.iloc[-1]
+        text += (
+            " Horizon MAE spans from "
+            f"{_format_optional_metric(first_row.get('mae'))} at "
+            f"horizon={first_row.get('group_value')} to "
+            f"{_format_optional_metric(last_row.get('mae'))} at "
+            f"horizon={last_row.get('group_value')}."
+        )
+
+    return text
+
+
+def _build_health_warning_text(
+    *,
+    prediction_table: pd.DataFrame,
+    evaluation_result: EvaluationResult | None,
+) -> str:
+    """Build a compact warning/anomaly summary from canonical report inputs.
+
+    Context:
+        A dashboard-first sink benefits from one short "anything suspicious?"
+        text surface. This helper intentionally stays conservative and relies
+        only on already-canonical row-level and evaluation-level signals.
+    """
+    warning_parts: list[str] = []
+
+    if not prediction_table.empty:
+        if "residual" in prediction_table.columns:
+            residual_series = prediction_table["residual"]
+            if not bool(residual_series.isna().all()):
+                mean_abs_residual = float(residual_series.abs().mean())
+                warning_parts.append(
+                    "mean_abs_residual="
+                    f"{_format_optional_metric(mean_abs_residual)}"
+                )
+
+        if "prediction_interval_width" in prediction_table.columns:
+            width_series = prediction_table["prediction_interval_width"]
+            if not bool(width_series.isna().all()):
+                near_zero_fraction = float((width_series.abs() <= 1e-8).mean())
+                warning_parts.append(
+                    "near_zero_interval_fraction="
+                    f"{_format_optional_metric(near_zero_fraction)}"
+                )
+
+        # Finite checks on the canonical prediction table are a lightweight way
+        # to surface obviously broken numeric artifacts without revisiting raw
+        # tensors or model internals here.
+        numeric_frame = prediction_table.select_dtypes(include=["number"])
+        if not numeric_frame.empty:
+            nonfinite_count = int((~numeric_frame.applymap(pd.notna)).sum().sum())
+            if nonfinite_count > 0:
+                warning_parts.append(f"nonfinite_numeric_cells={nonfinite_count}")
+
+    if evaluation_result is not None:
+        summary = evaluation_result.summary
+        coverage = summary.empirical_interval_coverage
+        if coverage is not None and not pd.isna(coverage):
+            # Coverage outside [0, 1] would be suspicious for an empirical
+            # coverage measure and therefore worth surfacing prominently.
+            if float(coverage) < 0.0 or float(coverage) > 1.0:
+                warning_parts.append(
+                    "coverage_out_of_range="
+                    f"{_format_optional_metric(coverage)}"
+                )
+
+    if not warning_parts:
+        return (
+            "No immediate high-level report warnings were derived from the "
+            "canonical shared-report surfaces."
+        )
+
+    return "High-level report health summary: " + "; ".join(warning_parts) + "."
+
+
 def _build_report_text(
     *,
     prediction_table: pd.DataFrame,
@@ -541,6 +688,15 @@ def _build_report_text(
     # These richer interpretation blocks are intentionally compact. They add
     # sink-ready narrative value without moving plotting or metric-computation
     # responsibilities into the builder.
+    text["dashboard_overview"] = _build_dashboard_overview_text(
+        prediction_table=prediction_table,
+        evaluation_result=evaluation_result,
+        by_horizon=by_horizon,
+    )
+    text["health_warning_overview"] = _build_health_warning_text(
+        prediction_table=prediction_table,
+        evaluation_result=evaluation_result,
+    )
     text["horizon_overview"] = _build_horizon_overview(by_horizon)
     text["probabilistic_overview"] = _build_probabilistic_overview(
         evaluation_result=evaluation_result,
@@ -585,6 +741,8 @@ def build_shared_report(
                 "dataset_overview": "Shared report is empty because no prediction batches were provided.",
                 "metric_overview": "No evaluation summary is available because no prediction batches were provided.",
                 "quantile_overview": "Quantile configuration is unavailable because no prediction batches were provided.",
+                "dashboard_overview": "Dashboard overview is unavailable because no prediction batches were provided.",
+                "health_warning_overview": "No high-level health summary is available because no prediction batches were provided.",
                 "horizon_overview": "Forecast-horizon grouped metrics are unavailable because no prediction batches were provided.",
                 "probabilistic_overview": "Probabilistic grouped interpretation is unavailable because no prediction batches were provided.",
                 "subject_variability_overview": "Subject-level grouped metrics are unavailable because no prediction batches were provided.",
@@ -631,6 +789,40 @@ def build_shared_report(
         if "horizon_index" in prediction_table
         else 0
     )
+
+    # Package a few additional flat scalars from the already-built prediction
+    # table. These remain packaging helpers only; they do not alter the
+    # evaluation layer's source-of-truth metrics.
+    if not prediction_table.empty:
+        if "residual" in prediction_table.columns:
+            residual_series = prediction_table["residual"]
+            if not bool(residual_series.isna().all()):
+                scalars["mean_abs_residual"] = float(residual_series.abs().mean())
+                scalars["residual_std"] = float(residual_series.std(ddof=0))
+
+        if "prediction_interval_width" in prediction_table.columns:
+            width_series = prediction_table["prediction_interval_width"]
+            if not bool(width_series.isna().all()):
+                scalars["mean_prediction_interval_width_from_rows"] = float(
+                    width_series.mean()
+                )
+                scalars["near_zero_interval_fraction"] = float(
+                    (width_series.abs() <= 1e-8).mean()
+                )
+
+        # Prediction/target scale summaries are lightweight dashboard-friendly
+        # context and are derived directly from the canonical flat row table.
+        if "target" in prediction_table.columns:
+            target_series = prediction_table["target"]
+            if not bool(target_series.isna().all()):
+                scalars["target_mean"] = float(target_series.mean())
+                scalars["target_std"] = float(target_series.std(ddof=0))
+
+        if "median_prediction" in prediction_table.columns:
+            prediction_series = prediction_table["median_prediction"]
+            if not bool(prediction_series.isna().all()):
+                scalars["prediction_mean"] = float(prediction_series.mean())
+                scalars["prediction_std"] = float(prediction_series.std(ddof=0))
 
     text = _build_report_text(
         prediction_table=prediction_table,

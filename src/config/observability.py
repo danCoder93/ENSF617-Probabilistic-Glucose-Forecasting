@@ -43,10 +43,24 @@ from __future__ import annotations
 # In other words, this file says what observability we want, not how each
 # callback achieves it.
 #
+# Dashboard-first cleanup note:
+# The repository now distinguishes more clearly between several TensorBoard
+# presentation layers:
+# - `dashboard/*` for the small front-door summary surface
+# - `text/*` for orientation and interpretation panels
+# - `debug/*` for drill-down numerical and parameter diagnostics
+# - `system/*` for runtime and device telemetry
+#
+# This config object still controls the same underlying observability features,
+# but several comments below now make that presentation split explicit. The
+# intent is to keep the code and configuration language aligned without adding
+# unnecessary new flags.
+#
 # AI generation disclaimer:
 # This file was patched with AI assistance, but the patch is intentionally
 # conservative: it preserves the current repo structure and behavior while
-# adding one new callback-policy flag for prediction-semantic diagnostics.
+# refining the documentation so the config descriptions better match the
+# dashboard-first observability layout.
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -124,8 +138,12 @@ class ObservabilityConfig:
     #
     # `enable_tensorboard`
     # Enables TensorBoard-backed logging when the surrounding workflow wires
-    # a TensorBoard logger. This is the main structured surface for scalar
-    # metrics, text summaries, model graphs, and images.
+    # a TensorBoard logger. Under the current dashboard-first layout,
+    # TensorBoard may contain several organized surfaces:
+    # - `dashboard/*` for the front-door summary view
+    # - `text/*` for interpretation and orientation panels
+    # - `debug/*` for drill-down diagnostics
+    # - `system/*` for runtime telemetry
     #
     # `enable_text_logging`
     # Enables plain-text log emission for human-readable event streams and
@@ -171,15 +189,20 @@ class ObservabilityConfig:
     # into run progress.
     #
     # `enable_system_telemetry`
-    # Enables the repo's custom host/device telemetry callback, which writes
-    # resource metrics into logger backends and CSV/text artifacts.
+    # Enables the repo's custom host/device telemetry callback. Under the
+    # dashboard-first namespace policy, these metrics now live under
+    # `system/*` rather than being mixed into model-quality or parameter
+    # drill-down namespaces.
     #
     # `enable_parameter_histograms`
     # Enables heavier parameter/gradient histogram logging. Useful for deep
-    # inspection, but potentially noisy and more expensive.
+    # inspection, but potentially noisy and more expensive. These are
+    # drill-down artifacts, not front-door dashboard content.
     #
     # `enable_parameter_scalars`
     # Enables lighter-weight per-parameter scalar summaries such as norms.
+    # These now live in `debug/parameters/*` and are intentionally treated as
+    # drill-down telemetry rather than dashboard-first metrics.
     #
     # `enable_prediction_sanity`
     # Enables sampled prediction-semantic diagnostics that check whether the
@@ -197,15 +220,19 @@ class ObservabilityConfig:
     # useful for quickly judging whether model outputs look plausible.
     #
     # `enable_model_graph`
-    # Enables TensorBoard-native graph logging when possible.
+    # Enables TensorBoard-native graph logging when possible. These artifacts
+    # are model-structure surfaces, not dashboard-first metric panels.
     #
     # `enable_model_text`
     # Enables plain-text model architecture dumps, usually via `repr(model)`.
+    # Under the updated layout, these are typically surfaced under
+    # `text/model/*`.
     #
     # `enable_torchview`
     # Enables the static torchview/Graphviz export path. This is useful for
     # architecture visualization, but it is intentionally best-effort and
-    # separate from actual runtime training logic.
+    # separate from actual runtime training logic. Under the updated layout,
+    # these artifacts are treated as `debug/model/*` drill-down surfaces.
     #
     # `enable_profiler`
     # Enables profiler integration when the broader workflow supports it.
@@ -234,12 +261,16 @@ class ObservabilityConfig:
     # `enable_gradient_stats`
     # Enables sampled gradient-health summaries. In the current repo this is
     # especially valuable for confirming that major fused-model branches are
-    # actually receiving gradient signal.
+    # actually receiving gradient signal. Most of these traces live under
+    # `debug/gradients/*`, while only a very small promoted subset may also
+    # appear under `dashboard/health/*`.
     #
     # `enable_activation_stats`
     # Enables sampled activation summaries from selected high-level modules.
     # This is intentionally off by default in some configurations because
-    # forward-hook-based logging can add extra runtime cost and noise.
+    # forward-hook-based logging can add extra runtime cost and noise. Most
+    # of these traces live under `debug/activations/*`, with only a very
+    # small promoted subset feeding dashboard health summaries.
     #
     # `enable_batch_audit`
     # Enables one-time or capped batch schema / contract summaries. This is
@@ -262,7 +293,8 @@ class ObservabilityConfig:
     #
     # `enable_plot_reports`
     # Enables saved report plots and richer visual run summaries where the
-    # workflow supports them.
+    # workflow supports them. These are post-run presentation artifacts and
+    # complement, rather than replace, the live TensorBoard surfaces.
     enable_prediction_exports: bool = True
     enable_plot_reports: bool = True
 

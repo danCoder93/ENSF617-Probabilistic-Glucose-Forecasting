@@ -25,6 +25,24 @@ from __future__ import annotations
 #
 # In other words, this file is a presentation sink. It should visualize already
 # packaged reporting surfaces, not quietly become a second metric engine.
+#
+# Dashboard-first enhancement note:
+# Earlier revisions of this sink already rendered useful HTML artifacts, but
+# the figure set was still organized more as a loose collection of plots than as
+# a deliberate front-door plus drill-down reporting surface. The current
+# version preserves the same underlying report inputs and HTML outputs while
+# tightening the interpretation structure:
+# - forecast overview remains the front-door qualitative figure
+# - horizon plots are kept separate by diagnostic purpose
+# - subject and glucose-range plots stay grouped and canonical
+# - comments now explain more clearly why each artifact exists and when it is
+#   intentionally omitted
+#
+# Important compatibility rule:
+# This sink still consumes the canonical `SharedReport` when available and still
+# supports compatibility fallback to a prediction-table CSV. The enhancement is
+# about clearer packaging and commentary, not about redefining the reporting
+# truth.
 
 from pathlib import Path
 
@@ -139,6 +157,22 @@ def _build_grouped_metrics_frame(
     return frame
 
 
+def _forecast_overview_subject_ids(frame: pd.DataFrame, max_subjects: int) -> list[str]:
+    """Return the capped list of subject ids used in the overview figure.
+
+    Context:
+        The forecast overview is intentionally a sample-based qualitative front
+        door rather than an exhaustive all-subject rendering. Keeping this
+        selection in one helper makes that policy explicit.
+    """
+    return list(dict.fromkeys(frame["subject_id"].tolist()))[:max_subjects]
+
+
+def _quantile_columns(frame: pd.DataFrame) -> list[str]:
+    """Return the sorted prediction-quantile column names from the flat table."""
+    return sorted(column for column in frame.columns if str(column).startswith("pred_q"))
+
+
 def generate_plotly_reports(
     prediction_table_path: PathInput | None,
     *,
@@ -207,6 +241,11 @@ def generate_plotly_reports(
     # ------------------------------------------------------------------
     # 1. Residual histogram
     # ------------------------------------------------------------------
+    # This is one of the fastest sanity-check plots after a run because it
+    # shows:
+    # - whether residuals cluster tightly or spread widely
+    # - whether the error distribution is roughly centered
+    # - whether obvious heavy-tail behavior is present
     residual_histogram = px.histogram(
         frame,
         x="residual",
@@ -227,6 +266,9 @@ def generate_plotly_reports(
     # ------------------------------------------------------------------
     # 2. Horizon metrics figure
     # ------------------------------------------------------------------
+    # Horizon metrics belong to the canonical grouped-report surface. The
+    # Plotly sink therefore renders them only when the shared report supplied
+    # the grouped horizon table explicitly.
     horizon_metrics = _build_horizon_metrics_frame(shared_report=shared_report)
     if not horizon_metrics.empty:
         horizon_metrics_fig = go.Figure()
@@ -249,6 +291,9 @@ def generate_plotly_reports(
 
         mean_interval_width = horizon_metrics.get("mean_interval_width")
         if mean_interval_width is not None and not bool(mean_interval_width.isna().all()):
+            # Interval width is kept on a secondary axis so uncertainty scale
+            # can be inspected without visually overwhelming the core error
+            # traces.
             horizon_metrics_fig.add_trace(
                 go.Scatter(
                     x=horizon_metrics["horizon_index"],
@@ -355,6 +400,9 @@ def generate_plotly_reports(
     # ------------------------------------------------------------------
     # 3. Subject-level grouped metrics
     # ------------------------------------------------------------------
+    # Subject-level figures are intentionally canonical grouped-table renders.
+    # They help answer whether top-line performance is broad-based or driven by
+    # a smaller subset of subjects.
     by_subject = _build_grouped_metrics_frame(
         shared_report=shared_report,
         table_name="by_subject",
@@ -402,6 +450,9 @@ def generate_plotly_reports(
     # ------------------------------------------------------------------
     # 4. Glucose-range grouped metrics
     # ------------------------------------------------------------------
+    # This figure keeps the clinically meaningful glucose-range slice visible in
+    # the lightweight HTML sink. Like the subject figure, it must come from the
+    # canonical grouped report surface rather than being recomputed here.
     by_glucose_range = _build_grouped_metrics_frame(
         shared_report=shared_report,
         table_name="by_glucose_range",
@@ -450,8 +501,14 @@ def generate_plotly_reports(
     # ------------------------------------------------------------------
     # 5. Forecast overview figure
     # ------------------------------------------------------------------
+    # This is the qualitative front-door artifact for the HTML sink:
+    # - it shows real targets
+    # - it shows the median forecast
+    # - it optionally shows a prediction interval band
+    #
+    # The subject count is intentionally capped so the page remains readable.
     overview_fig = go.Figure()
-    subject_ids = list(dict.fromkeys(frame["subject_id"].tolist()))[:max_subjects]
+    subject_ids = _forecast_overview_subject_ids(frame, max_subjects)
     filtered = frame[frame["subject_id"].isin(subject_ids)].copy()
     filtered["timestamp"] = pd.to_datetime(filtered["timestamp"])
     filtered = filtered.sort_values(
@@ -459,9 +516,7 @@ def generate_plotly_reports(
         ascending=True,
     )
 
-    quantile_columns = sorted(
-        column for column in frame.columns if str(column).startswith("pred_q")
-    )
+    quantile_columns = _quantile_columns(frame)
     for subject_id in subject_ids:
         subject_frame = filtered.loc[filtered["subject_id"] == subject_id, :]
         if len(subject_frame) == 0:
@@ -487,6 +542,10 @@ def generate_plotly_reports(
         if len(quantile_columns) >= 2:
             lower = quantile_columns[0]
             upper = quantile_columns[-1]
+
+            # The interval is rendered as a stacked fill between upper and lower
+            # traces. Keeping it lightweight here matches the sink's "quick
+            # browse" role without adding heavier custom shading logic.
             overview_fig.add_trace(
                 go.Scatter(
                     x=subject_frame["timestamp"],

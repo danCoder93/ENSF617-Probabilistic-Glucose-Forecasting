@@ -22,6 +22,8 @@ from __future__ import annotations
 # - normalize logger/trainer inputs down to TensorBoard-compatible experiments
 # - log post-run scalars, text blocks, compact table previews, and a few
 #   lightweight matplotlib figures
+# - impose a dashboard-first TensorBoard information architecture without
+#   changing the underlying metric truth already computed elsewhere
 #
 # What does *not* live here:
 # - canonical metric computation
@@ -33,6 +35,23 @@ from __future__ import annotations
 # In other words, this file is a post-run sink. It should render the canonical
 # shared-report surface into TensorBoard, not quietly become a second
 # computation layer.
+#
+# Dashboard-first enhancement note:
+# Earlier versions of this module logged report outputs under a single broad
+# namespace. That preserved information, but it made TensorBoard feel like a raw
+# artifact dump rather than a readable dashboard.
+#
+# The current version keeps the same reporting inputs and figure/table support,
+# but reorganizes them into clearer presentation layers:
+# - `dashboard/*` for the front-door views a human should inspect first
+# - `text/*` for orientation, interpretation, and compact narrative summaries
+# - `report/*` for broader report-style previews that remain useful but should
+#   not dominate the first TensorBoard screen
+#
+# Important compatibility rule:
+# This module still consumes the same canonical `SharedReport`. The enhancement
+# is about curation, naming, and presentation—not about changing the truth of
+# the run.
 
 from io import StringIO
 from typing import Any, Iterable, Mapping, Sequence
@@ -124,6 +143,208 @@ def _tensorboard_experiments(logger_or_trainer: Any) -> list[Any]:
 
 
 # ============================================================================
+# Namespace / Tag Policy Helpers
+# ============================================================================
+# The helpers below encode the dashboard-first TensorBoard taxonomy used by this
+# sink.
+#
+# Why make the taxonomy explicit here:
+# - it keeps naming policy centralized instead of scattering string literals
+#   across scalar/text/figure logging paths
+# - it preserves backward reasoning about what should appear in the front door
+#   versus what should remain a broader report preview
+# - it makes future refinements easier because the presentation contract is easy
+#   to inspect in one place
+#
+# Important boundary:
+# These helpers reorganize already-computed report outputs. They do not change
+# metric truth or recompute evaluation.
+
+def _dashboard_base(namespace: str) -> str:
+    """Return the dashboard-first base namespace for curated front-door views.
+
+    Context:
+    callers may still choose a broader top-level namespace such as `report` for
+    compatibility. The dashboard surface should remain clearly separated from
+    that broader namespace so the TensorBoard front door feels intentional
+    rather than like a raw dump of every artifact type.
+    """
+    return f"{namespace}/dashboard"
+
+
+
+def _text_base(namespace: str) -> str:
+    """Return the base namespace used for narrative orientation panels.
+
+    Context:
+    text blocks are first-class parts of the dashboard design because they make
+    the run easier to interpret. They still deserve a dedicated text namespace
+    so they remain easy to browse in TensorBoard's text tab.
+    """
+    return f"{namespace}/text"
+
+
+
+def _report_base(namespace: str) -> str:
+    """Return the broader report namespace for previews and secondary surfaces.
+
+    Context:
+    not every report artifact belongs in the first dashboard impression.
+    Compact table previews and additional report text are still valuable, but
+    they are better treated as a secondary report surface than as primary
+    dashboard cards.
+    """
+    return f"{namespace}/report"
+
+
+
+def _scalar_dashboard_tag(key: str, *, namespace: str) -> str:
+    """Map one canonical scalar key onto a curated dashboard TensorBoard tag.
+
+    Context:
+    `SharedReport.scalars` already stores canonical scalar truth. The dashboard
+    layer's job is to present that truth through human-readable groups that make
+    TensorBoard easier to scan.
+
+    Mapping policy:
+    - known training/forecast/uncertainty/calibration/health metrics are placed
+      into explicit dashboard sections
+    - unknown scalar keys fall back to a general dashboard/report bucket so the
+      sink remains forward-compatible with new scalar fields
+    """
+    dashboard = _dashboard_base(namespace)
+
+    # Training-quality and forecast-error summaries should be the front door.
+    if key in {"mae", "rmse", "mape", "median_ae", "bias", "overall_pinball_loss"}:
+        return f"{dashboard}/forecast/{key}"
+
+    # Uncertainty-width summaries deserve their own dashboard family because the
+    # repo is probabilistic and interval behavior is a first-class concern.
+    if key in {"mean_interval_width", "median_interval_width"}:
+        return f"{dashboard}/uncertainty/{key}"
+
+    # Coverage-style metrics are calibration signals and should be grouped
+    # separately from generic uncertainty width.
+    if "coverage" in key:
+        return f"{dashboard}/calibration/{key}"
+
+    # Count-like or diagnostic summary scalars still matter, but they are better
+    # framed as health indicators than as forecast-quality metrics.
+    if any(token in key for token in ("count", "warning", "nonfinite", "nan", "dead", "dominance")):
+        return f"{dashboard}/health/{key}"
+
+    # Prediction-table-derived residual aggregates are useful front-door health
+    # signals even when they do not fit the stricter metric families above.
+    if any(token in key for token in ("residual", "error", "abs_")):
+        return f"{dashboard}/health/{key}"
+
+    # Unknown-but-valid scalar additions should still surface somewhere curated
+    # instead of silently disappearing. A general bucket keeps the sink forward-
+    # compatible while remaining more organized than one flat scalar namespace.
+    return f"{dashboard}/report/{key}"
+
+
+
+def _table_preview_tag(table_name: str, *, namespace: str) -> str:
+    """Return the text tag used for one compact table preview.
+
+    Context:
+    table previews are useful for schema discovery and quick inspection, but
+    they are not the first thing a human should see on the TensorBoard front
+    page. We therefore keep them under the broader report namespace.
+    """
+    return f"{_report_base(namespace)}/tables/{_table_display_title(table_name)}"
+
+
+
+def _report_text_tag(text_key: str, *, namespace: str) -> str:
+    """Return the tag used for one broader report text panel.
+
+    Context:
+    the canonical text sections remain valuable even after adding a curated
+    dashboard-first layer. These report text entries are kept under the report
+    namespace so they remain easy to browse without competing directly with the
+    smaller orientation panels.
+    """
+    return f"{_report_base(namespace)}/text/{_text_section_title(text_key)}"
+
+
+
+def _dashboard_text_items(shared_report: SharedReport) -> list[tuple[str, str]]:
+    """Build the small curated dashboard text surface from the shared report.
+
+    Purpose:
+    provide a handful of interpretation-first text panels that make TensorBoard
+    easier to read before a user drills into the broader report namespace.
+
+    Why this helper exists:
+    the shared report already contains several canonical narrative sections, but
+    the dashboard front door benefits from a smaller, more guided subset:
+    - an index/orientation panel
+    - a compact metadata/provenance panel
+    - a small set of the most explanatory report sections when they exist
+
+    Important boundary:
+    this helper only reorganizes existing text content and metadata. It does not
+    invent new evaluation truth.
+    """
+    items: list[tuple[str, str]] = []
+
+    # Orientation first: the dashboard should advertise what interpretive text
+    # is available before the user drills into the longer sections.
+    items.append(("Overview Index", _report_text_index(shared_report)))
+
+    # Metadata is part of the front door because provenance and run context are
+    # often the first questions users ask when revisiting an artifact.
+    items.append(("Run Metadata", _metadata_text(shared_report.metadata)))
+
+    # Prefer the most explanatory existing canonical panels as dashboard text.
+    for key, value in _ordered_report_text_items(shared_report):
+        if key in {
+            "dataset_overview",
+            "metric_overview",
+            "probabilistic_overview",
+            "horizon_overview",
+        }:
+            items.append((_text_section_title(key), value))
+
+    return items
+
+
+
+def _dashboard_figure_tag(figure_name: str, *, namespace: str) -> str:
+    """Map one internal figure key onto a dashboard-friendly figure tag.
+
+    Context:
+    figures are some of the highest-value front-door artifacts because they can
+    summarize multidimensional report behavior more clearly than many separate
+    scalar cards.
+
+    Mapping policy:
+    - example-style visuals go under `dashboard/examples`
+    - horizon/uncertainty/calibration views go under their more specific
+      dashboard sections
+    - anything else still remains on the dashboard, but in a generic report-like
+      bucket so the sink stays forward-compatible
+    """
+    dashboard = _dashboard_base(namespace)
+
+    if figure_name == "forecast_overview":
+        return f"{dashboard}/examples/{_figure_tag_name(figure_name)}"
+    if figure_name == "residual_histogram":
+        return f"{dashboard}/examples/{_figure_tag_name(figure_name)}"
+    if figure_name in {"horizon_metrics", "subject_mae", "subject_rmse", "glucose_range_mae"}:
+        return f"{dashboard}/forecast/{_figure_tag_name(figure_name)}"
+    if figure_name in {"horizon_uncertainty", "glucose_range_interval_width"}:
+        return f"{dashboard}/uncertainty/{_figure_tag_name(figure_name)}"
+    if figure_name in {"glucose_range_coverage"}:
+        return f"{dashboard}/calibration/{_figure_tag_name(figure_name)}"
+    if figure_name in {"horizon_bias", "subject_bias", "glucose_range_bias"}:
+        return f"{dashboard}/health/{_figure_tag_name(figure_name)}"
+    return f"{dashboard}/report/{_figure_tag_name(figure_name)}"
+
+
+# ============================================================================
 # Text / Table Formatting Helpers
 # ============================================================================
 # TensorBoard's text surface is useful for compact narrative summaries and
@@ -149,6 +370,7 @@ def _metadata_text(metadata: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+
 def _table_display_title(table_name: str) -> str:
     """
     Convert an internal shared-report table key into a more readable title.
@@ -165,6 +387,7 @@ def _table_display_title(table_name: str) -> str:
         "by_glucose_range": "Glucose-Range Summary Table",
     }
     return titles.get(table_name, table_name.replace("_", " ").title())
+
 
 
 def _frame_preview_text(
@@ -200,6 +423,7 @@ def _frame_preview_text(
     return f"{display_title} ({row_suffix})\n\n```\n{buffer.getvalue()}\n```"
 
 
+
 def _ordered_report_text_items(shared_report: SharedReport) -> list[tuple[str, str]]:
     """
     Return report text items in a deterministic interpretation-first order.
@@ -233,6 +457,7 @@ def _ordered_report_text_items(shared_report: SharedReport) -> list[tuple[str, s
     return [(key, shared_report.text[key]) for key in ordered_keys]
 
 
+
 def _report_text_index(shared_report: SharedReport) -> str:
     """
     Build a lightweight index describing which canonical text panels are present.
@@ -256,6 +481,7 @@ def _report_text_index(shared_report: SharedReport) -> str:
     return "\n".join(lines)
 
 
+
 def _text_section_title(text_key: str) -> str:
     """
     Convert an internal report-text key into a more readable section title.
@@ -276,6 +502,7 @@ def _text_section_title(text_key: str) -> str:
         "index": "Index",
     }
     return titles.get(text_key, text_key.replace("_", " ").title())
+
 
 
 def _figure_tag_name(figure_name: str) -> str:
@@ -309,20 +536,28 @@ def _figure_tag_name(figure_name: str) -> str:
 # ============================================================================
 # These helpers each log one aspect of the shared report. Keeping them separate
 # makes the public sink easier to read and keeps each responsibility explicit.
-def _log_shared_report_scalars(
+def _log_dashboard_scalars(
     *,
     experiments: Sequence[Any],
     shared_report: SharedReport,
     global_step: int,
     namespace: str,
 ) -> None:
-    """
-    Log scalar entries from `SharedReport.scalars` into TensorBoard.
+    """Log curated shared-report scalars into the dashboard namespace.
 
     Context:
     these are the most dashboard-friendly report outputs. They are already
     packaged by the reporting builders, so this sink should only mirror them
     into TensorBoard rather than recomputing them.
+
+    Enhancement note:
+    this helper replaces the older flat `scalars/*` presentation with a curated
+    dashboard hierarchy so the TensorBoard front door better reflects the kinds
+    of questions users ask first:
+    - how good is the forecast?
+    - how wide are the intervals?
+    - how well calibrated are they?
+    - does the run look healthy?
     """
     if not experiments or not shared_report.scalars:
         return
@@ -334,11 +569,39 @@ def _log_shared_report_scalars(
         if value is None:
             continue
 
-        tag = f"{namespace}/scalars/{key}"
+        tag = _scalar_dashboard_tag(key, namespace=namespace)
         for experiment in experiments:
             add_scalar = getattr(experiment, "add_scalar", None)
             if callable(add_scalar):
                 add_scalar(tag, value, global_step=global_step)
+
+
+
+def _log_dashboard_text(
+    *,
+    experiments: Sequence[Any],
+    shared_report: SharedReport,
+    global_step: int,
+    namespace: str,
+) -> None:
+    """Log a small curated front-door text surface for the dashboard.
+
+    Context:
+    a dashboard-first TensorBoard layout needs lightweight interpretation and
+    provenance text near the front door. The canonical report text remains
+    available in the broader report namespace, but this helper selects the most
+    explanatory subset for the first-pass view.
+    """
+    if not experiments:
+        return
+
+    for section_title, payload in _dashboard_text_items(shared_report):
+        tag = f"{_text_base(namespace)}/overview/{section_title}"
+        for experiment in experiments:
+            add_text = getattr(experiment, "add_text", None)
+            if callable(add_text):
+                add_text(tag, payload, global_step=global_step)
+
 
 
 def _log_shared_report_text(
@@ -348,32 +611,28 @@ def _log_shared_report_text(
     global_step: int,
     namespace: str,
 ) -> None:
-    """
-    Log narrative text blocks and metadata summaries into TensorBoard.
+    """Log the broader canonical report-text surface into TensorBoard.
 
     Context:
-    the reporting package intentionally builds small factual text summaries in
-    `SharedReport.text`. TensorBoard text panes are a natural home for those
-    summaries because they make the report more interpretable without requiring
-    a separate document or notebook.
+    the dashboard text panels are intentionally small and guided. This helper
+    preserves the richer report-style text surface for users who want to inspect
+    the full narrative packaging already built by the shared report.
     """
     if not experiments:
         return
 
-    # Log a small orientation panel first so the text tab advertises the
-    # available report sections in a stable top-level location.
     report_text_index = _report_text_index(shared_report)
     for experiment in experiments:
         add_text = getattr(experiment, "add_text", None)
         if callable(add_text):
             add_text(
-                f"{namespace}/text/{_text_section_title('index')}",
+                _report_text_tag("index", namespace=namespace),
                 report_text_index,
                 global_step=global_step,
             )
 
     for key, value in _ordered_report_text_items(shared_report):
-        tag = f"{namespace}/text/{_text_section_title(key)}"
+        tag = _report_text_tag(key, namespace=namespace)
         for experiment in experiments:
             add_text = getattr(experiment, "add_text", None)
             if callable(add_text):
@@ -384,10 +643,11 @@ def _log_shared_report_text(
         add_text = getattr(experiment, "add_text", None)
         if callable(add_text):
             add_text(
-                f"{namespace}/text/{_text_section_title('metadata')}",
+                _report_text_tag("metadata", namespace=namespace),
                 metadata_text,
                 global_step=global_step,
             )
+
 
 
 def _log_shared_report_tables(
@@ -398,13 +658,17 @@ def _log_shared_report_tables(
     namespace: str,
     max_rows: int,
 ) -> None:
-    """
-    Log compact preview text for each shared-report table.
+    """Log compact preview text for each shared-report table.
 
     Context:
     TensorBoard does not provide a full spreadsheet-style table viewer. The
     pragmatic compromise is to log small previews as text blocks so users can
     quickly inspect the schema and the first few rows of each table.
+
+    Dashboard-placement note:
+    table previews remain intentionally outside the main dashboard front door.
+    They are valuable for inspection, but they are secondary report artifacts,
+    not the first thing that should dominate the TensorBoard experience.
     """
     if not experiments or not shared_report.tables:
         return
@@ -415,7 +679,7 @@ def _log_shared_report_tables(
             name=table_name,
             max_rows=max_rows,
         )
-        tag = f"{namespace}/tables/{_table_display_title(table_name)}"
+        tag = _table_preview_tag(table_name, namespace=namespace)
         for experiment in experiments:
             add_text = getattr(experiment, "add_text", None)
             if callable(add_text):
@@ -459,6 +723,7 @@ def _build_residual_histogram_figure(shared_report: SharedReport) -> Any | None:
     return figure
 
 
+
 def _normalized_grouped_frame(
     shared_report: SharedReport,
     *,
@@ -483,6 +748,7 @@ def _normalized_grouped_frame(
     # horizon views and deterministic for subgroup bar charts.
     frame = frame.sort_values(by=["group_value"]).reset_index(drop=True)
     return frame
+
 
 
 def _build_horizon_metrics_figure(shared_report: SharedReport) -> Any | None:
@@ -521,6 +787,7 @@ def _build_horizon_metrics_figure(shared_report: SharedReport) -> Any | None:
     axes.legend()
     figure.tight_layout()
     return figure
+
 
 
 def _build_horizon_uncertainty_figure(shared_report: SharedReport) -> Any | None:
@@ -598,6 +865,7 @@ def _build_horizon_uncertainty_figure(shared_report: SharedReport) -> Any | None
     return figure
 
 
+
 def _build_horizon_bias_figure(shared_report: SharedReport) -> Any | None:
     """Build a horizon-wise bias and pinball-loss figure.
 
@@ -661,6 +929,7 @@ def _build_horizon_bias_figure(shared_report: SharedReport) -> Any | None:
     return figure
 
 
+
 def _group_axis_label(table_name: str) -> str:
     """
     Return a readable x-axis label for grouped bar figures.
@@ -675,6 +944,7 @@ def _group_axis_label(table_name: str) -> str:
         "by_glucose_range": "Glucose Range",
     }
     return labels.get(table_name, "Group")
+
 
 
 def _build_grouped_bar_figure(
@@ -725,6 +995,7 @@ def _build_grouped_bar_figure(
 
     figure.tight_layout()
     return figure
+
 
 
 def _build_forecast_overview_figure(
@@ -812,6 +1083,7 @@ def _build_forecast_overview_figure(
     axes.legend()
     figure.tight_layout()
     return figure
+
 
 
 def _iter_report_figures(
@@ -928,7 +1200,8 @@ def _iter_report_figures(
         yield "forecast_overview", forecast_overview
 
 
-def _log_shared_report_figures(
+
+def _log_dashboard_figures(
     *,
     experiments: Sequence[Any],
     shared_report: SharedReport,
@@ -936,14 +1209,17 @@ def _log_shared_report_figures(
     namespace: str,
     max_subjects: int,
 ) -> None:
-    """
-    Log a small set of matplotlib figures derived from the shared report.
+    """Log curated report figures into dashboard-oriented namespaces.
 
     Context:
-    figure generation is intentionally conservative here:
-    - it uses already-packaged report tables
-    - it generates only a few stable high-value figures
-    - it degrades gracefully if matplotlib is unavailable
+    figures are among the most interpretable post-run surfaces because they can
+    communicate multi-dimensional forecast behavior more effectively than a long
+    flat list of scalar cards.
+
+    Enhancement note:
+    the figure-generation logic itself remains unchanged. The enhancement here is
+    the presentation layer: figure tags now reflect whether the figure is about
+    examples, forecast quality, uncertainty, calibration, or health.
     """
     if not experiments:
         return
@@ -952,7 +1228,7 @@ def _log_shared_report_figures(
         shared_report,
         max_subjects=max_subjects,
     ):
-        tag = f"{namespace}/figures/{_figure_tag_name(figure_name)}"
+        tag = _dashboard_figure_tag(figure_name, namespace=namespace)
         for experiment in experiments:
             add_figure = getattr(experiment, "add_figure", None)
             if callable(add_figure):
@@ -1022,18 +1298,45 @@ def log_shared_report_to_tensorboard(
     - if a specific artifact type cannot be rendered, the rest of the sink
       continues
     - it should never become a reason for the training workflow to fail
+
+    Dashboard-first enhancement summary:
+    this function now performs multiple conceptually separate passes so the
+    resulting TensorBoard experience is easier to navigate:
+    - dashboard scalars for first-pass quantitative inspection
+    - dashboard text for orientation and provenance
+    - dashboard figures for high-value visual interpretation
+    - broader report text and table previews for deeper inspection
+
+    Important compatibility note:
+    the function name and call contract stay unchanged so the workflow layer can
+    continue using the same integration point while benefiting from the improved
+    organization.
     """
     experiments = _tensorboard_experiments(logger_or_trainer)
     if not experiments:
         return False
 
-    # Scalars, text, tables, and figures are logged in separate passes so each
-    # artifact family remains conceptually independent and easier to maintain.
-    _log_shared_report_scalars(
+    # The logging passes are intentionally separated by artifact family so the
+    # presentation contract remains easy to reason about and future patches can
+    # adjust one surface without disturbing the others.
+    _log_dashboard_scalars(
         experiments=experiments,
         shared_report=shared_report,
         global_step=global_step,
         namespace=namespace,
+    )
+    _log_dashboard_text(
+        experiments=experiments,
+        shared_report=shared_report,
+        global_step=global_step,
+        namespace=namespace,
+    )
+    _log_dashboard_figures(
+        experiments=experiments,
+        shared_report=shared_report,
+        global_step=global_step,
+        namespace=namespace,
+        max_subjects=max_forecast_subjects,
     )
     _log_shared_report_text(
         experiments=experiments,
@@ -1047,12 +1350,5 @@ def log_shared_report_to_tensorboard(
         global_step=global_step,
         namespace=namespace,
         max_rows=max_table_rows,
-    )
-    _log_shared_report_figures(
-        experiments=experiments,
-        shared_report=shared_report,
-        global_step=global_step,
-        namespace=namespace,
-        max_subjects=max_forecast_subjects,
     )
     return True

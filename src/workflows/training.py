@@ -36,9 +36,22 @@ from __future__ import annotations
 # - `reporting` handles post-run packaging and rendering once predictions exist
 #
 # The logic below intentionally preserves the existing workflow behavior and
-# artifact flow while switching the import boundary to the new reporting
-# package and adding the next planned enhancement: a TensorBoard sink that
-# consumes the canonical `SharedReport` after prediction/evaluation complete.
+# artifact flow while switching the import boundary to the reporting package.
+#
+# Dashboard-first enhancement note:
+# the reporting package now exposes a more curated TensorBoard sink that keeps
+# the richer post-run shared report intact while presenting it through clearer
+# dashboard/text/report layers. This workflow remains the correct place to call
+# that sink because it is the first layer that simultaneously has:
+# - the fitted model artifacts
+# - the held-out prediction batches
+# - the structured evaluation result
+# - the canonical `SharedReport`
+#
+# In other words, the enhancement remains architectural rather than ad hoc:
+# - callbacks still own live runtime visibility
+# - the workflow still owns post-run packaging orchestration
+# - the reporting package still owns post-run rendering
 
 import json
 from dataclasses import replace
@@ -82,15 +95,19 @@ from workflows.helpers import (
 from workflows.types import EnvironmentBenchmarkArtifacts, MainRunArtifacts
 
 if TYPE_CHECKING:
+    import logging
     import torch
 
     from evaluation import EvaluationResult
+    from reporting.types import SharedReport
     from train import CheckpointSelection, FitArtifacts, FusedModelTrainer
 else:
     CheckpointSelection = Any
     EvaluationResult = Any
     FitArtifacts = Any
     FusedModelTrainer = Any
+    SharedReport = Any
+    logging = Any
 
 try:
     from pytorch_lightning import seed_everything
@@ -330,6 +347,67 @@ def _collect_environment_benchmark_memory(
     return metrics
 
 
+def _log_post_run_shared_report_to_tensorboard(
+    *,
+    shared_report: SharedReport,
+    logger_or_trainer: Any,
+    max_forecast_subjects: int,
+    text_logger: logging.Logger | None = None,
+) -> bool:
+    """
+    Best-effort bridge from workflow-level post-run artifacts into TensorBoard.
+
+    Purpose:
+    centralize the workflow's call into the reporting package's TensorBoard
+    sink so the post-run logging policy stays readable and easy to evolve.
+
+    Context:
+    the workflow is the first layer that can see:
+    - the canonical shared report
+    - the active experiment logger surface
+    - the final run-stage decision that prediction/evaluation are complete
+
+    That makes it the correct place to perform the post-run TensorBoard handoff
+    without pushing reporting policy down into callbacks or model code.
+
+    Important compatibility rule:
+    this helper does not change metric truth, prediction flow, or evaluation
+    timing. It only standardizes the handoff into the reporting sink.
+
+    Namespace rule:
+    the reporting sink now internally organizes outputs into clearer
+    dashboard/text/report surfaces. We intentionally keep the top-level
+    namespace argument stable here so existing run layouts remain broadly
+    recognizable while the sink itself improves the internal information
+    architecture underneath that root.
+    """
+    from reporting import log_shared_report_to_tensorboard
+
+    # The sink itself is already best-effort. This helper simply keeps the
+    # workflow's intent explicit and provides a small optional text-log note so
+    # later readers can tell whether a TensorBoard-compatible logger was active.
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger_or_trainer,
+        global_step=0,
+        namespace="report",
+        max_table_rows=20,
+        max_forecast_subjects=max_forecast_subjects,
+    )
+
+    if text_logger is not None:
+        if logged:
+            text_logger.info(
+                "logged post-run shared report to TensorBoard using dashboard-first report sink"
+            )
+        else:
+            text_logger.info(
+                "skipped post-run TensorBoard report logging because no compatible TensorBoard experiment backend was active"
+            )
+
+    return logged
+
+
 def run_environment_benchmark_workflow(
     config: Config,
     *,
@@ -388,6 +466,10 @@ def run_environment_benchmark_workflow(
     benchmark_snapshot_config = replace(snapshot_config, enabled=False)
     # Benchmark runs intentionally disable most observability extras so the
     # timing reflects training throughput more than artifact generation.
+    #
+    # The prediction-sanity flag is also disabled here because benchmark mode is
+    # about keeping the loop lightweight; the goal is environment comparison,
+    # not semantic forecast forensics.
     benchmark_observability_config = replace(
         observability_config,
         enable_tensorboard=False,
@@ -399,6 +481,7 @@ def run_environment_benchmark_workflow(
         enable_system_telemetry=False,
         enable_parameter_histograms=False,
         enable_parameter_scalars=False,
+        enable_prediction_sanity=False,
         enable_prediction_figures=False,
         enable_model_graph=False,
         enable_model_text=False,
@@ -675,7 +758,6 @@ def run_training_workflow(
         build_shared_report,
         export_prediction_table_from_report,
         generate_plotly_reports,
-        log_shared_report_to_tensorboard,
     )
     from train import FusedModelTrainer as DefaultFusedModelTrainer
 
@@ -833,20 +915,24 @@ def run_training_workflow(
         # - callbacks/loggers handle live runtime observability
         # - the reporting package handles post-run packaging and rendering
         #
+        # Dashboard-first enhancement note:
+        # the TensorBoard sink itself now performs internal curation into
+        # dashboard/text/report layers. The workflow does not duplicate that
+        # curation logic here; it simply performs the one canonical handoff once
+        # the shared report exists.
+        #
         # Important safety note:
-        # `log_shared_report_to_tensorboard(...)` is intentionally best-effort.
-        # - if the active logger is not TensorBoard-compatible, it returns
-        #   `False`
+        # the sink remains intentionally best-effort.
+        # - if the active logger is not TensorBoard-compatible, logging is
+        #   skipped cleanly
         # - if a particular artifact family cannot be rendered, the rest of the
         #   workflow continues
         # - the call does not alter training, prediction, or evaluation logic
-        log_shared_report_to_tensorboard(
+        _log_post_run_shared_report_to_tensorboard(
             shared_report=shared_report,
             logger_or_trainer=active_logger,
-            global_step=0,
-            namespace="report",
-            max_table_rows=20,
             max_forecast_subjects=effective_observability_config.max_forecast_subjects_per_report,
+            text_logger=text_logger,
         )
 
         if output_dir is not None and save_predictions:
