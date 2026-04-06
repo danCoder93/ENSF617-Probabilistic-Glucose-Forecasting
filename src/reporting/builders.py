@@ -284,13 +284,9 @@ def _sorted_grouped_frame(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty or "group_value" not in frame.columns:
         return frame.copy()
 
-    sorted_frame = frame.copy()
-
     # Sorting by `group_value` keeps horizon summaries monotonic and also makes
     # subject/range summaries deterministic for repeated runs and tests.
-    sorted_frame.sort_values(by=["group_value"], inplace=True)
-    sorted_frame.reset_index(drop=True, inplace=True)
-    return sorted_frame
+    return frame.copy().sort_values(by=["group_value"]).reset_index(drop=True)
 
 
 def _build_horizon_overview(by_horizon: pd.DataFrame) -> str:
@@ -303,8 +299,9 @@ def _build_horizon_overview(by_horizon: pd.DataFrame) -> str:
     """
     if by_horizon.empty:
         return (
-            "Horizon-level grouped metrics are unavailable, so the shared report "
-            "cannot summarize horizon-wise error growth for this run."
+            "Forecast-horizon grouped metrics are unavailable, so the shared "
+            "report cannot summarize how error changes across the step-ahead "
+            "axis for this run."
         )
 
     frame = _sorted_grouped_frame(by_horizon)
@@ -312,11 +309,11 @@ def _build_horizon_overview(by_horizon: pd.DataFrame) -> str:
     last_row = frame.iloc[-1]
 
     text = (
-        "Across forecast horizon, "
-        f"MAE moves from {_format_optional_metric(first_row.get('mae'))} at "
-        f"group_value={first_row.get('group_value')} to "
+        "Across the forecast horizon, MAE changes from "
+        f"{_format_optional_metric(first_row.get('mae'))} at "
+        f"horizon={first_row.get('group_value')} to "
         f"{_format_optional_metric(last_row.get('mae'))} at "
-        f"group_value={last_row.get('group_value')}, while RMSE moves from "
+        f"horizon={last_row.get('group_value')}, while RMSE changes from "
         f"{_format_optional_metric(first_row.get('rmse'))} to "
         f"{_format_optional_metric(last_row.get('rmse'))}."
     )
@@ -326,8 +323,8 @@ def _build_horizon_overview(by_horizon: pd.DataFrame) -> str:
         if not bool(absolute_bias.isna().all()):
             bias_row = frame.loc[absolute_bias.idxmax()]
             text += (
-                " The largest absolute horizon bias appears at "
-                f"group_value={bias_row.get('group_value')} with bias="
+                " The largest absolute directional error appears at "
+                f"horizon={bias_row.get('group_value')} with bias="
                 f"{_format_optional_metric(bias_row.get('bias'))}."
             )
 
@@ -355,7 +352,7 @@ def _build_probabilistic_overview(
 
     summary = evaluation_result.summary
     text = (
-        "Probabilistic overview: overall_pinball_loss="
+        "Probabilistic forecast summary: overall_pinball_loss="
         f"{_format_optional_metric(summary.overall_pinball_loss)}, "
         "mean_interval_width="
         f"{_format_optional_metric(summary.mean_interval_width)}, "
@@ -371,9 +368,9 @@ def _build_probabilistic_overview(
             text += (
                 " Horizon-level empirical coverage ranges from "
                 f"{_format_optional_metric(coverage_min_row.get('empirical_interval_coverage'))} "
-                f"at group_value={coverage_min_row.get('group_value')} to "
+                f"at horizon={coverage_min_row.get('group_value')} to "
                 f"{_format_optional_metric(coverage_max_row.get('empirical_interval_coverage'))} "
-                f"at group_value={coverage_max_row.get('group_value')}."
+                f"at horizon={coverage_max_row.get('group_value')}."
             )
 
     if not by_horizon.empty and "mean_interval_width" in by_horizon.columns:
@@ -384,9 +381,9 @@ def _build_probabilistic_overview(
             text += (
                 " Horizon-level interval width ranges from "
                 f"{_format_optional_metric(width_min_row.get('mean_interval_width'))} "
-                f"at group_value={width_min_row.get('group_value')} to "
+                f"at horizon={width_min_row.get('group_value')} to "
                 f"{_format_optional_metric(width_max_row.get('mean_interval_width'))} "
-                f"at group_value={width_max_row.get('group_value')}."
+                f"at horizon={width_max_row.get('group_value')}."
             )
 
     return text
@@ -412,10 +409,10 @@ def _build_subject_variability_overview(by_subject: pd.DataFrame) -> str:
     mae_best_row = frame.loc[frame["mae"].idxmin()]
 
     text = (
-        "Across subjects, the lowest MAE appears at group_value="
+        "Across subjects, the lowest MAE appears at subject="
         f"{mae_best_row.get('group_value')} with MAE="
         f"{_format_optional_metric(mae_best_row.get('mae'))}, while the highest "
-        "MAE appears at group_value="
+        "MAE appears at subject="
         f"{mae_worst_row.get('group_value')} with MAE="
         f"{_format_optional_metric(mae_worst_row.get('mae'))}."
     )
@@ -425,7 +422,7 @@ def _build_subject_variability_overview(by_subject: pd.DataFrame) -> str:
         if not bool(absolute_bias.isna().all()):
             bias_row = frame.loc[absolute_bias.idxmax()]
             text += (
-                " The largest absolute subject bias appears at group_value="
+                " The largest absolute subject bias appears at subject="
                 f"{bias_row.get('group_value')} with bias="
                 f"{_format_optional_metric(bias_row.get('bias'))}."
             )
@@ -453,10 +450,10 @@ def _build_glucose_range_overview(by_glucose_range: pd.DataFrame) -> str:
     mae_best_row = frame.loc[frame["mae"].idxmin()]
 
     text = (
-        "Across glucose ranges, the lowest MAE appears at group_value="
+        "Across glucose ranges, the lowest MAE appears at range="
         f"{mae_best_row.get('group_value')} with MAE="
         f"{_format_optional_metric(mae_best_row.get('mae'))}, while the highest "
-        "MAE appears at group_value="
+        "MAE appears at range="
         f"{mae_worst_row.get('group_value')} with MAE="
         f"{_format_optional_metric(mae_worst_row.get('mae'))}."
     )
@@ -469,9 +466,9 @@ def _build_glucose_range_overview(by_glucose_range: pd.DataFrame) -> str:
             text += (
                 " Empirical interval coverage ranges from "
                 f"{_format_optional_metric(coverage_low_row.get('empirical_interval_coverage'))} "
-                f"at group_value={coverage_low_row.get('group_value')} to "
+                f"at range={coverage_low_row.get('group_value')} to "
                 f"{_format_optional_metric(coverage_high_row.get('empirical_interval_coverage'))} "
-                f"at group_value={coverage_high_row.get('group_value')}."
+                f"at range={coverage_high_row.get('group_value')}."
             )
 
     return text
@@ -513,7 +510,7 @@ def _build_report_text(
     )
     text["dataset_overview"] = (
         "Shared report covers "
-        f"{sample_count} forecast rows across {subject_count} subject(s) "
+        f"{sample_count} forecast row(s) across {subject_count} subject(s) "
         f"and {horizon_count} horizon step(s)."
     )
 
@@ -523,7 +520,7 @@ def _build_report_text(
         coverage_text = _format_optional_metric(summary.empirical_interval_coverage)
         interval_text = _format_optional_metric(summary.mean_interval_width)
         text["metric_overview"] = (
-            "Detailed evaluation summary: "
+            "Top-level evaluation summary: "
             f"MAE={summary.mae:.4f}, RMSE={summary.rmse:.4f}, "
             f"bias={summary.bias:.4f}, "
             f"overall_pinball_loss={summary.overall_pinball_loss:.4f}, "
@@ -588,7 +585,7 @@ def build_shared_report(
                 "dataset_overview": "Shared report is empty because no prediction batches were provided.",
                 "metric_overview": "No evaluation summary is available because no prediction batches were provided.",
                 "quantile_overview": "Quantile configuration is unavailable because no prediction batches were provided.",
-                "horizon_overview": "Horizon-level grouped metrics are unavailable because no prediction batches were provided.",
+                "horizon_overview": "Forecast-horizon grouped metrics are unavailable because no prediction batches were provided.",
                 "probabilistic_overview": "Probabilistic grouped interpretation is unavailable because no prediction batches were provided.",
                 "subject_variability_overview": "Subject-level grouped metrics are unavailable because no prediction batches were provided.",
                 "glucose_range_overview": "Glucose-range grouped metrics are unavailable because no prediction batches were provided.",

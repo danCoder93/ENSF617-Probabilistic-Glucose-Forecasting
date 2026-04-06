@@ -36,6 +36,18 @@ from observability.utils import _has_module
 from reporting.types import SharedReport
 
 
+def _plot_title(title: str, subtitle: str) -> str:
+    """Return a compact human-readable Plotly title string.
+
+    Context:
+    Phase 6 focuses on interpretation polish rather than new metrics. A small
+    title helper keeps the sink's pages more readable and more consistent with
+    the TensorBoard terminology without changing the canonical reporting
+    contract.
+    """
+    return f"{title}<br><sup>{subtitle}</sup>"
+
+
 def _build_horizon_metrics_frame(
     *,
     shared_report: SharedReport | None,
@@ -71,8 +83,12 @@ def _build_horizon_metrics_frame(
         return pd.DataFrame()
 
     horizon_metrics = by_horizon.rename(columns={"group_value": "horizon_index"}).copy()
-    horizon_metrics.sort_values(by=["horizon_index"], inplace=True)
-    horizon_metrics.reset_index(drop=True, inplace=True)
+    # Use explicit keyword arguments here because pandas' overloads are easier
+    # for static analysis to resolve when both `by=` and `ascending=` are named.
+    horizon_metrics = horizon_metrics.sort_values(
+        by=["horizon_index"],
+        ascending=True,
+    ).reset_index(drop=True)
 
     # Keep only the columns the figures currently understand so the sink stays
     # resilient to future shared-report expansion.
@@ -114,8 +130,12 @@ def _build_grouped_metrics_frame(
     if not set(required_columns).issubset(set(frame.columns)):
         return pd.DataFrame()
 
-    frame.sort_values(by=["group_value"], inplace=True)
-    frame.reset_index(drop=True, inplace=True)
+    # As above, prefer explicit keyword arguments to keep pandas sorting calls
+    # friendlier to Pyright/Pylance static analysis.
+    frame = frame.sort_values(
+        by=["group_value"],
+        ascending=True,
+    ).reset_index(drop=True)
     return frame
 
 
@@ -191,7 +211,14 @@ def generate_plotly_reports(
         frame,
         x="residual",
         nbins=50,
-        title="Residual Distribution",
+        title=_plot_title(
+            "Residual Distribution",
+            "Row-level forecast errors across the held-out prediction table.",
+        ),
+    )
+    residual_histogram.update_layout(
+        xaxis_title="Residual",
+        yaxis_title="Count",
     )
     residual_histogram_path = report_dir / "residual_histogram.html"
     residual_histogram.write_html(str(residual_histogram_path))
@@ -240,7 +267,14 @@ def generate_plotly_reports(
                 )
             )
 
-        horizon_metrics_fig.update_layout(title="Error Metrics By Forecast Horizon")
+        horizon_metrics_fig.update_layout(
+            title=_plot_title(
+                "Forecast Horizon Error Metrics",
+                "MAE and RMSE by step ahead, with optional interval width when available.",
+            ),
+            xaxis_title="Horizon Index",
+            yaxis_title="Error Metric",
+        )
         horizon_metrics_path = report_dir / "horizon_metrics.html"
         horizon_metrics_fig.write_html(str(horizon_metrics_path))
         report_paths["horizon_metrics"] = horizon_metrics_path
@@ -281,7 +315,14 @@ def generate_plotly_reports(
                     )
                 )
 
-            horizon_bias_fig.update_layout(title="Bias And Pinball Loss By Forecast Horizon")
+            horizon_bias_fig.update_layout(
+                title=_plot_title(
+                    "Forecast Horizon Bias And Pinball Loss",
+                    "Directional error and probabilistic loss across the prediction horizon.",
+                ),
+                xaxis_title="Horizon Index",
+                yaxis_title="Bias",
+            )
             horizon_bias_path = report_dir / "horizon_bias.html"
             horizon_bias_fig.write_html(str(horizon_bias_path))
             report_paths["horizon_bias"] = horizon_bias_path
@@ -299,7 +340,14 @@ def generate_plotly_reports(
                     name="Empirical Coverage",
                 )
             )
-            horizon_coverage_fig.update_layout(title="Empirical Coverage By Forecast Horizon")
+            horizon_coverage_fig.update_layout(
+                title=_plot_title(
+                    "Forecast Horizon Coverage",
+                    "Empirical interval coverage across the prediction horizon.",
+                ),
+                xaxis_title="Horizon Index",
+                yaxis_title="Coverage",
+            )
             horizon_coverage_path = report_dir / "horizon_coverage.html"
             horizon_coverage_fig.write_html(str(horizon_coverage_path))
             report_paths["horizon_coverage"] = horizon_coverage_path
@@ -339,7 +387,14 @@ def generate_plotly_reports(
                     showgrid=False,
                 )
             )
-        subject_fig.update_layout(title="Grouped Metrics By Subject")
+        subject_fig.update_layout(
+            title=_plot_title(
+                "Subject-Level Metrics",
+                "Average error by subject, with directional bias when available.",
+            ),
+            xaxis_title="Subject",
+            yaxis_title="MAE",
+        )
         subject_path = report_dir / "subject_metrics.html"
         subject_fig.write_html(str(subject_path))
         report_paths["subject_metrics"] = subject_path
@@ -380,7 +435,14 @@ def generate_plotly_reports(
                     showgrid=False,
                 )
             )
-        glucose_range_fig.update_layout(title="Grouped Metrics By Glucose Range")
+        glucose_range_fig.update_layout(
+            title=_plot_title(
+                "Glucose-Range Metrics",
+                "Average error by glycemic regime, with coverage when available.",
+            ),
+            xaxis_title="Glucose Range",
+            yaxis_title="MAE",
+        )
         glucose_range_path = report_dir / "glucose_range_metrics.html"
         glucose_range_fig.write_html(str(glucose_range_path))
         report_paths["glucose_range_metrics"] = glucose_range_path
@@ -392,7 +454,10 @@ def generate_plotly_reports(
     subject_ids = list(dict.fromkeys(frame["subject_id"].tolist()))[:max_subjects]
     filtered = frame[frame["subject_id"].isin(subject_ids)].copy()
     filtered["timestamp"] = pd.to_datetime(filtered["timestamp"])
-    filtered.sort_values(by=["subject_id", "timestamp"], inplace=True)
+    filtered = filtered.sort_values(
+        by=["subject_id", "timestamp"],
+        ascending=True,
+    )
 
     quantile_columns = sorted(
         column for column in frame.columns if str(column).startswith("pred_q")
@@ -444,7 +509,14 @@ def generate_plotly_reports(
                 )
             )
 
-    overview_fig.update_layout(title="Forecast Overview")
+    overview_fig.update_layout(
+        title=_plot_title(
+            "Forecast Overview",
+            "Target trajectory, median prediction, and prediction interval for a sample of subjects.",
+        ),
+        xaxis_title="Timestamp",
+        yaxis_title="Value",
+    )
     overview_path = report_dir / "forecast_overview.html"
     overview_fig.write_html(str(overview_path))
     report_paths["forecast_overview"] = overview_path

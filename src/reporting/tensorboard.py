@@ -149,6 +149,24 @@ def _metadata_text(metadata: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _table_display_title(table_name: str) -> str:
+    """
+    Convert an internal shared-report table key into a more readable title.
+
+    Context:
+    table keys are intentionally concise and code-friendly. TensorBoard text
+    previews are easier to scan when the title shown to readers uses a
+    human-readable label that explains what the table represents.
+    """
+    titles = {
+        "prediction_table": "Prediction-Level Analysis Table",
+        "by_horizon": "Forecast-Horizon Summary Table",
+        "by_subject": "Subject-Level Summary Table",
+        "by_glucose_range": "Glucose-Range Summary Table",
+    }
+    return titles.get(table_name, table_name.replace("_", " ").title())
+
+
 def _frame_preview_text(
     frame: pd.DataFrame,
     *,
@@ -167,8 +185,9 @@ def _frame_preview_text(
     payload remains easy to read in TensorBoard's text tab and simple to reason
     about during maintenance.
     """
+    display_title = _table_display_title(name)
     if frame.empty:
-        return f"{name}: empty table."
+        return f"{display_title}: empty table."
 
     preview = frame.head(max_rows)
     buffer = StringIO()
@@ -178,7 +197,7 @@ def _frame_preview_text(
         if len(frame) > len(preview)
         else f"showing all {len(frame)} row(s)"
     )
-    return f"{name} ({row_suffix})\n\n```\n{buffer.getvalue()}\n```"
+    return f"{display_title} ({row_suffix})\n\n```\n{buffer.getvalue()}\n```"
 
 
 def _ordered_report_text_items(shared_report: SharedReport) -> list[tuple[str, str]]:
@@ -235,6 +254,54 @@ def _report_text_index(shared_report: SharedReport) -> str:
     for key, _ in ordered_items:
         lines.append(f"- {key}")
     return "\n".join(lines)
+
+
+def _text_section_title(text_key: str) -> str:
+    """
+    Convert an internal report-text key into a more readable section title.
+
+    Context:
+    The TensorBoard tag surface is easier to scan when text entries use
+    interpretation-oriented labels rather than raw internal key names.
+    """
+    titles = {
+        "dataset_overview": "Dataset Overview",
+        "metric_overview": "Metric Overview",
+        "quantile_overview": "Quantile Overview",
+        "horizon_overview": "Forecast Horizon Overview",
+        "probabilistic_overview": "Probabilistic Forecast Overview",
+        "subject_variability_overview": "Subject Variability Overview",
+        "glucose_range_overview": "Glucose-Range Overview",
+        "metadata": "Metadata",
+        "index": "Index",
+    }
+    return titles.get(text_key, text_key.replace("_", " ").title())
+
+
+def _figure_tag_name(figure_name: str) -> str:
+    """
+    Convert an internal figure key into a more readable TensorBoard tag name.
+
+    Context:
+    Internal figure keys are kept concise for maintenance, while TensorBoard
+    users benefit from tags that read like dashboard sections rather than code
+    identifiers.
+    """
+    titles = {
+        "residual_histogram": "Residual Distribution",
+        "horizon_metrics": "Forecast Horizon Error Metrics",
+        "horizon_uncertainty": "Forecast Horizon Uncertainty",
+        "horizon_bias": "Forecast Horizon Bias And Pinball Loss",
+        "subject_mae": "Subject-Level MAE",
+        "subject_bias": "Subject-Level Bias",
+        "subject_rmse": "Subject-Level RMSE",
+        "glucose_range_mae": "Glucose-Range MAE",
+        "glucose_range_bias": "Glucose-Range Bias",
+        "glucose_range_interval_width": "Glucose-Range Interval Width",
+        "glucose_range_coverage": "Glucose-Range Coverage",
+        "forecast_overview": "Forecast Overview",
+    }
+    return titles.get(figure_name, figure_name.replace("_", " ").title())
 
 
 # ============================================================================
@@ -300,13 +367,13 @@ def _log_shared_report_text(
         add_text = getattr(experiment, "add_text", None)
         if callable(add_text):
             add_text(
-                f"{namespace}/text/index",
+                f"{namespace}/text/{_text_section_title('index')}",
                 report_text_index,
                 global_step=global_step,
             )
 
     for key, value in _ordered_report_text_items(shared_report):
-        tag = f"{namespace}/text/{key}"
+        tag = f"{namespace}/text/{_text_section_title(key)}"
         for experiment in experiments:
             add_text = getattr(experiment, "add_text", None)
             if callable(add_text):
@@ -316,7 +383,11 @@ def _log_shared_report_text(
     for experiment in experiments:
         add_text = getattr(experiment, "add_text", None)
         if callable(add_text):
-            add_text(f"{namespace}/text/metadata", metadata_text, global_step=global_step)
+            add_text(
+                f"{namespace}/text/{_text_section_title('metadata')}",
+                metadata_text,
+                global_step=global_step,
+            )
 
 
 def _log_shared_report_tables(
@@ -344,7 +415,7 @@ def _log_shared_report_tables(
             name=table_name,
             max_rows=max_rows,
         )
-        tag = f"{namespace}/tables/{table_name}"
+        tag = f"{namespace}/tables/{_table_display_title(table_name)}"
         for experiment in experiments:
             add_text = getattr(experiment, "add_text", None)
             if callable(add_text):
@@ -381,7 +452,7 @@ def _build_residual_histogram_figure(shared_report: SharedReport) -> Any | None:
     figure = plt.figure()
     axes = figure.add_subplot(1, 1, 1)
     axes.hist(prediction_table["residual"].dropna())
-    axes.set_title("Residual Distribution")
+    axes.set_title("Residual Distribution: Error Spread Across Prediction Rows")
     axes.set_xlabel("Residual")
     axes.set_ylabel("Count")
     figure.tight_layout()
@@ -444,7 +515,7 @@ def _build_horizon_metrics_figure(shared_report: SharedReport) -> Any | None:
     horizon_index = by_horizon["group_value"]
     axes.plot(horizon_index, by_horizon["mae"], marker="o", label="MAE")
     axes.plot(horizon_index, by_horizon["rmse"], marker="o", label="RMSE")
-    axes.set_title("Error Metrics By Forecast Horizon")
+    axes.set_title("Forecast Horizon Error Metrics: MAE And RMSE By Step Ahead")
     axes.set_xlabel("Horizon Index")
     axes.set_ylabel("Metric Value")
     axes.legend()
@@ -509,7 +580,7 @@ def _build_horizon_uncertainty_figure(shared_report: SharedReport) -> Any | None
         )
         secondary_axes.set_ylabel("Coverage")
 
-    axes.set_title("Uncertainty By Forecast Horizon")
+    axes.set_title("Forecast Horizon Uncertainty: Interval Width And Coverage")
     axes.set_xlabel("Horizon Index")
     axes.set_ylabel("Interval Width")
 
@@ -574,7 +645,7 @@ def _build_horizon_bias_figure(shared_report: SharedReport) -> Any | None:
         )
         secondary_axes.set_ylabel("Pinball Loss")
 
-    axes.set_title("Bias And Pinball Loss By Forecast Horizon")
+    axes.set_title("Forecast Horizon Bias: Directional Error And Pinball Loss")
     axes.set_xlabel("Horizon Index")
     axes.set_ylabel("Bias")
 
@@ -588,6 +659,22 @@ def _build_horizon_bias_figure(shared_report: SharedReport) -> Any | None:
 
     figure.tight_layout()
     return figure
+
+
+def _group_axis_label(table_name: str) -> str:
+    """
+    Return a readable x-axis label for grouped bar figures.
+
+    Context:
+    Grouped report tables summarize different entities. Using one generic
+    “Group” label works functionally, but a more explicit label makes the
+    resulting TensorBoard figures easier to interpret at a glance.
+    """
+    labels = {
+        "by_subject": "Subject",
+        "by_glucose_range": "Glucose Range",
+    }
+    return labels.get(table_name, "Group")
 
 
 def _build_grouped_bar_figure(
@@ -627,7 +714,7 @@ def _build_grouped_bar_figure(
     group_labels = frame["group_value"].astype(str)
     axes.bar(group_labels, frame[metric_name])
     axes.set_title(title)
-    axes.set_xlabel("Group")
+    axes.set_xlabel(_group_axis_label(table_name))
     axes.set_ylabel(ylabel)
 
     # Larger grouped surfaces can have longer labels, so a light rotation keeps
@@ -719,7 +806,7 @@ def _build_forecast_overview_figure(
                 alpha=0.2,
             )
 
-    axes.set_title("Forecast Overview")
+    axes.set_title("Forecast Overview: Target, Median Prediction, And Interval Band")
     axes.set_xlabel("Timestamp")
     axes.set_ylabel("Value")
     axes.legend()
@@ -759,7 +846,7 @@ def _iter_report_figures(
         shared_report,
         table_name="by_subject",
         metric_name="mae",
-        title="MAE By Subject",
+        title="Subject-Level MAE: Average Error By Subject",
         ylabel="MAE",
     )
     if subject_mae is not None:
@@ -771,7 +858,7 @@ def _iter_report_figures(
         shared_report,
         table_name="by_subject",
         metric_name="bias",
-        title="Bias By Subject",
+        title="Subject-Level Bias: Over- Or Under-Prediction By Subject",
         ylabel="Bias",
     )
     if subject_bias is not None:
@@ -783,7 +870,7 @@ def _iter_report_figures(
         shared_report,
         table_name="by_subject",
         metric_name="rmse",
-        title="RMSE By Subject",
+        title="Subject-Level RMSE: Error Spread By Subject",
         ylabel="RMSE",
     )
     if subject_rmse is not None:
@@ -793,7 +880,7 @@ def _iter_report_figures(
         shared_report,
         table_name="by_glucose_range",
         metric_name="mae",
-        title="MAE By Glucose Range",
+        title="Glucose-Range MAE: Average Error By Glycemic Regime",
         ylabel="MAE",
     )
     if glucose_range_mae is not None:
@@ -805,7 +892,7 @@ def _iter_report_figures(
         shared_report,
         table_name="by_glucose_range",
         metric_name="bias",
-        title="Bias By Glucose Range",
+        title="Glucose-Range Bias: Directional Error By Glycemic Regime",
         ylabel="Bias",
     )
     if glucose_range_bias is not None:
@@ -817,7 +904,7 @@ def _iter_report_figures(
         shared_report,
         table_name="by_glucose_range",
         metric_name="mean_interval_width",
-        title="Mean Interval Width By Glucose Range",
+        title="Glucose-Range Interval Width: Uncertainty By Glycemic Regime",
         ylabel="Interval Width",
     )
     if glucose_range_interval_width is not None:
@@ -827,7 +914,7 @@ def _iter_report_figures(
         shared_report,
         table_name="by_glucose_range",
         metric_name="empirical_interval_coverage",
-        title="Empirical Coverage By Glucose Range",
+        title="Glucose-Range Coverage: Calibration By Glycemic Regime",
         ylabel="Coverage",
     )
     if glucose_range_coverage is not None:
@@ -865,7 +952,7 @@ def _log_shared_report_figures(
         shared_report,
         max_subjects=max_subjects,
     ):
-        tag = f"{namespace}/figures/{figure_name}"
+        tag = f"{namespace}/figures/{_figure_tag_name(figure_name)}"
         for experiment in experiments:
             add_figure = getattr(experiment, "add_figure", None)
             if callable(add_figure):
