@@ -104,6 +104,20 @@ def export_prediction_table(
         batch_size = int(prediction_cpu.shape[0])
         metadata = _as_metadata_lists(batch["metadata"], batch_size)
 
+        # CHANGE: Capture the final observed glucose from the encoder/history
+        # window so downstream analysis can compare the model against a simple
+        # persistence baseline. This makes the exported CSV much more useful
+        # without changing training logic at all.
+        encoder_target = batch.get("encoder_target")
+        encoder_target_cpu: Tensor | None = None
+        if encoder_target is not None:
+            if isinstance(encoder_target, Tensor):
+                encoder_target_cpu = encoder_target.detach().cpu()
+            else:
+                encoder_target_cpu = torch.as_tensor(encoder_target)
+            if encoder_target_cpu.ndim == 3 and encoder_target_cpu.shape[-1] == 1:
+                encoder_target_cpu = encoder_target_cpu.squeeze(-1)
+
         for sample_index in range(batch_size):
             subject_id = str(metadata.get("subject_id", ["unknown"])[sample_index])
             decoder_start = pd.Timestamp(
@@ -111,6 +125,14 @@ def export_prediction_table(
                     metadata.get("decoder_start", ["1970-01-01 00:00:00"])[sample_index]
                 )
             )
+
+            # CHANGE: Pull the most recent observed glucose value for this sample.
+            # Clear point here: this is the exact value a persistence baseline
+            # would carry forward, so we want it sitting right in the export.
+            last_observed_glucose = None
+            if encoder_target_cpu is not None:
+                last_observed_glucose = float(encoder_target_cpu[sample_index, -1].item())
+
             for horizon_index in range(int(prediction_cpu.shape[1])):
                 # The export is intentionally one row per forecast horizon step
                 # rather than one row per sample window. That denormalized
@@ -127,6 +149,7 @@ def export_prediction_table(
                     "decoder_end": str(metadata.get("decoder_end", [""])[sample_index]),
                     "timestamp": timestamp.isoformat(),
                     "horizon_index": horizon_index,
+                    "last_observed_glucose": last_observed_glucose,
                     "target": float(target_cpu[sample_index, horizon_index].item()),
                 }
                 for quantile_index, column_name in enumerate(quantile_columns):
