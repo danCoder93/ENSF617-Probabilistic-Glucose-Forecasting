@@ -32,7 +32,6 @@ from torch import Tensor
 
 from config import PathInput
 from evaluation import EvaluationResult
-
 from reporting.builders import build_shared_report
 from reporting.types import SharedReport, TestDataloaderProvider
 
@@ -42,8 +41,7 @@ def export_prediction_table_from_report(
     shared_report: SharedReport,
     output_path: PathInput | None,
 ) -> Path | None:
-    """
-    Export the canonical shared-report prediction table to CSV.
+    """Export the canonical shared-report prediction table to CSV.
 
     Purpose:
     provide the strict canonical sink path for prediction-table export once a
@@ -56,45 +54,66 @@ def export_prediction_table_from_report(
     - builders package that truth into `SharedReport`
     - sinks such as CSV, Plotly, and TensorBoard consume the already-built
       report rather than quietly recomputing it
-
-    Parameters:
-        shared_report:
-            The canonical in-memory reporting bundle whose `prediction_table`
-            should be serialized.
-        output_path:
-            Destination CSV path. When `None`, the export is skipped.
-
-    Returns:
-        The written CSV path when an export occurs, otherwise `None`.
-
-    Behavior:
-        - returns early when no output path is configured
-        - returns early when the canonical prediction table is empty
-        - creates parent directories on demand
-        - writes only the already-built canonical `prediction_table`
     """
-    # This helper is the preferred export path because it consumes the already-
-    # packaged shared report directly. That keeps the export sink aligned with
-    # the repository's canonical reporting lifecycle instead of rebuilding the
-    # report surface again from raw inputs.
     if output_path is None:
         return None
 
     output_path = Path(output_path)
 
-    # The canonical flat prediction table is the only table this CSV sink
-    # serializes. If the report does not contain rows, there is nothing useful
-    # to write and the export is skipped cleanly.
+    # The canonical flat prediction table is the only table this helper writes.
+    # If it is absent or empty, there is nothing useful to serialize.
     prediction_table = shared_report.tables.get("prediction_table")
     if prediction_table is None or prediction_table.empty:
         return None
 
-    # Filesystem policy belongs in the sink, not in the report builder. The
-    # builder should stay focused on in-memory packaging while this sink owns
-    # parent-directory creation and final CSV serialization.
     output_path.parent.mkdir(parents=True, exist_ok=True)
     prediction_table.to_csv(output_path, index=False)
     return output_path
+
+
+def export_grouped_tables_from_report(
+    *,
+    shared_report: SharedReport,
+    output_dir: PathInput | None,
+) -> dict[str, Path]:
+    """Export grouped canonical report tables into a directory of CSV files.
+
+    Context:
+    the canonical reporting payload already includes grouped tables for horizon,
+    subject, and glucose-range views. Persisting those tables makes offline
+    spreadsheet analysis easier while preserving the same source-of-truth path
+    used by the HTML and TensorBoard sinks.
+
+    Behavior:
+    - returns an empty mapping when no output directory is configured
+    - skips grouped tables that are absent or empty
+    - writes only tables already present in `SharedReport.tables`
+    - never recomputes grouped metrics from the flat prediction table
+    """
+    if output_dir is None:
+        return {}
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    written_paths: dict[str, Path] = {}
+
+    # File names are intentionally stable so downstream tooling can rely on
+    # them without needing to inspect the report contents first.
+    for table_name, filename in (
+        ("by_horizon", "by_horizon.csv"),
+        ("by_subject", "by_subject.csv"),
+        ("by_glucose_range", "by_glucose_range.csv"),
+    ):
+        table = shared_report.tables.get(table_name)
+        if table is None or table.empty:
+            continue
+
+        output_path = output_dir / filename
+        table.to_csv(output_path, index=False)
+        written_paths[table_name] = output_path
+
+    return written_paths
 
 
 def export_prediction_table(
@@ -106,8 +125,7 @@ def export_prediction_table(
     sampling_interval_minutes: int,
     evaluation_result: EvaluationResult | None = None,
 ) -> Path | None:
-    """
-    Export test predictions as a flat analysis-friendly CSV table.
+    """Export test predictions as a flat analysis-friendly CSV table.
 
     Context:
     the raw tensor dump preserves fidelity, while this table optimizes for
@@ -116,57 +134,11 @@ def export_prediction_table(
     Design note:
     this function now acts as a compatibility wrapper:
     - it builds the canonical shared report from raw inputs
-    - it forwards the actual CSV write to
-      `export_prediction_table_from_report(...)`
+    - it forwards the actual CSV write to `export_prediction_table_from_report(...)`
     - it preserves the historical call shape for older callers while keeping
       the real sink logic on the report-based path
-
-    Parameters:
-        datamodule:
-            Provider of the held-out test dataloader whose batches align with
-            the provided prediction tensors.
-        predictions:
-            Post-run prediction batches, typically produced by the workflow's
-            `predict_test(...)` path.
-        quantiles:
-            Ordered forecast quantiles used to label exported prediction columns.
-        output_path:
-            Destination CSV path. When `None`, the export is skipped.
-        sampling_interval_minutes:
-            Step size used to reconstruct horizon timestamps in the canonical
-            prediction table.
-        evaluation_result:
-            Optional structured evaluation output. This is forwarded into the
-            shared-report builder so the export path can stay aligned with the
-            same canonical post-run packaging surface used by other sinks.
-
-    Returns:
-        The written CSV path when an export occurs, otherwise `None`.
-
-    Behavior:
-        - returns early when no output path is configured
-        - returns early when no prediction batches exist
-        - builds the canonical `SharedReport`
-        - delegates the actual CSV write to the strict report-based sink
     """
-    # This wrapper deliberately preserves the old public call shape so existing
-    # tests, scripts, and ad hoc callers do not have to switch all at once.
-    # The important architectural change is that the actual write path now
-    # happens through `export_prediction_table_from_report(...)`.
-    if output_path is None:
-        return None
-
-    # If no prediction batches exist, building a shared report would only
-    # produce an empty prediction table. Returning early keeps the historical
-    # behavior unchanged and avoids unnecessary work.
-    if not predictions:
-        return None
-
-    # Canonical report construction remains centralized in the reporting
-    # builders module. This wrapper does not recreate row logic itself; it
-    # simply asks the builder for the shared report and then forwards that
-    # report into the strict sink path.
-    report = build_shared_report(
+    shared_report = build_shared_report(
         datamodule=datamodule,
         predictions=predictions,
         quantiles=quantiles,
@@ -174,9 +146,7 @@ def export_prediction_table(
         evaluation_result=evaluation_result,
     )
 
-    # Delegate the final CSV write to the report-based sink so the real export
-    # logic stays centralized in one place.
     return export_prediction_table_from_report(
-        shared_report=report,
+        shared_report=shared_report,
         output_path=output_path,
     )

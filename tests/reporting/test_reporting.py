@@ -5,18 +5,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
+import torch
 
-torch = pytest.importorskip("torch")
-pd = pytest.importorskip("pandas")
-DataFrame = pd.DataFrame
+pytest.importorskip("torch")
+pytest.importorskip("pandas")
 
 from reporting import (
     SharedReport,
+    export_grouped_tables_from_report,
     export_prediction_table,
     export_prediction_table_from_report,
     generate_plotly_reports,
 )
+from reporting.builders import build_shared_report
+from src.evaluation.types import EvaluationResult, GroupedMetricRow, MetricSummary
 
 
 class StubDataModule:
@@ -31,7 +35,7 @@ class StubDataModule:
         return self._test_batches
 
 
-def _build_prediction_table_frame() -> DataFrame:
+def _build_prediction_table_frame() -> pd.DataFrame:
     """Build a compact canonical prediction table used across reporting tests.
 
     Purpose:
@@ -64,18 +68,12 @@ def _build_prediction_table_frame() -> DataFrame:
     )
 
 
-def _build_by_horizon_frame() -> DataFrame:
+def _build_by_horizon_frame() -> pd.DataFrame:
     """Build the canonical grouped horizon table used by strict Plotly tests.
 
     Purpose:
         Mirror the grouped horizon-report table shape that the stricter Plotly
         sink now expects from `SharedReport.tables["by_horizon"]`.
-
-    Context:
-        The Plotly sink no longer recomputes grouped horizon metrics from the
-        flat prediction table. That behavior now belongs upstream in evaluation
-        and shared-report packaging, so the tests must provide the grouped table
-        explicitly when they expect a horizon-metrics artifact.
     """
     return pd.DataFrame(
         {
@@ -87,24 +85,140 @@ def _build_by_horizon_frame() -> DataFrame:
             "bias": [-0.75, 1.0],
             "overall_pinball_loss": [0.45, 0.55],
             "mean_interval_width": [8.5, 9.5],
+            "empirical_interval_coverage": [1.0, 0.5],
+        }
+    )
+
+
+def _build_by_subject_frame() -> pd.DataFrame:
+    """Build a compact grouped subject table with canonical grouped columns."""
+    return pd.DataFrame(
+        {
+            "group_name": ["subject_id", "subject_id"],
+            "group_value": ["subject_a", "subject_b"],
+            "count": [2, 2],
+            "mae": [1.0, 0.75],
+            "rmse": [1.0, 0.80],
+            "bias": [0.2, -0.5],
+            "overall_pinball_loss": [0.50, 0.45],
+            "mean_interval_width": [9.0, 8.5],
             "empirical_interval_coverage": [1.0, 1.0],
         }
     )
 
 
-def _build_shared_report(*, include_by_horizon: bool) -> SharedReport:
-    """Build a compact shared report for Plotly sink regression tests.
+def _build_by_glucose_range_frame() -> pd.DataFrame:
+    """Build a compact grouped glucose-range table with canonical grouped columns."""
+    return pd.DataFrame(
+        {
+            "group_name": ["glucose_range", "glucose_range"],
+            "group_value": ["euglycemia", "hyperglycemia"],
+            "count": [2, 2],
+            "mae": [0.6, 1.1],
+            "rmse": [0.7, 1.2],
+            "bias": [-0.1, 0.4],
+            "overall_pinball_loss": [0.40, 0.60],
+            "mean_interval_width": [8.0, 10.5],
+            "empirical_interval_coverage": [1.0, 0.5],
+        }
+    )
+
+
+def _build_evaluation_result() -> EvaluationResult:
+    """Build a real typed evaluation result for report-builder tests.
 
     Purpose:
-        Provide one canonical in-memory report bundle that matches the stricter
-        reporting architecture, where sinks consume `SharedReport` rather than
-        recomputing grouped metrics internally.
-
-    Args:
-        include_by_horizon:
-            Whether the returned report should include the canonical grouped
-            horizon table required for the horizon-metrics Plotly artifact.
+        Use the repo's actual evaluation contract rather than a lookalike stub
+        so static analysis and runtime behavior stay aligned.
     """
+    return EvaluationResult(
+        summary=MetricSummary(
+            count=4,
+            mae=0.875,
+            rmse=0.9,
+            bias=0.1,
+            overall_pinball_loss=0.5,
+            pinball_loss_by_quantile={"0.1": 0.4, "0.5": 0.5, "0.9": 0.6},
+            mean_interval_width=9.0,
+            empirical_interval_coverage=0.75,
+        ),
+        by_horizon=(
+            GroupedMetricRow(
+                group_name="horizon_index",
+                group_value=0,
+                count=2,
+                mae=0.75,
+                rmse=0.85,
+                bias=-0.25,
+                overall_pinball_loss=0.40,
+                mean_interval_width=8.5,
+                empirical_interval_coverage=1.0,
+            ),
+            GroupedMetricRow(
+                group_name="horizon_index",
+                group_value=1,
+                count=2,
+                mae=1.0,
+                rmse=1.05,
+                bias=0.45,
+                overall_pinball_loss=0.60,
+                mean_interval_width=9.5,
+                empirical_interval_coverage=0.5,
+            ),
+        ),
+        by_subject=(
+            GroupedMetricRow(
+                group_name="subject_id",
+                group_value="subject_a",
+                count=2,
+                mae=1.0,
+                rmse=1.0,
+                bias=0.2,
+                overall_pinball_loss=0.50,
+                mean_interval_width=9.0,
+                empirical_interval_coverage=1.0,
+            ),
+            GroupedMetricRow(
+                group_name="subject_id",
+                group_value="subject_b",
+                count=2,
+                mae=0.75,
+                rmse=0.80,
+                bias=-0.5,
+                overall_pinball_loss=0.45,
+                mean_interval_width=8.5,
+                empirical_interval_coverage=1.0,
+            ),
+        ),
+        by_glucose_range=(
+            GroupedMetricRow(
+                group_name="glucose_range",
+                group_value="euglycemia",
+                count=2,
+                mae=0.6,
+                rmse=0.7,
+                bias=-0.1,
+                overall_pinball_loss=0.40,
+                mean_interval_width=8.0,
+                empirical_interval_coverage=1.0,
+            ),
+            GroupedMetricRow(
+                group_name="glucose_range",
+                group_value="hyperglycemia",
+                count=2,
+                mae=1.1,
+                rmse=1.2,
+                bias=0.4,
+                overall_pinball_loss=0.60,
+                mean_interval_width=10.5,
+                empirical_interval_coverage=0.5,
+            ),
+        ),
+    )
+
+
+def _build_shared_report(*, include_by_horizon: bool) -> SharedReport:
+    """Build a compact shared report for reporting sink regression tests."""
     prediction_table = _build_prediction_table_frame()
     by_horizon = _build_by_horizon_frame() if include_by_horizon else pd.DataFrame()
 
@@ -117,13 +231,17 @@ def _build_shared_report(*, include_by_horizon: bool) -> SharedReport:
         tables={
             "prediction_table": prediction_table,
             "by_horizon": by_horizon,
-            "by_subject": pd.DataFrame(),
-            "by_glucose_range": pd.DataFrame(),
+            "by_subject": _build_by_subject_frame(),
+            "by_glucose_range": _build_by_glucose_range_frame(),
         },
         text={
             "dataset_overview": "Synthetic shared report for reporting tests.",
             "metric_overview": "Synthetic grouped metrics for reporting tests.",
             "quantile_overview": "Quantiles: 0.1, 0.5, 0.9",
+            "horizon_overview": "Synthetic horizon text.",
+            "probabilistic_overview": "Synthetic probabilistic text.",
+            "subject_variability_overview": "Synthetic subject text.",
+            "glucose_range_overview": "Synthetic glucose-range text.",
         },
         figures={},
         metadata={
@@ -136,9 +254,6 @@ def _build_shared_report(*, include_by_horizon: bool) -> SharedReport:
 
 
 def test_export_prediction_table_writes_analysis_friendly_rows(tmp_path: Path) -> None:
-    # Prediction export is the bridge from batched quantile tensors to a flat
-    # analysis table, so this test checks both schema and a few key derived
-    # values.
     predictions = [
         torch.tensor(
             [
@@ -182,6 +297,7 @@ def test_export_prediction_table_writes_analysis_friendly_rows(tmp_path: Path) -
     )
 
     assert output_path == tmp_path / "test_predictions.csv"
+    assert output_path is not None
     frame = pd.read_csv(output_path)
     assert len(frame) == 4
     assert {
@@ -203,9 +319,6 @@ def test_export_prediction_table_writes_analysis_friendly_rows(tmp_path: Path) -
 def test_export_prediction_table_from_report_writes_canonical_prediction_table(
     tmp_path: Path,
 ) -> None:
-    # The stricter canonical export path should serialize the already-built
-    # shared-report prediction table directly without needing raw prediction
-    # tensors or datamodule access at sink time.
     shared_report = _build_shared_report(include_by_horizon=True)
 
     output_path = export_prediction_table_from_report(
@@ -214,17 +327,85 @@ def test_export_prediction_table_from_report_writes_canonical_prediction_table(
     )
 
     assert output_path == tmp_path / "report_predictions.csv"
+    assert output_path is not None
     frame = pd.read_csv(output_path)
     assert len(frame) == 4
     assert set(shared_report.tables["prediction_table"].columns).issubset(frame.columns)
 
 
+def test_export_grouped_tables_from_report_writes_grouped_csvs(tmp_path: Path) -> None:
+    shared_report = _build_shared_report(include_by_horizon=True)
+
+    written_paths = export_grouped_tables_from_report(
+        shared_report=shared_report,
+        output_dir=tmp_path / "grouped_reports",
+    )
+
+    assert set(written_paths) == {"by_horizon", "by_subject", "by_glucose_range"}
+    for path in written_paths.values():
+        assert path.exists()
+        assert path.suffix == ".csv"
+
+
+def test_build_shared_report_adds_richer_canonical_text_keys() -> None:
+    predictions = [
+        torch.tensor(
+            [
+                [[95.0, 100.0, 105.0], [96.0, 101.0, 106.0]],
+                [[115.0, 120.0, 125.0], [116.0, 121.0, 126.0]],
+            ],
+            dtype=torch.float32,
+        )
+    ]
+    datamodule = StubDataModule(
+        [
+            {
+                "target": torch.tensor(
+                    [
+                        [[102.0], [103.0]],
+                        [[118.0], [119.0]],
+                    ],
+                    dtype=torch.float32,
+                ),
+                "metadata": {
+                    "subject_id": ["subject_a", "subject_b"],
+                    "decoder_start": [
+                        "2026-01-01 00:00:00",
+                        "2026-01-02 00:00:00",
+                    ],
+                    "decoder_end": [
+                        "2026-01-01 00:05:00",
+                        "2026-01-02 00:05:00",
+                    ],
+                },
+            }
+        ]
+    )
+
+    shared_report = build_shared_report(
+        datamodule=datamodule,
+        predictions=predictions,
+        quantiles=(0.1, 0.5, 0.9),
+        sampling_interval_minutes=5,
+        evaluation_result=_build_evaluation_result(),
+    )
+
+    assert {
+        "dataset_overview",
+        "metric_overview",
+        "quantile_overview",
+        "horizon_overview",
+        "probabilistic_overview",
+        "subject_variability_overview",
+        "glucose_range_overview",
+    }.issubset(shared_report.text)
+    assert "MAE" in shared_report.text["horizon_overview"]
+    assert "Probabilistic overview" in shared_report.text["probabilistic_overview"]
+
+
 def test_generate_plotly_reports_creates_all_expected_artifacts_from_shared_report(
     tmp_path: Path,
 ) -> None:
-    # Plot generation should consume the canonical shared report directly. When
-    # the grouped horizon table is present, the stricter sink should emit the
-    # horizon-metrics artifact in addition to the residual and overview plots.
     pytest.importorskip("plotly")
 
     shared_report = _build_shared_report(include_by_horizon=True)
@@ -239,6 +420,10 @@ def test_generate_plotly_reports_creates_all_expected_artifacts_from_shared_repo
     assert set(report_paths) == {
         "residual_histogram",
         "horizon_metrics",
+        "horizon_bias",
+        "horizon_coverage",
+        "subject_metrics",
+        "glucose_range_metrics",
         "forecast_overview",
     }
     for path in report_paths.values():
@@ -249,10 +434,6 @@ def test_generate_plotly_reports_creates_all_expected_artifacts_from_shared_repo
 def test_generate_plotly_reports_skips_horizon_metrics_without_canonical_grouped_data(
     tmp_path: Path,
 ) -> None:
-    # The stricter Plotly contract no longer recomputes grouped horizon metrics
-    # from the flat prediction table. If canonical `by_horizon` data is absent,
-    # the sink should omit only that artifact while still producing the plots
-    # that are legitimately derived from the prediction table itself.
     pytest.importorskip("plotly")
 
     shared_report = _build_shared_report(include_by_horizon=False)
@@ -266,9 +447,13 @@ def test_generate_plotly_reports_skips_horizon_metrics_without_canonical_grouped
 
     assert set(report_paths) == {
         "residual_histogram",
+        "subject_metrics",
+        "glucose_range_metrics",
         "forecast_overview",
     }
     assert "horizon_metrics" not in report_paths
+    assert "horizon_bias" not in report_paths
+    assert "horizon_coverage" not in report_paths
 
     for path in report_paths.values():
         assert path.exists()

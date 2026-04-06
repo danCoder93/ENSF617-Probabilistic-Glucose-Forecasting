@@ -56,6 +56,7 @@ from __future__ import annotations
 
 from reporting.builders import build_shared_report
 from reporting.exports import (
+    export_grouped_tables_from_report,
     export_prediction_table,
     export_prediction_table_from_report,
 )
@@ -79,7 +80,8 @@ __all__ = [
     "TestDataloaderProvider",
     "build_shared_report",
     "export_prediction_table",
+    "export_prediction_table_from_report",
+    "export_grouped_tables_from_report",
     "generate_plotly_reports",
     "log_shared_report_to_tensorboard",
-    "export_prediction_table_from_report"
 ]

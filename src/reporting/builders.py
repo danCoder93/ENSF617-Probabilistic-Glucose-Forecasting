@@ -252,11 +252,239 @@ def _grouped_rows_to_frame(rows: Sequence[GroupedMetricRow]) -> pd.DataFrame:
     )
 
 
+def _format_optional_metric(value: Any) -> str:
+    """Format a scalar-like metric value for deterministic report text.
+
+    Context:
+    report text should stay concise and stable across sinks. This helper keeps
+    optional numeric formatting consistent anywhere the builder needs to mention
+    a metric that may legitimately be absent.
+    """
+    if value is None:
+        return "unavailable"
+
+    if pd.isna(value):
+        return "unavailable"
+
+    try:
+        return f"{float(value):.4f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _sorted_grouped_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return a grouped metrics frame sorted by its canonical group axis.
+
+    Context:
+    grouped evaluation tables use a repository-stable `group_value` column for
+    the x-axis or grouping key. Sorting once here keeps the textual summaries
+    deterministic and avoids every summary helper having to duplicate the same
+    normalization logic.
+    """
+    if frame.empty or "group_value" not in frame.columns:
+        return frame.copy()
+
+    sorted_frame = frame.copy()
+
+    # Sorting by `group_value` keeps horizon summaries monotonic and also makes
+    # subject/range summaries deterministic for repeated runs and tests.
+    sorted_frame.sort_values(by=["group_value"], inplace=True)
+    sorted_frame.reset_index(drop=True, inplace=True)
+    return sorted_frame
+
+
+def _build_horizon_overview(by_horizon: pd.DataFrame) -> str:
+    """Build a compact interpretation of horizon-wise error behavior.
+
+    Context:
+    horizon degradation is one of the most important post-run diagnostics for
+    forecasting models. This text summarizes that already-canonical grouped
+    table so sinks can surface it without each sink re-deriving its own prose.
+    """
+    if by_horizon.empty:
+        return (
+            "Horizon-level grouped metrics are unavailable, so the shared report "
+            "cannot summarize horizon-wise error growth for this run."
+        )
+
+    frame = _sorted_grouped_frame(by_horizon)
+    first_row = frame.iloc[0]
+    last_row = frame.iloc[-1]
+
+    text = (
+        "Across forecast horizon, "
+        f"MAE moves from {_format_optional_metric(first_row.get('mae'))} at "
+        f"group_value={first_row.get('group_value')} to "
+        f"{_format_optional_metric(last_row.get('mae'))} at "
+        f"group_value={last_row.get('group_value')}, while RMSE moves from "
+        f"{_format_optional_metric(first_row.get('rmse'))} to "
+        f"{_format_optional_metric(last_row.get('rmse'))}."
+    )
+
+    if "bias" in frame.columns:
+        absolute_bias = frame["bias"].abs()
+        if not bool(absolute_bias.isna().all()):
+            bias_row = frame.loc[absolute_bias.idxmax()]
+            text += (
+                " The largest absolute horizon bias appears at "
+                f"group_value={bias_row.get('group_value')} with bias="
+                f"{_format_optional_metric(bias_row.get('bias'))}."
+            )
+
+    return text
+
+
+def _build_probabilistic_overview(
+    *,
+    evaluation_result: EvaluationResult | None,
+    by_horizon: pd.DataFrame,
+) -> str:
+    """Build a compact probabilistic-quality interpretation block.
+
+    Context:
+    the canonical evaluation summary already contains interval width, empirical
+    coverage, and pinball loss. The builder packages that information into one
+    short narrative block so TensorBoard and HTML sinks can present the same
+    probabilistic framing without bespoke text logic.
+    """
+    if evaluation_result is None:
+        return (
+            "Probabilistic evaluation detail is unavailable because no structured "
+            "evaluation result was supplied to the shared-report builder."
+        )
+
+    summary = evaluation_result.summary
+    text = (
+        "Probabilistic overview: overall_pinball_loss="
+        f"{_format_optional_metric(summary.overall_pinball_loss)}, "
+        "mean_interval_width="
+        f"{_format_optional_metric(summary.mean_interval_width)}, "
+        "empirical_interval_coverage="
+        f"{_format_optional_metric(summary.empirical_interval_coverage)}."
+    )
+
+    if not by_horizon.empty and "empirical_interval_coverage" in by_horizon.columns:
+        coverage_series = by_horizon["empirical_interval_coverage"]
+        if not bool(coverage_series.isna().all()):
+            coverage_min_row = by_horizon.loc[coverage_series.idxmin()]
+            coverage_max_row = by_horizon.loc[coverage_series.idxmax()]
+            text += (
+                " Horizon-level empirical coverage ranges from "
+                f"{_format_optional_metric(coverage_min_row.get('empirical_interval_coverage'))} "
+                f"at group_value={coverage_min_row.get('group_value')} to "
+                f"{_format_optional_metric(coverage_max_row.get('empirical_interval_coverage'))} "
+                f"at group_value={coverage_max_row.get('group_value')}."
+            )
+
+    if not by_horizon.empty and "mean_interval_width" in by_horizon.columns:
+        width_series = by_horizon["mean_interval_width"]
+        if not bool(width_series.isna().all()):
+            width_min_row = by_horizon.loc[width_series.idxmin()]
+            width_max_row = by_horizon.loc[width_series.idxmax()]
+            text += (
+                " Horizon-level interval width ranges from "
+                f"{_format_optional_metric(width_min_row.get('mean_interval_width'))} "
+                f"at group_value={width_min_row.get('group_value')} to "
+                f"{_format_optional_metric(width_max_row.get('mean_interval_width'))} "
+                f"at group_value={width_max_row.get('group_value')}."
+            )
+
+    return text
+
+
+def _build_subject_variability_overview(by_subject: pd.DataFrame) -> str:
+    """Build a compact summary of subject-level variability.
+
+    Context:
+    one poor aggregate metric can hide whether errors are broadly shared across
+    the cohort or concentrated in a smaller subset of subjects. This text uses
+    the canonical grouped subject table to surface that distinction.
+    """
+    if by_subject.empty:
+        return (
+            "Subject-level grouped metrics are unavailable, so the shared report "
+            "cannot summarize cross-subject variability for this run."
+        )
+
+    frame = _sorted_grouped_frame(by_subject)
+
+    mae_worst_row = frame.loc[frame["mae"].idxmax()]
+    mae_best_row = frame.loc[frame["mae"].idxmin()]
+
+    text = (
+        "Across subjects, the lowest MAE appears at group_value="
+        f"{mae_best_row.get('group_value')} with MAE="
+        f"{_format_optional_metric(mae_best_row.get('mae'))}, while the highest "
+        "MAE appears at group_value="
+        f"{mae_worst_row.get('group_value')} with MAE="
+        f"{_format_optional_metric(mae_worst_row.get('mae'))}."
+    )
+
+    if "bias" in frame.columns:
+        absolute_bias = frame["bias"].abs()
+        if not bool(absolute_bias.isna().all()):
+            bias_row = frame.loc[absolute_bias.idxmax()]
+            text += (
+                " The largest absolute subject bias appears at group_value="
+                f"{bias_row.get('group_value')} with bias="
+                f"{_format_optional_metric(bias_row.get('bias'))}."
+            )
+
+    return text
+
+
+def _build_glucose_range_overview(by_glucose_range: pd.DataFrame) -> str:
+    """Build a compact summary of glucose-range performance differences.
+
+    Context:
+    grouped glucose-range metrics help show whether the forecasting stack is
+    behaving differently in lower, mid, or higher glucose regions. This is a
+    high-value interpretability surface and belongs in the canonical report
+    text because multiple sinks benefit from the same summary.
+    """
+    if by_glucose_range.empty:
+        return (
+            "Glucose-range grouped metrics are unavailable, so the shared report "
+            "cannot summarize range-specific behavior for this run."
+        )
+
+    frame = _sorted_grouped_frame(by_glucose_range)
+    mae_worst_row = frame.loc[frame["mae"].idxmax()]
+    mae_best_row = frame.loc[frame["mae"].idxmin()]
+
+    text = (
+        "Across glucose ranges, the lowest MAE appears at group_value="
+        f"{mae_best_row.get('group_value')} with MAE="
+        f"{_format_optional_metric(mae_best_row.get('mae'))}, while the highest "
+        "MAE appears at group_value="
+        f"{mae_worst_row.get('group_value')} with MAE="
+        f"{_format_optional_metric(mae_worst_row.get('mae'))}."
+    )
+
+    if "empirical_interval_coverage" in frame.columns:
+        coverage_series = frame["empirical_interval_coverage"]
+        if not bool(coverage_series.isna().all()):
+            coverage_low_row = frame.loc[coverage_series.idxmin()]
+            coverage_high_row = frame.loc[coverage_series.idxmax()]
+            text += (
+                " Empirical interval coverage ranges from "
+                f"{_format_optional_metric(coverage_low_row.get('empirical_interval_coverage'))} "
+                f"at group_value={coverage_low_row.get('group_value')} to "
+                f"{_format_optional_metric(coverage_high_row.get('empirical_interval_coverage'))} "
+                f"at group_value={coverage_high_row.get('group_value')}."
+            )
+
+    return text
+
+
 def _build_report_text(
     *,
     prediction_table: pd.DataFrame,
     evaluation_result: EvaluationResult | None,
     quantiles: Sequence[float],
+    by_horizon: pd.DataFrame,
+    by_subject: pd.DataFrame,
+    by_glucose_range: pd.DataFrame,
 ) -> dict[str, str]:
     """
     Build lightweight narrative text summaries for the shared report.
@@ -266,6 +494,11 @@ def _build_report_text(
     The aim is to provide concise human-readable interpretation surfaces for
     later sinks without turning the reporting package into a heavyweight
     natural-language report system.
+
+    Important design rule:
+    these summaries must be derived only from already-canonical report inputs.
+    They should not introduce new evaluation semantics or replace grouped
+    metric computation performed upstream in the evaluation layer.
     """
     text: dict[str, str] = {}
 
@@ -287,16 +520,8 @@ def _build_report_text(
     if evaluation_result is not None:
         summary = evaluation_result.summary
 
-        coverage_text = (
-            "unavailable"
-            if summary.empirical_interval_coverage is None
-            else f"{summary.empirical_interval_coverage:.4f}"
-        )
-        interval_text = (
-            "unavailable"
-            if summary.mean_interval_width is None
-            else f"{summary.mean_interval_width:.4f}"
-        )
+        coverage_text = _format_optional_metric(summary.empirical_interval_coverage)
+        interval_text = _format_optional_metric(summary.mean_interval_width)
         text["metric_overview"] = (
             "Detailed evaluation summary: "
             f"MAE={summary.mae:.4f}, RMSE={summary.rmse:.4f}, "
@@ -315,6 +540,17 @@ def _build_report_text(
         "Quantile configuration for this shared report: "
         + ", ".join(f"{float(q):.3f}" for q in quantiles)
     )
+
+    # These richer interpretation blocks are intentionally compact. They add
+    # sink-ready narrative value without moving plotting or metric-computation
+    # responsibilities into the builder.
+    text["horizon_overview"] = _build_horizon_overview(by_horizon)
+    text["probabilistic_overview"] = _build_probabilistic_overview(
+        evaluation_result=evaluation_result,
+        by_horizon=by_horizon,
+    )
+    text["subject_variability_overview"] = _build_subject_variability_overview(by_subject)
+    text["glucose_range_overview"] = _build_glucose_range_overview(by_glucose_range)
 
     return text
 
@@ -352,6 +588,10 @@ def build_shared_report(
                 "dataset_overview": "Shared report is empty because no prediction batches were provided.",
                 "metric_overview": "No evaluation summary is available because no prediction batches were provided.",
                 "quantile_overview": "Quantile configuration is unavailable because no prediction batches were provided.",
+                "horizon_overview": "Horizon-level grouped metrics are unavailable because no prediction batches were provided.",
+                "probabilistic_overview": "Probabilistic grouped interpretation is unavailable because no prediction batches were provided.",
+                "subject_variability_overview": "Subject-level grouped metrics are unavailable because no prediction batches were provided.",
+                "glucose_range_overview": "Glucose-range grouped metrics are unavailable because no prediction batches were provided.",
             },
             figures={},
             metadata={
@@ -399,6 +639,9 @@ def build_shared_report(
         prediction_table=prediction_table,
         evaluation_result=evaluation_result,
         quantiles=quantiles,
+        by_horizon=by_horizon,
+        by_subject=by_subject,
+        by_glucose_range=by_glucose_range,
     )
 
     # Keep figure payloads intentionally lightweight for now. Concrete sinks can

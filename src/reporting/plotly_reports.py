@@ -62,38 +62,61 @@ def _build_horizon_metrics_frame(
     if shared_report is None:
         return pd.DataFrame()
 
-    # The canonical grouped horizon table is packaged by `build_shared_report`
-    # from the structured evaluation result. If it is absent here, the sink
-    # intentionally refuses to act as a backup metrics engine.
     by_horizon = shared_report.tables.get("by_horizon", pd.DataFrame()).copy()
     if by_horizon.empty:
         return pd.DataFrame()
 
-    # The shared-report grouped-table contract uses `group_value` as the stable
-    # axis field across grouped surfaces. For the horizon figure we rename that
-    # field into a more explicit plotting-oriented column while preserving the
-    # original metric columns.
     required_columns = {"group_value", "mae", "rmse"}
     if not required_columns.issubset(set(by_horizon.columns)):
         return pd.DataFrame()
 
-    horizon_metrics = by_horizon.rename(
-        columns={"group_value": "horizon_index"}
-    ).copy()
+    horizon_metrics = by_horizon.rename(columns={"group_value": "horizon_index"}).copy()
+    horizon_metrics.sort_values(by=["horizon_index"], inplace=True)
+    horizon_metrics.reset_index(drop=True, inplace=True)
 
-    # Keep only the columns the figure actually understands so the sink remains
-    # resilient to future expansion of the grouped report schema.
+    # Keep only the columns the figures currently understand so the sink stays
+    # resilient to future shared-report expansion.
     desired_columns = [
         column
         for column in (
             "horizon_index",
             "mae",
             "rmse",
+            "bias",
+            "overall_pinball_loss",
             "mean_interval_width",
+            "empirical_interval_coverage",
         )
         if column in horizon_metrics.columns
     ]
     return horizon_metrics.loc[:, desired_columns]
+
+
+def _build_grouped_metrics_frame(
+    *,
+    shared_report: SharedReport | None,
+    table_name: str,
+    required_columns: tuple[str, ...],
+) -> pd.DataFrame:
+    """Return one canonical grouped table after minimal Plotly normalization.
+
+    Context:
+    subject and glucose-range reports are already packaged upstream. The Plotly
+    sink only needs a light validation and sorting layer before rendering them.
+    """
+    if shared_report is None:
+        return pd.DataFrame()
+
+    frame = shared_report.tables.get(table_name, pd.DataFrame()).copy()
+    if frame.empty:
+        return pd.DataFrame()
+
+    if not set(required_columns).issubset(set(frame.columns)):
+        return pd.DataFrame()
+
+    frame.sort_values(by=["group_value"], inplace=True)
+    frame.reset_index(drop=True, inplace=True)
+    return frame
 
 
 def generate_plotly_reports(
@@ -126,38 +149,21 @@ def generate_plotly_reports(
     - residual and forecast-overview figures may render from the flat
       prediction table because they are direct visualizations of row-level
       prediction data
-    - the horizon-metrics figure must render only from the canonical grouped
-      `by_horizon` table packaged inside `SharedReport`
-    - when that grouped table is unavailable, the sink omits the
-      `horizon_metrics` artifact rather than recomputing grouped metrics
-
-    Returns:
-        A mapping from report name to written HTML path.
-
-    Behavior:
-    - returns an empty mapping when Plotly is unavailable
-    - returns an empty mapping when there is no usable prediction table
-    - writes a small number of stable report artifacts into `report_dir`
+    - grouped horizon, subject, and glucose-range figures must render only from
+      canonical grouped report tables packaged inside `SharedReport`
+    - when a required grouped table is unavailable, the corresponding artifact
+      is omitted rather than recomputed here
     """
-    # These reports are intentionally first-pass diagnostics rather than a full
-    # experiment reporting system. The aim is to generate a few reliable HTML
-    # artifacts automatically so each run leaves behind something visual and
-    # shareable.
     if report_dir is None:
         return {}
 
     report_dir = Path(report_dir)
 
-    # Plotly is optional by design. Missing the dependency should degrade
-    # gracefully instead of breaking the rest of the workflow.
     if not _has_module("plotly"):
         return {}
 
     frame: pd.DataFrame
     if shared_report is not None:
-        # Prefer the canonical in-memory shared report when it already exists.
-        # This avoids redundant disk reads and keeps the sink aligned with the
-        # reporting package's "build once, render many ways" design.
         frame = shared_report.tables.get("prediction_table", pd.DataFrame()).copy()
     else:
         if prediction_table_path is None:
@@ -167,9 +173,6 @@ def generate_plotly_reports(
         if not prediction_table_path.exists():
             return {}
 
-        # This path-based fallback preserves the historical usage style so
-        # lighter or transitional workflows do not have to provide a
-        # `SharedReport` object yet.
         frame = pd.read_csv(prediction_table_path)
 
     if frame.empty:
@@ -184,13 +187,6 @@ def generate_plotly_reports(
     # ------------------------------------------------------------------
     # 1. Residual histogram
     # ------------------------------------------------------------------
-    # Residual distribution is one of the fastest sanity checks for:
-    # - broad bias direction
-    # - outlier behavior
-    # - whether errors are tightly concentrated or widely spread
-    #
-    # It is intentionally cheap to compute, so every run can leave behind at
-    # least one immediately useful error view.
     residual_histogram = px.histogram(
         frame,
         x="residual",
@@ -204,9 +200,6 @@ def generate_plotly_reports(
     # ------------------------------------------------------------------
     # 2. Horizon metrics figure
     # ------------------------------------------------------------------
-    # Under the stricter canonical reporting rule, grouped horizon metrics must
-    # come from the shared report's `by_horizon` table. The sink no longer
-    # derives grouped metrics from flat prediction rows.
     horizon_metrics = _build_horizon_metrics_frame(shared_report=shared_report)
     if not horizon_metrics.empty:
         horizon_metrics_fig = go.Figure()
@@ -227,9 +220,6 @@ def generate_plotly_reports(
             )
         )
 
-        # When interval-width information exists, surface it on a secondary axis
-        # so uncertainty-width growth can be visually compared with point-error
-        # growth without collapsing unlike scales into one axis.
         mean_interval_width = horizon_metrics.get("mean_interval_width")
         if mean_interval_width is not None and not bool(mean_interval_width.isna().all()):
             horizon_metrics_fig.add_trace(
@@ -255,41 +245,163 @@ def generate_plotly_reports(
         horizon_metrics_fig.write_html(str(horizon_metrics_path))
         report_paths["horizon_metrics"] = horizon_metrics_path
 
-    # ------------------------------------------------------------------
-    # 3. Forecast overview figure
-    # ------------------------------------------------------------------
-    # This is the most qualitative sink artifact. It overlays:
-    # - true target values
-    # - median prediction
-    # - simple prediction interval band when available
-    #
-    # Subject count is capped intentionally so the output stays readable and
-    # does not balloon in size for larger runs.
-    overview_fig = go.Figure()
+        # Bias and pinball loss are kept in a separate artifact so the main
+        # horizon page stays readable while still surfacing directional and
+        # probabilistic quality behavior from the same canonical grouped table.
+        if "bias" in horizon_metrics.columns or "overall_pinball_loss" in horizon_metrics.columns:
+            horizon_bias_fig = go.Figure()
 
+            if "bias" in horizon_metrics.columns:
+                horizon_bias_fig.add_trace(
+                    go.Scatter(
+                        x=horizon_metrics["horizon_index"],
+                        y=horizon_metrics["bias"],
+                        mode="lines+markers",
+                        name="Bias",
+                    )
+                )
+
+            pinball_series = horizon_metrics.get("overall_pinball_loss")
+            if pinball_series is not None and not bool(pinball_series.isna().all()):
+                horizon_bias_fig.add_trace(
+                    go.Scatter(
+                        x=horizon_metrics["horizon_index"],
+                        y=horizon_metrics["overall_pinball_loss"],
+                        mode="lines+markers",
+                        name="Overall Pinball Loss",
+                        yaxis="y2",
+                    )
+                )
+                horizon_bias_fig.update_layout(
+                    yaxis2=dict(
+                        title="Pinball Loss",
+                        overlaying="y",
+                        side="right",
+                        showgrid=False,
+                    )
+                )
+
+            horizon_bias_fig.update_layout(title="Bias And Pinball Loss By Forecast Horizon")
+            horizon_bias_path = report_dir / "horizon_bias.html"
+            horizon_bias_fig.write_html(str(horizon_bias_path))
+            report_paths["horizon_bias"] = horizon_bias_path
+
+        # Coverage gets its own page because it often benefits from being read
+        # as a calibration-focused artifact rather than mixed into error plots.
+        coverage_series = horizon_metrics.get("empirical_interval_coverage")
+        if coverage_series is not None and not bool(coverage_series.isna().all()):
+            horizon_coverage_fig = go.Figure()
+            horizon_coverage_fig.add_trace(
+                go.Scatter(
+                    x=horizon_metrics["horizon_index"],
+                    y=horizon_metrics["empirical_interval_coverage"],
+                    mode="lines+markers",
+                    name="Empirical Coverage",
+                )
+            )
+            horizon_coverage_fig.update_layout(title="Empirical Coverage By Forecast Horizon")
+            horizon_coverage_path = report_dir / "horizon_coverage.html"
+            horizon_coverage_fig.write_html(str(horizon_coverage_path))
+            report_paths["horizon_coverage"] = horizon_coverage_path
+
+    # ------------------------------------------------------------------
+    # 3. Subject-level grouped metrics
+    # ------------------------------------------------------------------
+    by_subject = _build_grouped_metrics_frame(
+        shared_report=shared_report,
+        table_name="by_subject",
+        required_columns=("group_value", "mae"),
+    )
+    if not by_subject.empty:
+        subject_fig = go.Figure()
+        subject_fig.add_trace(
+            go.Bar(
+                x=by_subject["group_value"].astype(str),
+                y=by_subject["mae"],
+                name="MAE",
+            )
+        )
+        if "bias" in by_subject.columns and not bool(by_subject["bias"].isna().all()):
+            subject_fig.add_trace(
+                go.Scatter(
+                    x=by_subject["group_value"].astype(str),
+                    y=by_subject["bias"],
+                    mode="lines+markers",
+                    name="Bias",
+                    yaxis="y2",
+                )
+            )
+            subject_fig.update_layout(
+                yaxis2=dict(
+                    title="Bias",
+                    overlaying="y",
+                    side="right",
+                    showgrid=False,
+                )
+            )
+        subject_fig.update_layout(title="Grouped Metrics By Subject")
+        subject_path = report_dir / "subject_metrics.html"
+        subject_fig.write_html(str(subject_path))
+        report_paths["subject_metrics"] = subject_path
+
+    # ------------------------------------------------------------------
+    # 4. Glucose-range grouped metrics
+    # ------------------------------------------------------------------
+    by_glucose_range = _build_grouped_metrics_frame(
+        shared_report=shared_report,
+        table_name="by_glucose_range",
+        required_columns=("group_value", "mae"),
+    )
+    if not by_glucose_range.empty:
+        glucose_range_fig = go.Figure()
+        glucose_range_fig.add_trace(
+            go.Bar(
+                x=by_glucose_range["group_value"].astype(str),
+                y=by_glucose_range["mae"],
+                name="MAE",
+            )
+        )
+        coverage_series = by_glucose_range.get("empirical_interval_coverage")
+        if coverage_series is not None and not bool(coverage_series.isna().all()):
+            glucose_range_fig.add_trace(
+                go.Scatter(
+                    x=by_glucose_range["group_value"].astype(str),
+                    y=by_glucose_range["empirical_interval_coverage"],
+                    mode="lines+markers",
+                    name="Empirical Coverage",
+                    yaxis="y2",
+                )
+            )
+            glucose_range_fig.update_layout(
+                yaxis2=dict(
+                    title="Coverage",
+                    overlaying="y",
+                    side="right",
+                    showgrid=False,
+                )
+            )
+        glucose_range_fig.update_layout(title="Grouped Metrics By Glucose Range")
+        glucose_range_path = report_dir / "glucose_range_metrics.html"
+        glucose_range_fig.write_html(str(glucose_range_path))
+        report_paths["glucose_range_metrics"] = glucose_range_path
+
+    # ------------------------------------------------------------------
+    # 5. Forecast overview figure
+    # ------------------------------------------------------------------
+    overview_fig = go.Figure()
     subject_ids = list(dict.fromkeys(frame["subject_id"].tolist()))[:max_subjects]
     filtered = frame[frame["subject_id"].isin(subject_ids)].copy()
     filtered["timestamp"] = pd.to_datetime(filtered["timestamp"])
-    # Use keyword argument for static type-checker friendliness
     filtered.sort_values(by=["subject_id", "timestamp"], inplace=True)
 
-    # Quantile columns are global schema-level columns of the prediction
-        # table, so derive them from the full frame once per loop iteration
-        # rather than relying on the narrowed subject slice's inferred type.
     quantile_columns = sorted(
         column for column in frame.columns if str(column).startswith("pred_q")
-    )   
-    
+    )
     for subject_id in subject_ids:
-        # `loc[...]` keeps the intent explicit for both readers and static type
-        # checkers: we are selecting rows from the canonical prediction-table
-        # DataFrame for one subject.
         subject_frame = filtered.loc[filtered["subject_id"] == subject_id, :]
         if len(subject_frame) == 0:
             continue
 
-        # Plot the observed target first so all forecast traces are interpreted
-        # relative to the real glucose trajectory.
         overview_fig.add_trace(
             go.Scatter(
                 x=subject_frame["timestamp"],
@@ -310,10 +422,6 @@ def generate_plotly_reports(
         if len(quantile_columns) >= 2:
             lower = quantile_columns[0]
             upper = quantile_columns[-1]
-
-            # Plotly interval fill uses two traces: an upper bound followed by a
-            # lower bound filled to the previous trace. Keeping this explicit
-            # makes the intent easier to understand during maintenance.
             overview_fig.add_trace(
                 go.Scatter(
                     x=subject_frame["timestamp"],
@@ -340,5 +448,4 @@ def generate_plotly_reports(
     overview_path = report_dir / "forecast_overview.html"
     overview_fig.write_html(str(overview_path))
     report_paths["forecast_overview"] = overview_path
-
     return report_paths

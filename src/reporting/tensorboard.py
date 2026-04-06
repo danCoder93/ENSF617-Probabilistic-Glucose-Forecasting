@@ -320,6 +320,33 @@ def _build_residual_histogram_figure(shared_report: SharedReport) -> Any | None:
     return figure
 
 
+def _normalized_grouped_frame(
+    shared_report: SharedReport,
+    *,
+    table_name: str,
+    required_columns: Sequence[str],
+) -> pd.DataFrame:
+    """Return one canonical grouped report table after minimal sink normalization.
+
+    Context:
+    the shared report stores grouped tables in a repository-stable schema. Sink
+    code still benefits from one small helper that validates presence, sorts the
+    canonical group axis, and returns an isolated copy for plotting.
+    """
+    frame = shared_report.tables.get(table_name, pd.DataFrame()).copy()
+    if frame.empty:
+        return pd.DataFrame()
+
+    if not set(required_columns).issubset(set(frame.columns)):
+        return pd.DataFrame()
+
+    # Sorting on the canonical grouped axis keeps line plots monotonic for
+    # horizon views and deterministic for subgroup bar charts.
+    frame.sort_values(by=["group_value"], inplace=True)
+    frame.reset_index(drop=True, inplace=True)
+    return frame
+
+
 def _build_horizon_metrics_figure(shared_report: SharedReport) -> Any | None:
     """
     Build a matplotlib horizon-metrics figure from shared-report tables.
@@ -329,12 +356,12 @@ def _build_horizon_metrics_figure(shared_report: SharedReport) -> Any | None:
     for sequence forecasting because it reveals whether performance degrades
     sharply or gradually across the prediction horizon.
     """
-    by_horizon = shared_report.tables.get("by_horizon", pd.DataFrame())
+    by_horizon = _normalized_grouped_frame(
+        shared_report,
+        table_name="by_horizon",
+        required_columns=("group_value", "mae", "rmse"),
+    )
     if by_horizon.empty:
-        return None
-
-    required_columns = {"group_value", "mae", "rmse"}
-    if not required_columns.issubset(set(by_horizon.columns)):
         return None
 
     try:
@@ -354,6 +381,194 @@ def _build_horizon_metrics_figure(shared_report: SharedReport) -> Any | None:
     axes.set_xlabel("Horizon Index")
     axes.set_ylabel("Metric Value")
     axes.legend()
+    figure.tight_layout()
+    return figure
+
+
+def _build_horizon_uncertainty_figure(shared_report: SharedReport) -> Any | None:
+    """Build a horizon-wise uncertainty and calibration figure.
+
+    Context:
+    the canonical `by_horizon` table already carries uncertainty-oriented fields
+    such as interval width and empirical coverage. Surfacing them here turns
+    TensorBoard into a stronger probabilistic forecasting surface without
+    changing evaluation semantics.
+    """
+    by_horizon = _normalized_grouped_frame(
+        shared_report,
+        table_name="by_horizon",
+        required_columns=("group_value",),
+    )
+    if by_horizon.empty:
+        return None
+
+    has_width = "mean_interval_width" in by_horizon.columns and not bool(
+        by_horizon["mean_interval_width"].isna().all()
+    )
+    has_coverage = "empirical_interval_coverage" in by_horizon.columns and not bool(
+        by_horizon["empirical_interval_coverage"].isna().all()
+    )
+
+    if not has_width and not has_coverage:
+        return None
+
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return None
+
+    figure = plt.figure()
+    axes = figure.add_subplot(1, 1, 1)
+    horizon_index = by_horizon["group_value"]
+
+    # Width and coverage can have unlike scales, so a secondary axis keeps both
+    # readable without rescaling or silently discarding one of them.
+    secondary_axes = None
+    if has_width:
+        axes.plot(
+            horizon_index,
+            by_horizon["mean_interval_width"],
+            marker="o",
+            label="Mean Interval Width",
+        )
+
+    if has_coverage:
+        secondary_axes = axes.twinx()
+        secondary_axes.plot(
+            horizon_index,
+            by_horizon["empirical_interval_coverage"],
+            marker="o",
+            label="Empirical Coverage",
+        )
+        secondary_axes.set_ylabel("Coverage")
+
+    axes.set_title("Uncertainty By Forecast Horizon")
+    axes.set_xlabel("Horizon Index")
+    axes.set_ylabel("Interval Width")
+
+    # Matplotlib keeps legends per-axis, so merge handles explicitly when a
+    # secondary axis exists.
+    handles, labels = axes.get_legend_handles_labels()
+    if secondary_axes is not None:
+        secondary_handles, secondary_labels = secondary_axes.get_legend_handles_labels()
+        handles += secondary_handles
+        labels += secondary_labels
+    if handles:
+        axes.legend(handles, labels)
+
+    figure.tight_layout()
+    return figure
+
+
+def _build_horizon_bias_figure(shared_report: SharedReport) -> Any | None:
+    """Build a horizon-wise bias and pinball-loss figure.
+
+    Context:
+    the grouped horizon table already carries signed bias and pinball-loss
+    summaries. Logging them separately keeps the main horizon error plot clean
+    while still surfacing important probabilistic and directional behavior.
+    """
+    by_horizon = _normalized_grouped_frame(
+        shared_report,
+        table_name="by_horizon",
+        required_columns=("group_value",),
+    )
+    if by_horizon.empty:
+        return None
+
+    has_bias = "bias" in by_horizon.columns and not bool(by_horizon["bias"].isna().all())
+    has_pinball = "overall_pinball_loss" in by_horizon.columns and not bool(
+        by_horizon["overall_pinball_loss"].isna().all()
+    )
+
+    if not has_bias and not has_pinball:
+        return None
+
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return None
+
+    figure = plt.figure()
+    axes = figure.add_subplot(1, 1, 1)
+    horizon_index = by_horizon["group_value"]
+
+    if has_bias:
+        axes.plot(horizon_index, by_horizon["bias"], marker="o", label="Bias")
+
+    secondary_axes = None
+    if has_pinball:
+        secondary_axes = axes.twinx()
+        secondary_axes.plot(
+            horizon_index,
+            by_horizon["overall_pinball_loss"],
+            marker="o",
+            label="Overall Pinball Loss",
+        )
+        secondary_axes.set_ylabel("Pinball Loss")
+
+    axes.set_title("Bias And Pinball Loss By Forecast Horizon")
+    axes.set_xlabel("Horizon Index")
+    axes.set_ylabel("Bias")
+
+    handles, labels = axes.get_legend_handles_labels()
+    if secondary_axes is not None:
+        secondary_handles, secondary_labels = secondary_axes.get_legend_handles_labels()
+        handles += secondary_handles
+        labels += secondary_labels
+    if handles:
+        axes.legend(handles, labels)
+
+    figure.tight_layout()
+    return figure
+
+
+def _build_grouped_bar_figure(
+    shared_report: SharedReport,
+    *,
+    table_name: str,
+    metric_name: str,
+    title: str,
+    ylabel: str,
+) -> Any | None:
+    """Build a compact grouped bar chart for one canonical grouped table.
+
+    Context:
+    subject-level and glucose-range tables are already packaged canonically. A
+    small generic helper keeps the sink consistent when turning those grouped
+    tables into simple bar charts for TensorBoard.
+    """
+    frame = _normalized_grouped_frame(
+        shared_report,
+        table_name=table_name,
+        required_columns=("group_value", metric_name),
+    )
+    if frame.empty:
+        return None
+
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return None
+
+    figure = plt.figure()
+    axes = figure.add_subplot(1, 1, 1)
+
+    # Converting the canonical group values to strings keeps category labels
+    # stable regardless of whether the grouping key is numeric, textual, or a
+    # pandas interval-like object.
+    group_labels = frame["group_value"].astype(str)
+    axes.bar(group_labels, frame[metric_name])
+    axes.set_title(title)
+    axes.set_xlabel("Group")
+    axes.set_ylabel(ylabel)
+
+    # Larger grouped surfaces can have longer labels, so a light rotation keeps
+    # them readable without changing the underlying grouped contract.
+    for label in axes.get_xticklabels():
+        label.set_rotation(45)
+        label.set_horizontalalignment("right")
+
     figure.tight_layout()
     return figure
 
@@ -393,7 +608,7 @@ def _build_forecast_overview_figure(
 
     frame = prediction_table.copy()
     frame["timestamp"] = pd.to_datetime(frame["timestamp"])
-    frame.sort_values(["subject_id", "timestamp"], inplace=True)
+    frame.sort_values(by=["subject_id", "timestamp"], inplace=True)
 
     subject_ids = list(dict.fromkeys(frame["subject_id"].tolist()))[:max_subjects]
     if not subject_ids:
@@ -407,7 +622,7 @@ def _build_forecast_overview_figure(
     )
 
     for subject_id in subject_ids:
-        subject_frame = frame[frame["subject_id"] == subject_id]
+        subject_frame = frame.loc[frame["subject_id"] == subject_id, :]
         if subject_frame.empty:
             continue
 
@@ -464,6 +679,44 @@ def _iter_report_figures(
     horizon_metrics = _build_horizon_metrics_figure(shared_report)
     if horizon_metrics is not None:
         yield "horizon_metrics", horizon_metrics
+
+    horizon_uncertainty = _build_horizon_uncertainty_figure(shared_report)
+    if horizon_uncertainty is not None:
+        yield "horizon_uncertainty", horizon_uncertainty
+
+    horizon_bias = _build_horizon_bias_figure(shared_report)
+    if horizon_bias is not None:
+        yield "horizon_bias", horizon_bias
+
+    subject_mae = _build_grouped_bar_figure(
+        shared_report,
+        table_name="by_subject",
+        metric_name="mae",
+        title="MAE By Subject",
+        ylabel="MAE",
+    )
+    if subject_mae is not None:
+        yield "subject_mae", subject_mae
+
+    glucose_range_mae = _build_grouped_bar_figure(
+        shared_report,
+        table_name="by_glucose_range",
+        metric_name="mae",
+        title="MAE By Glucose Range",
+        ylabel="MAE",
+    )
+    if glucose_range_mae is not None:
+        yield "glucose_range_mae", glucose_range_mae
+
+    glucose_range_coverage = _build_grouped_bar_figure(
+        shared_report,
+        table_name="by_glucose_range",
+        metric_name="empirical_interval_coverage",
+        title="Empirical Coverage By Glucose Range",
+        ylabel="Coverage",
+    )
+    if glucose_range_coverage is not None:
+        yield "glucose_range_coverage", glucose_range_coverage
 
     forecast_overview = _build_forecast_overview_figure(
         shared_report,
