@@ -21,10 +21,7 @@ nvidia-smi
 
 JOB_SCRATCH="/scratch/${SLURM_JOB_ID}"
 mkdir -p "$JOB_SCRATCH"
-mkdir -p "${JOB_SCRATCH}/artifacts"
-
-ARTIFACTS_PATH= "${JOB_SCRATCH}/artifacts/glucose_${SLURM_JOB_ID}"
-echo "Artifacts File: ${ARTIFACTS_PATH}"
+mkdir -p "${SLURM_SUBMIT_DIR}/artifacts"
 
 python main.py \
   --device-profile slurm-cuda \
@@ -34,4 +31,4 @@ python main.py \
   --device-stats \
   --enable-activation-stats \
   --enable-profiler \
-  --output-dir "${ARTIFACTS_PATH}"
+  --output-dir "${SLURM_SUBMIT_DIR}/artifacts/glucose_${SLURM_JOB_ID}"
