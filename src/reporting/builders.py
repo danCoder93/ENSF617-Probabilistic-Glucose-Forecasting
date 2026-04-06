@@ -123,13 +123,20 @@ def _build_prediction_rows(
                 timestamp = decoder_start + pd.Timedelta(
                     minutes=sampling_interval_minutes * horizon_index
                 )
+
+                # `pd.Timestamp(...)` normally gives us a timestamp-like object
+                # with `isoformat()`, but pandas typing can widen some datetime
+                # expressions to include `NaTType`. Converting through `str(...)`
+                # keeps the exported reporting row stable and avoids a false
+                # static-analysis complaint without changing runtime behavior for
+                # valid timestamps.
                 row = {
                     "prediction_batch_index": batch_index,
                     "sample_index_within_batch": sample_index,
                     "subject_id": subject_id,
                     "decoder_start": str(metadata.get("decoder_start", [""])[sample_index]),
                     "decoder_end": str(metadata.get("decoder_end", [""])[sample_index]),
-                    "timestamp": timestamp.isoformat(),
+                    "timestamp": str(timestamp),
                     "horizon_index": horizon_index,
                     "target": float(target_cpu[sample_index, horizon_index].item()),
                 }
@@ -209,7 +216,11 @@ def _grouped_rows_to_frame(rows: Sequence[GroupedMetricRow]) -> pd.DataFrame:
     even when the table contains zero rows.
     """
     if not rows:
-        return pd.DataFrame(
+        # Build the empty frame from an empty row list plus an explicit schema.
+        # This is equivalent at runtime to passing `columns=[...]` directly, but
+        # it is friendlier to static type checkers for the pandas constructor.
+        return pd.DataFrame.from_records(
+            [],
             columns=[
                 "group_name",
                 "group_value",
@@ -220,7 +231,7 @@ def _grouped_rows_to_frame(rows: Sequence[GroupedMetricRow]) -> pd.DataFrame:
                 "overall_pinball_loss",
                 "mean_interval_width",
                 "empirical_interval_coverage",
-            ]
+            ],
         )
 
     return pd.DataFrame(

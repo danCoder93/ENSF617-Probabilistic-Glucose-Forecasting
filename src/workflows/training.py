@@ -673,7 +673,7 @@ def run_training_workflow(
     from evaluation import evaluate_prediction_batches
     from reporting import (
         build_shared_report,
-        export_prediction_table,
+        export_prediction_table_from_report,
         generate_plotly_reports,
         log_shared_report_to_tensorboard,
     )
@@ -865,16 +865,15 @@ def run_training_workflow(
             # for the raw tensor artifact. We keep both because they serve
             # different debugging/research use cases.
             #
-            # The export sink remains thin: it writes the canonical flat
-            # prediction table shape while staying aligned with the same shared
-            # report/evaluation surfaces used elsewhere in the post-run stack.
-            prediction_table_path = export_prediction_table(
-                datamodule=datamodule,
-                predictions=test_predictions,
-                quantiles=quantiles,
+            # The workflow already built the canonical `shared_report` above, so
+            # the strict export path now consumes that same in-memory report
+            # directly instead of rebuilding reporting surfaces from raw inputs.
+            # This keeps CSV export aligned with the same "build once, consume
+            # many ways" pattern already used by the TensorBoard and Plotly
+            # reporting sinks.
+            prediction_table_path = export_prediction_table_from_report(
+                shared_report=shared_report,
                 output_path=effective_observability_config.prediction_table_path,
-                sampling_interval_minutes=effective_config.data.sampling_interval_minutes,
-                evaluation_result=test_evaluation,
             )
 
         if effective_observability_config.enable_plot_reports:
@@ -889,7 +888,6 @@ def run_training_workflow(
                 prediction_table_path,
                 report_dir=effective_observability_config.report_dir,
                 max_subjects=effective_observability_config.max_forecast_subjects_per_report,
-                evaluation_result=test_evaluation,
                 shared_report=shared_report,
             )
 

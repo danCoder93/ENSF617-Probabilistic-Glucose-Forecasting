@@ -55,7 +55,10 @@ from __future__ import annotations
 # across smaller files.
 
 from reporting.builders import build_shared_report
-from reporting.exports import export_prediction_table
+from reporting.exports import (
+    export_prediction_table,
+    export_prediction_table_from_report,
+)
 from reporting.plotly_reports import generate_plotly_reports
 from reporting.types import SharedReport, TestDataloaderProvider
 from reporting.tensorboard import log_shared_report_to_tensorboard
@@ -77,5 +80,6 @@ __all__ = [
     "build_shared_report",
     "export_prediction_table",
     "generate_plotly_reports",
-    "log_shared_report_to_tensorboard"
+    "log_shared_report_to_tensorboard",
+    "export_prediction_table_from_report"
 ]

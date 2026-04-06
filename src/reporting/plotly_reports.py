@@ -27,12 +27,10 @@ from __future__ import annotations
 # packaged reporting surfaces, not quietly become a second metric engine.
 
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 
 from config import PathInput
-from evaluation import EvaluationResult
 from observability.utils import _has_module
 
 from reporting.types import SharedReport
@@ -40,59 +38,62 @@ from reporting.types import SharedReport
 
 def _build_horizon_metrics_frame(
     *,
-    prediction_table: pd.DataFrame,
-    evaluation_result: EvaluationResult | None,
+    shared_report: SharedReport | None,
 ) -> pd.DataFrame:
     """
     Build the horizon-metrics frame used by the lightweight Plotly sink.
 
     Context:
-    the repository already has a canonical structured evaluation surface. When
-    that surface is available, the Plotly sink should prefer it. However, the
-    HTML reports have historically also worked from the flat prediction table,
-    so this helper preserves that compatibility fallback.
+    the repository now treats grouped horizon metrics as canonical reporting
+    surfaces that belong upstream in evaluation + shared-report packaging.
 
-    Preference order:
-    1. use grouped horizon metrics from `EvaluationResult`
-    2. otherwise derive a simpler horizon summary from the prediction table
+    Canonical rule for this sink:
+    - horizon metrics must come from `SharedReport.tables["by_horizon"]`
+    - this sink does *not* derive grouped horizon metrics from the flat
+      prediction table
+    - when canonical grouped horizon data is unavailable, the horizon-metrics
+      artifact is omitted rather than recomputed here
 
     Why this helper exists:
-    the fallback logic is sink-specific. It belongs in the HTML-report module,
-    not in the canonical shared-report builder or evaluation package.
+    the sink still needs one small normalization layer because the grouped
+    report table uses repository-stable column names such as `group_value`,
+    while the Plotly figure wants an explicit horizon-axis column.
     """
-    if evaluation_result is not None and evaluation_result.by_horizon:
-        # Structured grouped evaluation is the preferred source because it is
-        # the repository's canonical detailed-metric surface.
-        return pd.DataFrame(
-            {
-                "horizon_index": [row.group_value for row in evaluation_result.by_horizon],
-                "mae": [row.mae for row in evaluation_result.by_horizon],
-                "rmse": [row.rmse for row in evaluation_result.by_horizon],
-                "mean_interval_width": [
-                    row.mean_interval_width for row in evaluation_result.by_horizon
-                ],
-            }
+    if shared_report is None:
+        return pd.DataFrame()
+
+    # The canonical grouped horizon table is packaged by `build_shared_report`
+    # from the structured evaluation result. If it is absent here, the sink
+    # intentionally refuses to act as a backup metrics engine.
+    by_horizon = shared_report.tables.get("by_horizon", pd.DataFrame()).copy()
+    if by_horizon.empty:
+        return pd.DataFrame()
+
+    # The shared-report grouped-table contract uses `group_value` as the stable
+    # axis field across grouped surfaces. For the horizon figure we rename that
+    # field into a more explicit plotting-oriented column while preserving the
+    # original metric columns.
+    required_columns = {"group_value", "mae", "rmse"}
+    if not required_columns.issubset(set(by_horizon.columns)):
+        return pd.DataFrame()
+
+    horizon_metrics = by_horizon.rename(
+        columns={"group_value": "horizon_index"}
+    ).copy()
+
+    # Keep only the columns the figure actually understands so the sink remains
+    # resilient to future expansion of the grouped report schema.
+    desired_columns = [
+        column
+        for column in (
+            "horizon_index",
+            "mae",
+            "rmse",
+            "mean_interval_width",
         )
-
-    # The fallback path intentionally keeps the report sink usable even in
-    # lighter workflows where only the flat prediction table is available.
-    #
-    # We compute a small set of horizon-wise diagnostics because "how does
-    # error grow as forecasting looks farther ahead?" is one of the most useful
-    # first-pass views for sequence forecasting.
-    grouped = prediction_table.assign(abs_error=lambda data: data["residual"].abs()).groupby(
-        "horizon_index",
-        as_index=False,
-    )
-
-    aggregation: dict[str, Any] = {
-        "mae": ("abs_error", "mean"),
-        "rmse": ("residual", lambda values: float((values.pow(2).mean()) ** 0.5)),
-    }
-    if "prediction_interval_width" in prediction_table.columns:
-        aggregation["mean_interval_width"] = ("prediction_interval_width", "mean")
-
-    return grouped.agg(**aggregation)
+        if column in horizon_metrics.columns
+    ]
+    return horizon_metrics.loc[:, desired_columns]
 
 
 def generate_plotly_reports(
@@ -100,12 +101,11 @@ def generate_plotly_reports(
     *,
     report_dir: PathInput | None,
     max_subjects: int,
-    evaluation_result: EvaluationResult | None = None,
     shared_report: SharedReport | None = None,
 ) -> dict[str, Path]:
     """
-    Generate lightweight Plotly HTML reports from the exported prediction table
-    or a precomputed shared report.
+    Generate lightweight Plotly HTML reports from the canonical shared report
+    or a compatibility prediction-table CSV.
 
     Purpose:
     leave behind a few immediately useful human-facing diagnostics after a run
@@ -121,6 +121,15 @@ def generate_plotly_reports(
     Preferred input:
     - when `shared_report` is provided, use its canonical packaged tables
     - otherwise, fall back to reading the exported prediction-table CSV
+
+    Important canonical rule:
+    - residual and forecast-overview figures may render from the flat
+      prediction table because they are direct visualizations of row-level
+      prediction data
+    - the horizon-metrics figure must render only from the canonical grouped
+      `by_horizon` table packaged inside `SharedReport`
+    - when that grouped table is unavailable, the sink omits the
+      `horizon_metrics` artifact rather than recomputing grouped metrics
 
     Returns:
         A mapping from report name to written HTML path.
@@ -195,60 +204,56 @@ def generate_plotly_reports(
     # ------------------------------------------------------------------
     # 2. Horizon metrics figure
     # ------------------------------------------------------------------
-    # Prefer the structured evaluation result when it exists because it is the
-    # repository's canonical detailed-metric surface. The fallback still keeps
-    # the HTML sink useful when only flat prediction rows are available.
-    horizon_metrics = _build_horizon_metrics_frame(
-        prediction_table=frame,
-        evaluation_result=evaluation_result,
-    )
-
-    horizon_metrics_fig = go.Figure()
-    horizon_metrics_fig.add_trace(
-        go.Scatter(
-            x=horizon_metrics["horizon_index"],
-            y=horizon_metrics["mae"],
-            mode="lines+markers",
-            name="MAE",
-        )
-    )
-    horizon_metrics_fig.add_trace(
-        go.Scatter(
-            x=horizon_metrics["horizon_index"],
-            y=horizon_metrics["rmse"],
-            mode="lines+markers",
-            name="RMSE",
-        )
-    )
-
-    # When interval-width information exists, surface it on a secondary axis so
-    # uncertainty-width growth can be visually compared with point-error growth
-    # without collapsing unlike scales into one axis.
-    if "mean_interval_width" in horizon_metrics.columns and not horizon_metrics[
-        "mean_interval_width"
-    ].isna().all():
+    # Under the stricter canonical reporting rule, grouped horizon metrics must
+    # come from the shared report's `by_horizon` table. The sink no longer
+    # derives grouped metrics from flat prediction rows.
+    horizon_metrics = _build_horizon_metrics_frame(shared_report=shared_report)
+    if not horizon_metrics.empty:
+        horizon_metrics_fig = go.Figure()
         horizon_metrics_fig.add_trace(
             go.Scatter(
                 x=horizon_metrics["horizon_index"],
-                y=horizon_metrics["mean_interval_width"],
+                y=horizon_metrics["mae"],
                 mode="lines+markers",
-                name="Mean Interval Width",
-                yaxis="y2",
+                name="MAE",
             )
         )
-        horizon_metrics_fig.update_layout(
-            yaxis2=dict(
-                title="Interval Width",
-                overlaying="y",
-                side="right",
-                showgrid=False,
+        horizon_metrics_fig.add_trace(
+            go.Scatter(
+                x=horizon_metrics["horizon_index"],
+                y=horizon_metrics["rmse"],
+                mode="lines+markers",
+                name="RMSE",
             )
         )
 
-    horizon_metrics_fig.update_layout(title="Error Metrics By Forecast Horizon")
-    horizon_metrics_path = report_dir / "horizon_metrics.html"
-    horizon_metrics_fig.write_html(str(horizon_metrics_path))
-    report_paths["horizon_metrics"] = horizon_metrics_path
+        # When interval-width information exists, surface it on a secondary axis
+        # so uncertainty-width growth can be visually compared with point-error
+        # growth without collapsing unlike scales into one axis.
+        mean_interval_width = horizon_metrics.get("mean_interval_width")
+        if mean_interval_width is not None and not bool(mean_interval_width.isna().all()):
+            horizon_metrics_fig.add_trace(
+                go.Scatter(
+                    x=horizon_metrics["horizon_index"],
+                    y=horizon_metrics["mean_interval_width"],
+                    mode="lines+markers",
+                    name="Mean Interval Width",
+                    yaxis="y2",
+                )
+            )
+            horizon_metrics_fig.update_layout(
+                yaxis2=dict(
+                    title="Interval Width",
+                    overlaying="y",
+                    side="right",
+                    showgrid=False,
+                )
+            )
+
+        horizon_metrics_fig.update_layout(title="Error Metrics By Forecast Horizon")
+        horizon_metrics_path = report_dir / "horizon_metrics.html"
+        horizon_metrics_fig.write_html(str(horizon_metrics_path))
+        report_paths["horizon_metrics"] = horizon_metrics_path
 
     # ------------------------------------------------------------------
     # 3. Forecast overview figure
@@ -265,11 +270,22 @@ def generate_plotly_reports(
     subject_ids = list(dict.fromkeys(frame["subject_id"].tolist()))[:max_subjects]
     filtered = frame[frame["subject_id"].isin(subject_ids)].copy()
     filtered["timestamp"] = pd.to_datetime(filtered["timestamp"])
-    filtered.sort_values(["subject_id", "timestamp"], inplace=True)
+    # Use keyword argument for static type-checker friendliness
+    filtered.sort_values(by=["subject_id", "timestamp"], inplace=True)
 
+    # Quantile columns are global schema-level columns of the prediction
+        # table, so derive them from the full frame once per loop iteration
+        # rather than relying on the narrowed subject slice's inferred type.
+    quantile_columns = sorted(
+        column for column in frame.columns if str(column).startswith("pred_q")
+    )   
+    
     for subject_id in subject_ids:
-        subject_frame = filtered[filtered["subject_id"] == subject_id]
-        if subject_frame.empty:
+        # `loc[...]` keeps the intent explicit for both readers and static type
+        # checkers: we are selecting rows from the canonical prediction-table
+        # DataFrame for one subject.
+        subject_frame = filtered.loc[filtered["subject_id"] == subject_id, :]
+        if len(subject_frame) == 0:
             continue
 
         # Plot the observed target first so all forecast traces are interpreted
@@ -291,9 +307,6 @@ def generate_plotly_reports(
             )
         )
 
-        quantile_columns = sorted(
-            column for column in subject_frame.columns if column.startswith("pred_q")
-        )
         if len(quantile_columns) >= 2:
             lower = quantile_columns[0]
             upper = quantile_columns[-1]
