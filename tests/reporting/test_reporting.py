@@ -11,7 +11,7 @@ torch = pytest.importorskip("torch")
 pd = pytest.importorskip("pandas")
 
 from evaluation.types import EvaluationResult, GroupedMetricRow, MetricSummary
-from observability.reporting import export_prediction_table, generate_plotly_reports
+from reporting import export_prediction_table, generate_plotly_reports
 
 
 class StubDataModule:

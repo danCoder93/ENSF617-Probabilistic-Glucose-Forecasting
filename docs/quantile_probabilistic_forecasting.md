@@ -1,6 +1,6 @@
 # Understanding the Repository's Probabilistic Glucose Forecasting Model
 
-## A coherent guide from classical regression intuition to probabilistic forecasting, model flow, training, and output interpretation
+## Theoretical Foundations and Architectural Interpretation of Quantile-Based Probabilistic Forecasting
 
 **Purpose.** This document turns the repository's current model-facing design and the conceptual discussion around it into one coherent learning note. Its goal is not merely to list facts about the code, but to help a reader move smoothly from familiar regression thinking to the probabilistic forecasting view used by the repository's hybrid **TCN + TFT** model.
 
@@ -16,7 +16,7 @@ It does **not** discuss runtime environment logic, observability internals, work
 
 ---
 
-## 1. Starting from the familiar regression view
+## 1. Classical Regression Foundations
 
 A useful way to begin is with the most classical machine learning picture:
 
@@ -43,7 +43,7 @@ That shift motivates everything that follows.
 
 ---
 
-## 2. From point prediction to probabilistic prediction
+## 2. Transition from Point Estimation to Probabilistic Forecasting
 
 If one begins from ordinary regression, the natural first question is:
 
@@ -75,7 +75,7 @@ This makes the probabilistic model richer than a single point forecaster while s
 
 ---
 
-## 3. Why quantile regression is the right next concept
+## 3. Quantile Regression as a Distributional Learning Framework
 
 Once the need for probabilistic forecasting is established, the next academic step is to clarify what kind of probabilistic object the model is producing.
 
@@ -148,7 +148,7 @@ This makes quantile regression particularly suitable for medical time-series for
 
 ---
 
-## 4. Returning to the forecasting setting: from one future value to a future horizon
+## 4. Sequence Forecasting and the Concept of Prediction Horizon
 
 Once the reader understands that the repository predicts conditional quantiles rather than only a conditional mean, the next important transition is from **one future value** to a **future sequence**.
 
@@ -181,7 +181,7 @@ This also explains why the output must be interpreted along two dimensions at on
 
 ---
 
-## 5. Why the repository uses a semantic data contract
+## 5. Semantic Structuring of Model Inputs
 
 At this point, a natural next question is:
 
@@ -227,7 +227,7 @@ This is especially important for the TFT branch, which is built to reason explic
 
 ---
 
-## 6. The architectural consequence: two complementary branches
+## 6. Architectural Design: Complementary Modeling Branches
 
 Once the data is understood as semantically structured and the output is understood as a horizon-wise probabilistic forecast, the model architecture becomes easier to motivate.
 
@@ -266,7 +266,7 @@ The fusion layer then combines these complementary representations.
 
 ---
 
-## 7. The TCN path in detail: why target history belongs there
+## 7. Temporal Convolutional Network (TCN) Branch: Historical Signal Modeling
 
 The easiest branch to misunderstand is often the TCN branch, because it does **not** receive the full structured TFT-style input contract.
 
@@ -321,7 +321,7 @@ the model obtains three related but differently biased temporal views of the sam
 
 ---
 
-## 8. The TFT path in detail: feature-role-aware forecasting
+## 8. Temporal Fusion Transformer (TFT) Branch: Feature-Aware Forecasting
 
 If the TCN path is the history-specialist branch, the TFT path is the feature-role-aware branch.
 
@@ -350,7 +350,7 @@ This is an important conceptual transition because it leads directly to the ques
 
 ---
 
-## 9. What is actually fused: correcting the common misunderstanding
+## 9. Latent Representation Fusion Mechanism
 
 It is very easy to imagine the fusion step incorrectly as something like:
 
@@ -384,7 +384,7 @@ This is a crucial architectural idea:
 
 ---
 
-## 10. Tensor-shape view: making the abstract flow concrete
+## 10. Tensor-Level Representation of Model Flow
 
 Once the functional story is clear, tensor shapes help stabilize understanding.
 
@@ -477,7 +477,7 @@ This tensor-shape view is the most concrete way to see how the earlier conceptua
 
 ---
 
-## 11. The final head: what it does and what it does not do
+## 11. Output Projection Layer and Quantile Mapping
 
 Once the fused hidden representation has been formed, the model passes it through the final `NNHead`.
 
@@ -508,7 +508,7 @@ So if one asks how the model "knows" its output is a set of quantiles, the most 
 
 ---
 
-## 12. How quantiles are learned: from raw outputs to meaningful cutoffs
+## 12. Learning Quantile Functions through Optimization
 
 At this stage, the reader can naturally ask:
 
@@ -565,7 +565,7 @@ The next question, then, is why the loss pushes different channels toward differ
 
 ---
 
-## 13. Pinball loss: why it creates quantile behavior
+## 13. Pinball Loss and Its Role in Quantile Estimation
 
 Pinball loss is the standard loss for quantile regression, and the repository uses it as the core probabilistic training objective.
 
@@ -618,7 +618,7 @@ So the percentages emerge from the optimization dynamics of the loss, not from e
 
 ---
 
-## 14. The CDF lens: a more mathematical way to unify the story
+## 14. Conditional Distribution Interpretation via the CDF
 
 At this point, the narrative can return to the conditional CDF view introduced earlier and connect it directly to the training story.
 
@@ -647,7 +647,7 @@ In other words, the final output channels can be understood simultaneously as:
 
 ---
 
-## 15. Horizon alignment in both branches: clarifying TCN and TFT
+## 15. Horizon Alignment Across Model Components
 
 A further conceptual gap often appears around the word "decoder" and whether the TCN branch also has a horizon.
 
@@ -671,7 +671,7 @@ This shared alignment is what makes late fusion over future positions possible.
 
 ---
 
-## 16. From probabilistic output to familiar metrics
+## 16. Bridging Probabilistic Outputs with Point-Based Evaluation
 
 Once the reader accepts that the model's true native output is a full quantile tensor, the next academic question is:
 
@@ -716,7 +716,7 @@ This is a clean and academically coherent division of responsibilities.
 
 ---
 
-## 17. Interpreting the reported metrics
+## 17. Evaluation Metrics and Their Interpretation
 
 The repository's metric surface can now be understood naturally.
 
@@ -791,7 +791,7 @@ Together, interval width and empirical coverage provide a first-pass view of pro
 
 ---
 
-## 18. Reaffirming the key conceptual point: quantiles are not new targets
+## 18. Quantiles as Distributional Summaries of a Single Target
 
 At this stage, it is worth stating the central conceptual lesson one final time.
 
@@ -811,7 +811,7 @@ This is why the probabilistic model can still be understood from the classical s
 
 ---
 
-## 19. Three complementary lenses for understanding the model
+## 19. Complementary Conceptual Frameworks
 
 By now, three different explanatory lenses have appeared. Rather than choosing between them, it is best to treat them as complementary.
 
@@ -844,7 +844,7 @@ Taken together, these lenses explain why the model can be simultaneously:
 
 ---
 
-## 20. Why the current repository design is academically coherent
+## 20. Architectural and Theoretical Coherence
 
 With all the pieces now in place, the broader academic coherence of the current design becomes clearer.
 
@@ -863,7 +863,7 @@ So the probabilistic behavior of the model is not an add-on. It is part of the a
 
 ---
 
-## 21. A worked example to unify the ideas
+## 21. Illustrative Example of Quantile Forecast Interpretation
 
 Suppose that for one future timestep the model outputs:
 
@@ -916,7 +916,7 @@ This example shows how the different explanatory lenses all describe the same ou
 
 ---
 
-## 23. Final synthesis
+## 22. Concluding Synthesis
 
 The cleanest final summary is:
 

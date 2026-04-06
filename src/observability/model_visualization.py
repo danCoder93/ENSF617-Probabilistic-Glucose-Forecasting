@@ -78,7 +78,7 @@ class TorchviewFusedAdapter(torch.nn.Module):
           simpler and more deterministic output contract
 
     Reading note:
-        This adapter intentionally preserves the *real* traced internals of the
+        This adapter intentionally preserves the real traced internals of the
         wrapped model. That makes it useful for deep debugging, but it also
         means the resulting graph can become visually crowded for large fused
         architectures. For a higher-level, easier-to-read presentation view,
@@ -178,14 +178,6 @@ def _require_batch_mapping(batch: Any) -> Mapping[str, Any]:
     )
 
 
-# Keep the staged-intermediate contract explicit for static type checkers.
-#
-# The fused model's private `_forward_intermediates(...)` helper already returns
-# a dictionary of named tensors, but because we access that helper dynamically
-# through `getattr(...)`, tools like Pylance lose the precise return type and
-# treat the result as `object`. Defining the expected contract here and casting
-# once at the boundary restores type information without requiring any changes
-# to the real model file.
 ForwardIntermediates = Mapping[str, torch.Tensor]
 
 
@@ -224,10 +216,6 @@ class SemanticTorchviewAdapter(torch.nn.Module):
     def __init__(self, model: torch.nn.Module) -> None:
         super().__init__()
         self.model = model
-
-        # These wrappers exist purely so torchview can show a smaller number of
-        # named semantic nodes in the graph. They intentionally do not own any
-        # parameters or computation.
         self.input_stage = _VisualizationStage("input_preparation")
         self.tcn_stage = _VisualizationStage("multiscale_tcn_path")
         self.tft_stage = _VisualizationStage("tft_path")
@@ -258,34 +246,17 @@ class SemanticTorchviewAdapter(torch.nn.Module):
         )
 
     def forward(self, *args: Any, **kwargs: Any) -> torch.Tensor:
-        """Project the fused model into a smaller set of semantic graph stages.
-
-        Important implementation note:
-            The named stage modules below are *identity* wrappers. Their job is
-            not to perform the real computation themselves. Instead, they make
-            the semantic flow visible to graph tools while the wrapped model
-            continues to own the actual forecasting logic.
-        """
+        """Project the fused model into a smaller set of semantic graph stages."""
         batch = self._normalize_batch(*args, **kwargs)
 
         intermediates_fn = getattr(self.model, "_forward_intermediates", None)
         if not callable(intermediates_fn):
-            # Conservative fallback for models that do not expose staged
-            # intermediates. We still return a stable tensor output, but the
-            # graph will naturally be less semantically structured.
             return extract_trace_tensor(self.model(batch))
 
         intermediates = cast(ForwardIntermediates, intermediates_fn(dict(batch)))
 
-        # Stage 1: surface the encoder/history-side signal that feeds the TCN
-        # pathway. This is the narrowest "prepared input" representation already
-        # exposed by the fused model.
         prepared_inputs = self.input_stage(intermediates["tcn_inputs"])
 
-        # Stage 2: represent the multiscale TCN pathway as one semantic block.
-        # The fused model already computes three branch tensors. We concatenate
-        # them here only for visualization-stage grouping; the real model logic
-        # is unchanged and continues to use the original branch tensors.
         multiscale_tcn_features = torch.cat(
             [
                 intermediates["tcn3_features"],
@@ -294,40 +265,30 @@ class SemanticTorchviewAdapter(torch.nn.Module):
             ],
             dim=-1,
         )
+
+        # Important shape fix:
+        # `prepared_inputs` lives on the encoder-history axis, while
+        # `multiscale_tcn_features` lives on the decoder-horizon axis. To keep a
+        # visible dependency without creating an axis mismatch, collapse the
+        # prepared input to one broadcastable scalar per batch item.
+        multiscale_tcn_features = multiscale_tcn_features + (
+            0.0 * prepared_inputs.mean(dim=(1, 2), keepdim=True)
+        )
         multiscale_tcn_features = self.tcn_stage(multiscale_tcn_features)
 
-        # Stage 3: surface the TFT branch representation directly.
         tft_features = self.tft_stage(intermediates["tft_features"])
 
-        # Stage 4: represent the late-fusion hidden state. We preserve a visible
-        # dependency on both semantic branches so the graph still communicates
-        # that fusion depends on the TCN and TFT pathways together.
         semantic_fusion_view = torch.cat(
             [tft_features, multiscale_tcn_features],
             dim=-1,
         )
         semantic_fusion_view = self.fusion_stage(semantic_fusion_view)
 
-        # The real fused model already computed `post_fusion_features` using its
-        # proper GRN-based fusion logic. We combine that real tensor with a zero-
-        # weighted semantic view so the output node keeps a visible dependency on
-        # the named fusion stage without changing numerical behavior.
         post_fusion_features = intermediates["post_fusion_features"] + (
             0.0 * semantic_fusion_view.mean(dim=-1, keepdim=True)
         )
 
-        # `prepared_inputs` is deliberately folded into the semantic branch view
-        # with a zero-weight dependency so the clean graph preserves a visible
-        # upstream input-preparation stage without changing tensor values.
-        multiscale_tcn_features = multiscale_tcn_features + (
-            0.0 * prepared_inputs.mean(dim=-1, keepdim=True)
-        )
-
-        # Stage 5: expose the final probabilistic output head.
         predictions = self.head_stage(intermediates["predictions"])
-
-        # As above, preserve the real prediction tensor while keeping a visible
-        # dependency on the semantic head stage in the traced graph.
         return extract_trace_tensor(
             predictions + (0.0 * post_fusion_features.mean(dim=-1, keepdim=True))
         )
