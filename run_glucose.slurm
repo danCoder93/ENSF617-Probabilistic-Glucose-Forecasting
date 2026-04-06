@@ -28,9 +28,10 @@ echo "Artifacts File: ${ARTIFACTS_PATH}"
 
 python main.py \
   --device-profile slurm-cuda \
-  --batch-size 128 \
+  --batch-size 256 \
   --max-epochs 20 \
-  --observability-mode debug \
+  --observability-mode trace \
   --device-stats \
   --enable-activation-stats \
+  --enable-profiler \
   --output-dir "${ARTIFACTS_PATH}"
