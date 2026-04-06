@@ -78,6 +78,22 @@ class StubTensorBoardLogger:
         self.experiment = experiment
 
 
+class StubTrainerWithLogger:
+    """Expose a Lightning-like `.logger` attribute for normalization tests."""
+
+    def __init__(self, logger: StubTensorBoardLogger) -> None:
+        """Store the single logger under the trainer-style attribute name."""
+        self.logger = logger
+
+
+class StubTrainerWithLoggers:
+    """Expose a Lightning-like `.loggers` attribute for normalization tests."""
+
+    def __init__(self, loggers: list[StubTensorBoardLogger]) -> None:
+        """Store multiple loggers under the trainer-style attribute name."""
+        self.loggers = loggers
+
+
 class StubNonTensorBoardLogger:
     """Provide a logger shape that should be ignored by the TensorBoard sink.
 
@@ -694,3 +710,415 @@ def test_log_shared_report_to_tensorboard_gracefully_skips_missing_grouped_metri
     # omitted rather than causing the sink to fail.
     assert "report/figures/subject_rmse" not in figure_tags
     assert "report/figures/glucose_range_interval_width" not in figure_tags
+
+
+def test_log_shared_report_to_tensorboard_normalizes_single_trainer_logger() -> None:
+    """Validate logger normalization when the sink receives a trainer-like object.
+
+    Context:
+        The workflow can pass a trainer instead of a raw logger. The sink should
+        discover the `.logger` attribute and still log against the same
+        TensorBoard-style experiment surface.
+    """
+    shared_report = _build_shared_report(include_by_horizon=True)
+    experiment = StubTensorBoardExperiment()
+    trainer = StubTrainerWithLogger(StubTensorBoardLogger(experiment))
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=trainer,
+        global_step=11,
+        namespace="phase5",
+    )
+
+    assert logged is True
+    assert any(tag == "phase5/scalars/num_prediction_rows" for tag, _, _ in experiment.scalars)
+    assert all(global_step == 11 for _, _, global_step in experiment.scalars)
+    assert all(global_step == 11 for _, _, global_step in experiment.texts)
+    assert all(global_step == 11 for _, _, global_step in experiment.figures)
+
+
+def test_log_shared_report_to_tensorboard_normalizes_multiple_trainer_loggers() -> None:
+    """Validate logger normalization when the sink receives `.loggers`.
+
+    Context:
+        Lightning-style trainers may expose multiple loggers. The reporting sink
+        should fan out to each compatible TensorBoard experiment without
+        requiring the workflow to reshape that input first.
+    """
+    shared_report = _build_shared_report(include_by_horizon=True)
+    experiment_a = StubTensorBoardExperiment()
+    experiment_b = StubTensorBoardExperiment()
+    trainer = StubTrainerWithLoggers(
+        [
+            StubTensorBoardLogger(experiment_a),
+            StubTensorBoardLogger(experiment_b),
+        ]
+    )
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=trainer,
+        global_step=13,
+        namespace="phase5",
+    )
+
+    assert logged is True
+    assert any(tag == "phase5/text/index" for tag, _, _ in experiment_a.texts)
+    assert any(tag == "phase5/text/index" for tag, _, _ in experiment_b.texts)
+    assert all(global_step == 13 for _, _, global_step in experiment_a.texts)
+    assert all(global_step == 13 for _, _, global_step in experiment_b.texts)
+
+
+@pytest.mark.parametrize("logger_container_factory", [list, tuple, set])
+def test_log_shared_report_to_tensorboard_normalizes_logger_collections(
+    logger_container_factory: Any,
+) -> None:
+    """Validate normalization for direct logger collections.
+
+    Context:
+        Some callers may pass logger collections directly instead of trainer
+        objects. The sink should treat list/tuple/set inputs consistently.
+    """
+    shared_report = _build_shared_report(include_by_horizon=True)
+    experiment = StubTensorBoardExperiment()
+
+    logger_collection = logger_container_factory([StubTensorBoardLogger(experiment)])
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger_collection,
+        global_step=17,
+        namespace="phase5",
+    )
+
+    assert logged is True
+    assert any(tag == "phase5/text/metadata" for tag, _, _ in experiment.texts)
+    assert all(global_step == 17 for _, _, global_step in experiment.texts)
+
+
+def test_log_shared_report_to_tensorboard_skips_none_scalars_and_preserves_valid_ones() -> None:
+    """Ensure missing scalar values are omitted without affecting valid scalars."""
+    shared_report = _build_shared_report(include_by_horizon=True)
+    shared_report.scalars["missing_scalar"] = None
+    shared_report.scalars["explicit_scalar"] = 42.0
+
+    experiment = StubTensorBoardExperiment()
+    logger = StubTensorBoardLogger(experiment)
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger,
+        namespace="phase5",
+    )
+
+    assert logged is True
+
+    scalar_tags = {tag for tag, _, _ in experiment.scalars}
+    assert "phase5/scalars/missing_scalar" not in scalar_tags
+    assert "phase5/scalars/explicit_scalar" in scalar_tags
+
+
+def test_log_shared_report_to_tensorboard_uses_custom_namespace_and_global_step() -> None:
+    """Confirm namespace and step propagate across all logged artifact families."""
+    shared_report = _build_shared_report(include_by_horizon=True)
+    experiment = StubTensorBoardExperiment()
+    logger = StubTensorBoardLogger(experiment)
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger,
+        global_step=23,
+        namespace="custom_report",
+        max_table_rows=2,
+        max_forecast_subjects=1,
+    )
+
+    assert logged is True
+
+    assert all(tag.startswith("custom_report/") for tag, _, _ in experiment.scalars)
+    assert all(tag.startswith("custom_report/") for tag, _, _ in experiment.texts)
+    assert all(tag.startswith("custom_report/") for tag, _, _ in experiment.figures)
+
+    assert all(global_step == 23 for _, _, global_step in experiment.scalars)
+    assert all(global_step == 23 for _, _, global_step in experiment.texts)
+    assert all(global_step == 23 for _, _, global_step in experiment.figures)
+
+
+def test_log_shared_report_to_tensorboard_handles_empty_text_metadata_and_table_previews() -> None:
+    """Ensure empty narrative surfaces still produce stable non-failing text output.
+
+    Context:
+        Phase 5 should protect the best-effort contract not only for missing
+        figures but also for empty text, metadata, and table-preview surfaces.
+    """
+    shared_report = _build_shared_report(include_by_horizon=True)
+
+    # `SharedReport` exposes these mappings as read-only attributes at the
+    # object level, so mutate the existing dictionaries instead of rebinding
+    # the attributes. This preserves the report object contract while still
+    # letting the test simulate empty narrative/metadata surfaces.
+    shared_report.text.clear()
+    shared_report.metadata.clear()
+    shared_report.tables["empty_debug_table"] = pd.DataFrame()
+
+    experiment = StubTensorBoardExperiment()
+    logger = StubTensorBoardLogger(experiment)
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger,
+        namespace="phase5",
+    )
+
+    assert logged is True
+
+    text_calls = _text_by_tag(experiment)
+    assert "phase5/text/index" in text_calls
+    assert text_calls["phase5/text/index"][1] == "No canonical report text panels are available."
+    assert "phase5/text/metadata" in text_calls
+    assert text_calls["phase5/text/metadata"][1] == "Shared-report metadata is empty."
+
+    assert "phase5/tables/empty_debug_table" in text_calls
+    assert text_calls["phase5/tables/empty_debug_table"][1] == "empty_debug_table: empty table."
+
+
+
+def test_log_shared_report_to_tensorboard_skips_horizon_uncertainty_when_columns_missing() -> None:
+    """Ensure the uncertainty figure is omitted when both required signals are absent.
+
+    Context:
+        `_build_horizon_uncertainty_figure(...)` is intentionally best-effort.
+        When neither interval width nor empirical coverage is meaningfully
+        available, the sink should skip just that figure and preserve the rest
+        of the report surfaces.
+    """
+    shared_report = _build_shared_report(include_by_horizon=True)
+
+    # Remove both uncertainty-oriented grouped fields so the uncertainty figure
+    # builder has no valid canonical content to render.
+    shared_report.tables["by_horizon"] = shared_report.tables["by_horizon"].drop(
+        columns=["mean_interval_width", "empirical_interval_coverage"]
+    )
+
+    experiment = StubTensorBoardExperiment()
+    logger = StubTensorBoardLogger(experiment)
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger,
+        namespace="phase5",
+    )
+
+    assert logged is True
+
+    figure_tags = _figure_tags(experiment)
+    assert "phase5/figures/horizon_uncertainty" not in figure_tags
+
+    # Other unaffected report surfaces should still be present.
+    text_calls = _text_by_tag(experiment)
+    assert "phase5/text/index" in text_calls
+    assert "phase5/tables/by_horizon" in text_calls
+    assert "phase5/figures/horizon_metrics" in figure_tags
+    assert "phase5/figures/horizon_bias" in figure_tags
+
+
+def test_log_shared_report_to_tensorboard_skips_horizon_bias_when_columns_missing() -> None:
+    """Ensure the bias figure is omitted when both required signals are absent.
+
+    Context:
+        Horizon bias logging depends on canonical grouped bias and/or grouped
+        pinball-loss fields. If both are missing, the sink should omit only the
+        bias figure rather than failing the full reporting path.
+    """
+    shared_report = _build_shared_report(include_by_horizon=True)
+
+    # Remove both bias-oriented grouped fields so the bias figure builder has
+    # no valid canonical content to render.
+    shared_report.tables["by_horizon"] = shared_report.tables["by_horizon"].drop(
+        columns=["bias", "overall_pinball_loss"]
+    )
+
+    experiment = StubTensorBoardExperiment()
+    logger = StubTensorBoardLogger(experiment)
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger,
+        namespace="phase5",
+    )
+
+    assert logged is True
+
+    figure_tags = _figure_tags(experiment)
+    assert "phase5/figures/horizon_bias" not in figure_tags
+
+    # Other unaffected report surfaces should still be present.
+    text_calls = _text_by_tag(experiment)
+    assert "phase5/text/index" in text_calls
+    assert "phase5/tables/by_horizon" in text_calls
+    assert "phase5/figures/horizon_metrics" in figure_tags
+    assert "phase5/figures/horizon_uncertainty" in figure_tags
+
+
+def test_log_shared_report_to_tensorboard_skips_residual_and_forecast_when_required_columns_missing() -> None:
+    """Ensure row-level figures are omitted when their required columns are missing.
+
+    Context:
+        The TensorBoard sink still includes a few row-level views sourced from
+        the canonical prediction table. Those views should degrade gracefully
+        when their required flat-table columns are unavailable.
+    """
+    shared_report = _build_shared_report(include_by_horizon=True)
+
+    # Remove the residual column so the histogram cannot be rendered, and drop
+    # a required forecast-overview column so that overview figure is skipped as
+    # well. The rest of the report should remain loggable.
+    shared_report.tables["prediction_table"] = shared_report.tables["prediction_table"].drop(
+        columns=["residual", "median_prediction"]
+    )
+
+    experiment = StubTensorBoardExperiment()
+    logger = StubTensorBoardLogger(experiment)
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger,
+        namespace="phase5",
+    )
+
+    assert logged is True
+
+    figure_tags = _figure_tags(experiment)
+    assert "phase5/figures/residual_histogram" not in figure_tags
+    assert "phase5/figures/forecast_overview" not in figure_tags
+
+    # The sink should still log the remaining artifact families and grouped
+    # figures that do not depend on the removed prediction-table fields.
+    scalar_tags = {tag for tag, _, _ in experiment.scalars}
+    text_calls = _text_by_tag(experiment)
+
+    assert "phase5/scalars/num_prediction_rows" in scalar_tags
+    assert "phase5/text/index" in text_calls
+    assert "phase5/tables/prediction_table" in text_calls
+    assert "phase5/figures/horizon_metrics" in figure_tags
+    assert "phase5/figures/subject_mae" in figure_tags
+
+
+
+def test_log_shared_report_to_tensorboard_requires_canonical_by_horizon_for_grouped_horizon_figures() -> None:
+    """Ensure grouped horizon figures depend on canonical `by_horizon` data only.
+
+    Context:
+        The TensorBoard sink must not derive grouped horizon metrics from the
+        flat prediction table as a fallback. When the canonical grouped horizon
+        table is absent, grouped horizon figures should disappear even if
+        row-level prediction data still exists.
+    """
+    shared_report = _build_shared_report(include_by_horizon=True)
+
+    # Remove the canonical grouped horizon table contents while preserving the
+    # flat prediction table so row-level figures remain eligible.
+    shared_report.tables["by_horizon"] = pd.DataFrame()
+
+    experiment = StubTensorBoardExperiment()
+    logger = StubTensorBoardLogger(experiment)
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger,
+        namespace="phase5",
+    )
+
+    assert logged is True
+
+    figure_tags = _figure_tags(experiment)
+
+    # Grouped horizon figures should be omitted because the canonical grouped
+    # horizon table is unavailable.
+    assert "phase5/figures/horizon_metrics" not in figure_tags
+    assert "phase5/figures/horizon_uncertainty" not in figure_tags
+    assert "phase5/figures/horizon_bias" not in figure_tags
+
+    # Row-level figures should still work because their required prediction
+    # table columns remain present.
+    assert "phase5/figures/residual_histogram" in figure_tags
+    assert "phase5/figures/forecast_overview" in figure_tags
+
+
+def test_log_shared_report_to_tensorboard_requires_canonical_by_subject_for_subject_figures() -> None:
+    """Ensure subject grouped figures depend on canonical `by_subject` data only.
+
+    Context:
+        Subject-level figures should not be reconstructed from flat rows inside
+        the sink. Their presence must reflect availability of the canonical
+        grouped subject table built upstream by evaluation/builders.
+    """
+    shared_report = _build_shared_report(include_by_horizon=True)
+
+    # Remove the canonical grouped subject table while preserving both
+    # prediction-table content and other grouped report tables.
+    shared_report.tables["by_subject"] = pd.DataFrame()
+
+    experiment = StubTensorBoardExperiment()
+    logger = StubTensorBoardLogger(experiment)
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger,
+        namespace="phase5",
+    )
+
+    assert logged is True
+
+    figure_tags = _figure_tags(experiment)
+
+    # Subject grouped figures should be omitted because the canonical grouped
+    # subject table is unavailable.
+    assert "phase5/figures/subject_mae" not in figure_tags
+    assert "phase5/figures/subject_bias" not in figure_tags
+    assert "phase5/figures/subject_rmse" not in figure_tags
+
+    # Unrelated grouped and row-level figures should still work.
+    assert "phase5/figures/glucose_range_mae" in figure_tags
+    assert "phase5/figures/horizon_metrics" in figure_tags
+    assert "phase5/figures/residual_histogram" in figure_tags
+
+
+def test_log_shared_report_to_tensorboard_requires_canonical_by_glucose_range_for_range_figures() -> None:
+    """Ensure glucose-range grouped figures depend on canonical grouped data only.
+
+    Context:
+        Glucose-range views are part of the canonical grouped-report surface and
+        must disappear when that canonical grouped table is absent, rather than
+        being recreated from row-level predictions inside the sink.
+    """
+    shared_report = _build_shared_report(include_by_horizon=True)
+
+    # Remove the canonical grouped glucose-range table while preserving both
+    # prediction-table content and other grouped report tables.
+    shared_report.tables["by_glucose_range"] = pd.DataFrame()
+
+    experiment = StubTensorBoardExperiment()
+    logger = StubTensorBoardLogger(experiment)
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger,
+        namespace="phase5",
+    )
+
+    assert logged is True
+
+    figure_tags = _figure_tags(experiment)
+
+    # Glucose-range grouped figures should be omitted because the canonical
+    # grouped glucose-range table is unavailable.
+    assert "phase5/figures/glucose_range_mae" not in figure_tags
+    assert "phase5/figures/glucose_range_bias" not in figure_tags
+    assert "phase5/figures/glucose_range_interval_width" not in figure_tags
+    assert "phase5/figures/glucose_range_coverage" not in figure_tags
+
+    # Unrelated grouped and row-level figures should still work.
+    assert "phase5/figures/subject_mae" in figure_tags
+    assert "phase5/figures/horizon_metrics" in figure_tags
+    assert "phase5/figures/forecast_overview" in figure_tags
