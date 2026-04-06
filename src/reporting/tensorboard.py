@@ -181,6 +181,62 @@ def _frame_preview_text(
     return f"{name} ({row_suffix})\n\n```\n{buffer.getvalue()}\n```"
 
 
+def _ordered_report_text_items(shared_report: SharedReport) -> list[tuple[str, str]]:
+    """
+    Return report text items in a deterministic interpretation-first order.
+
+    Context:
+    `SharedReport.text` is already canonical and should remain the source of
+    truth for narrative summaries. The TensorBoard sink still benefits from a
+    stable ordering policy so the most interpretive panels surface first in the
+    text tab instead of being shown in arbitrary dictionary order.
+
+    Design note:
+    this helper does not synthesize new metric content. It only controls the
+    presentation order of already-packaged text blocks.
+    """
+    preferred_order = [
+        "dataset_overview",
+        "metric_overview",
+        "quantile_overview",
+        "horizon_overview",
+        "probabilistic_overview",
+        "subject_variability_overview",
+        "glucose_range_overview",
+    ]
+    remaining_keys = sorted(
+        key for key in shared_report.text.keys() if key not in set(preferred_order)
+    )
+
+    ordered_keys = [key for key in preferred_order if key in shared_report.text]
+    ordered_keys.extend(remaining_keys)
+
+    return [(key, shared_report.text[key]) for key in ordered_keys]
+
+
+def _report_text_index(shared_report: SharedReport) -> str:
+    """
+    Build a lightweight index describing which canonical text panels are present.
+
+    Context:
+    TensorBoard text panes are flatter than a document viewer. A compact index
+    at the top makes it easier to understand which interpretation sections exist
+    in the current shared report before drilling into each individual panel.
+
+    Design note:
+    the index is intentionally descriptive only. It should not become another
+    computation surface or duplicate the contents of the individual sections.
+    """
+    ordered_items = _ordered_report_text_items(shared_report)
+    if not ordered_items:
+        return "No canonical report text panels are available."
+
+    lines = ["Available report text panels:"]
+    for key, _ in ordered_items:
+        lines.append(f"- {key}")
+    return "\n".join(lines)
+
+
 # ============================================================================
 # Scalar / Text / Table Logging
 # ============================================================================
@@ -237,7 +293,19 @@ def _log_shared_report_text(
     if not experiments:
         return
 
-    for key, value in shared_report.text.items():
+    # Log a small orientation panel first so the text tab advertises the
+    # available report sections in a stable top-level location.
+    report_text_index = _report_text_index(shared_report)
+    for experiment in experiments:
+        add_text = getattr(experiment, "add_text", None)
+        if callable(add_text):
+            add_text(
+                f"{namespace}/text/index",
+                report_text_index,
+                global_step=global_step,
+            )
+
+    for key, value in _ordered_report_text_items(shared_report):
         tag = f"{namespace}/text/{key}"
         for experiment in experiments:
             add_text = getattr(experiment, "add_text", None)
@@ -342,8 +410,7 @@ def _normalized_grouped_frame(
 
     # Sorting on the canonical grouped axis keeps line plots monotonic for
     # horizon views and deterministic for subgroup bar charts.
-    frame.sort_values(by=["group_value"], inplace=True)
-    frame.reset_index(drop=True, inplace=True)
+    frame = frame.sort_values(by=["group_value"]).reset_index(drop=True)
     return frame
 
 
@@ -608,7 +675,7 @@ def _build_forecast_overview_figure(
 
     frame = prediction_table.copy()
     frame["timestamp"] = pd.to_datetime(frame["timestamp"])
-    frame.sort_values(by=["subject_id", "timestamp"], inplace=True)
+    frame = frame.sort_values(by=["subject_id", "timestamp"])
 
     subject_ids = list(dict.fromkeys(frame["subject_id"].tolist()))[:max_subjects]
     if not subject_ids:
@@ -698,6 +765,30 @@ def _iter_report_figures(
     if subject_mae is not None:
         yield "subject_mae", subject_mae
 
+    # Bias is already packaged canonically by evaluation/builders, so the sink
+    # only needs to surface it for subject-level directional interpretation.
+    subject_bias = _build_grouped_bar_figure(
+        shared_report,
+        table_name="by_subject",
+        metric_name="bias",
+        title="Bias By Subject",
+        ylabel="Bias",
+    )
+    if subject_bias is not None:
+        yield "subject_bias", subject_bias
+
+    # RMSE provides a simple spread-oriented companion to MAE for subject-level
+    # inspection without introducing any new grouped metric computation here.
+    subject_rmse = _build_grouped_bar_figure(
+        shared_report,
+        table_name="by_subject",
+        metric_name="rmse",
+        title="RMSE By Subject",
+        ylabel="RMSE",
+    )
+    if subject_rmse is not None:
+        yield "subject_rmse", subject_rmse
+
     glucose_range_mae = _build_grouped_bar_figure(
         shared_report,
         table_name="by_glucose_range",
@@ -707,6 +798,30 @@ def _iter_report_figures(
     )
     if glucose_range_mae is not None:
         yield "glucose_range_mae", glucose_range_mae
+
+    # Bias by glucose range helps show whether specific glycemic regimes skew
+    # high or low even when top-line MAE stays acceptable.
+    glucose_range_bias = _build_grouped_bar_figure(
+        shared_report,
+        table_name="by_glucose_range",
+        metric_name="bias",
+        title="Bias By Glucose Range",
+        ylabel="Bias",
+    )
+    if glucose_range_bias is not None:
+        yield "glucose_range_bias", glucose_range_bias
+
+    # Interval width by glucose range gives TensorBoard a direct view of how
+    # predictive uncertainty changes across clinically different regimes.
+    glucose_range_interval_width = _build_grouped_bar_figure(
+        shared_report,
+        table_name="by_glucose_range",
+        metric_name="mean_interval_width",
+        title="Mean Interval Width By Glucose Range",
+        ylabel="Interval Width",
+    )
+    if glucose_range_interval_width is not None:
+        yield "glucose_range_interval_width", glucose_range_interval_width
 
     glucose_range_coverage = _build_grouped_bar_figure(
         shared_report,

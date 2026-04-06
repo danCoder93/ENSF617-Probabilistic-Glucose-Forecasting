@@ -4,6 +4,7 @@ from __future__ import annotations
 # already exist.
 
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -18,6 +19,7 @@ from reporting import (
     export_prediction_table,
     export_prediction_table_from_report,
     generate_plotly_reports,
+    log_shared_report_to_tensorboard,
 )
 from reporting.builders import build_shared_report
 from src.evaluation.types import EvaluationResult, GroupedMetricRow, MetricSummary
@@ -33,6 +35,61 @@ class StubDataModule:
     def test_dataloader(self) -> list[dict[str, object]]:
         """Return the stored synthetic batches as the held-out prediction surface."""
         return self._test_batches
+
+
+class StubTensorBoardExperiment:
+    """Record TensorBoard-style logging calls for sink-behavior assertions.
+
+    Purpose:
+        Keep TensorBoard sink tests lightweight and deterministic without
+        requiring a real Lightning trainer, filesystem event writer, or running
+        TensorBoard process.
+
+    Context:
+        `log_shared_report_to_tensorboard(...)` only relies on the small writer
+        surface below. Capturing those calls in memory is sufficient for testing
+        the sink contract.
+    """
+
+    def __init__(self) -> None:
+        """Initialize empty call ledgers for scalar, text, and figure logging."""
+        self.scalars: list[tuple[str, Any, int]] = []
+        self.texts: list[tuple[str, str, int]] = []
+        self.figures: list[tuple[str, Any, int]] = []
+
+    def add_scalar(self, tag: str, value: Any, global_step: int) -> None:
+        """Record one scalar logging call exactly as the sink emitted it."""
+        self.scalars.append((tag, value, global_step))
+
+    def add_text(self, tag: str, text: str, global_step: int) -> None:
+        """Record one text logging call exactly as the sink emitted it."""
+        self.texts.append((tag, text, global_step))
+
+    def add_figure(self, tag: str, figure: Any, global_step: int) -> None:
+        """Record one figure logging call exactly as the sink emitted it."""
+        self.figures.append((tag, figure, global_step))
+
+
+class StubTensorBoardLogger:
+    """Expose a TensorBoard-like `.experiment` surface to the reporting sink."""
+
+    def __init__(self, experiment: StubTensorBoardExperiment) -> None:
+        """Store the in-memory experiment recorder under the expected attribute."""
+        self.experiment = experiment
+
+
+class StubNonTensorBoardLogger:
+    """Provide a logger shape that should be ignored by the TensorBoard sink.
+
+    Context:
+        The sink is expected to filter to logger backends that expose
+        TensorBoard-style methods. This stub helps validate that incompatible
+        loggers do not cause logging attempts or failures.
+    """
+
+    def __init__(self) -> None:
+        """Store a placeholder experiment object without TensorBoard methods."""
+        self.experiment = object()
 
 
 def _build_prediction_table_frame() -> pd.DataFrame:
@@ -253,6 +310,18 @@ def _build_shared_report(*, include_by_horizon: bool) -> SharedReport:
     )
 
 
+def _text_by_tag(
+    experiment: StubTensorBoardExperiment,
+) -> dict[str, tuple[str, str, int]]:
+    """Index captured text calls by tag for concise TensorBoard assertions."""
+    return {tag: (tag, text, global_step) for tag, text, global_step in experiment.texts}
+
+
+def _figure_tags(experiment: StubTensorBoardExperiment) -> set[str]:
+    """Return the logged TensorBoard figure tags as a simple lookup set."""
+    return {tag for tag, _, _ in experiment.figures}
+
+
 def test_export_prediction_table_writes_analysis_friendly_rows(tmp_path: Path) -> None:
     predictions = [
         torch.tensor(
@@ -458,3 +527,170 @@ def test_generate_plotly_reports_skips_horizon_metrics_without_canonical_grouped
     for path in report_paths.values():
         assert path.exists()
         assert path.suffix == ".html"
+
+
+def test_log_shared_report_to_tensorboard_logs_expected_scalars_text_tables_and_figures() -> None:
+    """Validate the main TensorBoard sink path against the canonical shared report.
+
+    Purpose:
+        Protect the new TensorBoard reporting surface so later reporting changes
+        do not silently drop key interpretation panels or grouped diagnostics.
+    """
+    shared_report = _build_shared_report(include_by_horizon=True)
+    experiment = StubTensorBoardExperiment()
+    logger = StubTensorBoardLogger(experiment)
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger,
+        global_step=7,
+        namespace="report",
+        max_table_rows=3,
+        max_forecast_subjects=2,
+    )
+
+    assert logged is True
+
+    scalar_tags = {tag for tag, _, _ in experiment.scalars}
+    assert {
+        "report/scalars/num_prediction_rows",
+        "report/scalars/num_subjects",
+        "report/scalars/num_horizons",
+    }.issubset(scalar_tags)
+
+    text_calls = _text_by_tag(experiment)
+    assert "report/text/index" in text_calls
+    assert "Available report text panels:" in text_calls["report/text/index"][1]
+
+    assert "report/text/dataset_overview" in text_calls
+    assert "report/text/metric_overview" in text_calls
+    assert "report/text/quantile_overview" in text_calls
+    assert "report/text/horizon_overview" in text_calls
+    assert "report/text/probabilistic_overview" in text_calls
+    assert "report/text/subject_variability_overview" in text_calls
+    assert "report/text/glucose_range_overview" in text_calls
+    assert "report/text/metadata" in text_calls
+
+    # Table previews should still be present so TensorBoard preserves the raw
+    # drill-down surface alongside higher-level interpretation panels.
+    assert "report/tables/prediction_table" in text_calls
+    assert "report/tables/by_horizon" in text_calls
+    assert "report/tables/by_subject" in text_calls
+    assert "report/tables/by_glucose_range" in text_calls
+
+    figure_tags = _figure_tags(experiment)
+    assert {
+        "report/figures/residual_histogram",
+        "report/figures/horizon_metrics",
+        "report/figures/horizon_uncertainty",
+        "report/figures/horizon_bias",
+        "report/figures/subject_mae",
+        "report/figures/subject_bias",
+        "report/figures/subject_rmse",
+        "report/figures/glucose_range_mae",
+        "report/figures/glucose_range_bias",
+        "report/figures/glucose_range_interval_width",
+        "report/figures/glucose_range_coverage",
+        "report/figures/forecast_overview",
+    }.issubset(figure_tags)
+
+
+def test_log_shared_report_to_tensorboard_orders_text_panels_interpretation_first() -> None:
+    """Ensure the sink's text panels are emitted in a stable, meaningful order.
+
+    Context:
+        The text tab is easier to navigate when broad report interpretation
+        appears first and any extra custom text blocks are appended afterward in
+        deterministic order.
+    """
+    shared_report = _build_shared_report(include_by_horizon=True)
+    shared_report.text["zzz_custom_appendix"] = "Synthetic appendix text."
+
+    experiment = StubTensorBoardExperiment()
+    logger = StubTensorBoardLogger(experiment)
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger,
+        global_step=1,
+        namespace="report",
+    )
+
+    assert logged is True
+
+    text_tags = [tag for tag, _, _ in experiment.texts]
+    report_text_tags = [tag for tag in text_tags if tag.startswith("report/text/")]
+
+    # The index should lead the text surface, followed by the canonical report
+    # interpretation blocks in their preferred order, and only then any extra
+    # custom text sections.
+    assert report_text_tags[0] == "report/text/index"
+    assert report_text_tags[1:8] == [
+        "report/text/dataset_overview",
+        "report/text/metric_overview",
+        "report/text/quantile_overview",
+        "report/text/horizon_overview",
+        "report/text/probabilistic_overview",
+        "report/text/subject_variability_overview",
+        "report/text/glucose_range_overview",
+    ]
+    assert "report/text/zzz_custom_appendix" in report_text_tags
+    assert report_text_tags.index("report/text/zzz_custom_appendix") > report_text_tags.index(
+        "report/text/glucose_range_overview"
+    )
+
+
+def test_log_shared_report_to_tensorboard_skips_incompatible_logger_backends() -> None:
+    """Confirm the sink returns False when no TensorBoard-compatible logger exists."""
+    shared_report = _build_shared_report(include_by_horizon=True)
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=StubNonTensorBoardLogger(),
+    )
+
+    assert logged is False
+
+
+def test_log_shared_report_to_tensorboard_gracefully_skips_missing_grouped_metric_figures() -> None:
+    """Validate best-effort figure logging when some grouped metric columns are absent.
+
+    Context:
+        The sink should preserve all unaffected report surfaces while omitting
+        only the figures whose required canonical columns are missing.
+    """
+    shared_report = _build_shared_report(include_by_horizon=True)
+
+    # Remove one column from each grouped table to force the newly added figure
+    # builders to opt out while leaving the rest of the report intact.
+    shared_report.tables["by_subject"] = shared_report.tables["by_subject"].drop(
+        columns=["rmse"]
+    )
+    shared_report.tables["by_glucose_range"] = shared_report.tables["by_glucose_range"].drop(
+        columns=["mean_interval_width"]
+    )
+
+    experiment = StubTensorBoardExperiment()
+    logger = StubTensorBoardLogger(experiment)
+
+    logged = log_shared_report_to_tensorboard(
+        shared_report=shared_report,
+        logger_or_trainer=logger,
+        namespace="report",
+    )
+
+    assert logged is True
+
+    figure_tags = _figure_tags(experiment)
+
+    # Existing unaffected figures should still be logged.
+    assert "report/figures/subject_mae" in figure_tags
+    assert "report/figures/subject_bias" in figure_tags
+    assert "report/figures/glucose_range_mae" in figure_tags
+    assert "report/figures/glucose_range_bias" in figure_tags
+    assert "report/figures/glucose_range_coverage" in figure_tags
+
+    # The newly added figures whose required columns were removed should be
+    # omitted rather than causing the sink to fail.
+    assert "report/figures/subject_rmse" not in figure_tags
+    assert "report/figures/glucose_range_interval_width" not in figure_tags
