@@ -21,9 +21,9 @@ nvidia-smi
 
 JOB_SCRATCH="/scratch/${SLURM_JOB_ID}"
 mkdir -p "$JOB_SCRATCH"
-mkdir -p "${SLURM_SUBMIT_DIR}/artifacts"
+mkdir -p "${JOB_SCRATCH}/artifacts"
 
-ARTIFACTS_PATH= "${SLURM_SUBMIT_DIR}/artifacts/glucose_${SLURM_JOB_ID}"
+ARTIFACTS_PATH= "${JOB_SCRATCH}/artifacts/glucose_${SLURM_JOB_ID}"
 echo "Artifacts File: ${ARTIFACTS_PATH}"
 
 python main.py \
