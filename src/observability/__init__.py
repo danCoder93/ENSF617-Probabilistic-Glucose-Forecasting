@@ -2,63 +2,64 @@ from __future__ import annotations
 
 # AI-assisted maintenance note:
 # `observability` is the stable package-level facade for the repository's
-# logging, callback, profiler, runtime-observability, and post-run reporting
-# utilities.
+# runtime-observability stack.
 #
-# Why keep this file:
+# Why this file exists:
 # - existing callers already use concise imports like
 #   `from observability import setup_observability, BatchAuditCallback`
-# - that short public surface is convenient for `train.py`, `main.py`, tests,
-#   notebooks, and one-off debugging scripts
-# - this facade lets the internal package evolve into smaller, more focused
-#   files without forcing import churn everywhere else in the repository
+# - that short public surface remains convenient for `train.py`, `main.py`,
+#   tests, notebooks, and one-off debugging scripts
+# - this facade lets the internal runtime-observability package evolve into
+#   smaller, more focused files without forcing unnecessary import churn
+#   everywhere else in the repository
 #
-# Internal layout:
-# - `runtime.py` assembles loggers, profilers, output paths, and text logging
-#   helpers for one run
-# - `logging_utils.py` holds smaller metric / hparameter helpers that are
-#   shared by orchestration code and callbacks
-# - `tensors.py` centralizes nested tensor and metadata normalization helpers
-# - `callbacks.py` is the stable public callback assembly surface
-# - `debug_callbacks.py`, `system_callbacks.py`, `parameter_callbacks.py`, and
-#   `prediction_callbacks.py` hold the concrete callback implementations
-# - `reporting.py` now owns both:
-#   1. the shared post-run reporting layer that packages prediction/evaluation
-#      outputs into a canonical in-memory report surface, and
-#   2. the concrete export / visualization sinks that serialize or render that
-#      report into CSV and lightweight HTML artifacts
+# Architectural clarification:
+# the repository now keeps three related concerns separate on purpose:
 #
-# Responsibility boundary:
-# - expose the repository's public observability surface in one place
-# - let orchestration code import reporting/runtime/callback helpers without
-#   needing to care about the package's internal file split
-# - keep the rest of the codebase insulated from internal observability
-#   refactors as long as the package-level contract remains stable
+# 1. `observability`
+#    Live runtime visibility during training/evaluation, including:
+#    - logger/profiler setup
+#    - callback assembly
+#    - system telemetry
+#    - model graph/text surfaces
+#    - gradient/activation/parameter/prediction-sanity instrumentation
+#
+# 2. `reporting`
+#    Post-run packaging and presentation once predictions already exist,
+#    including:
+#    - canonical `SharedReport` construction
+#    - tabular prediction export
+#    - lightweight HTML report sinks
+#
+# 3. `evaluation`
+#    Canonical metric computation and grouped evaluation truth
+#
+# In other words:
+# - evaluation computes model-quality truth
+# - reporting packages and renders post-run artifacts from that truth
+# - observability handles live runtime visibility while the run is happening
+#
+# Important boundary for this phase:
+# this file intentionally does *not* re-export the reporting layer anymore.
+# Post-run reporting now belongs to the dedicated `reporting` package and
+# should be imported from there directly.
 #
 # What does *not* live here:
-# - the implementation details of callbacks, logging, profiling, or reporting
+# - concrete callback implementation details
+# - report-building or report-rendering logic
 # - training orchestration
-# - runtime environment policy
-# - model-quality metric computation itself
+# - canonical metric computation
 #
-# Architectural note:
-# the evaluation package remains the canonical home for metric computation and
-# grouped evaluation truth. The reporting layer in `reporting.py` consumes that
-# structured evaluation output and packages it for downstream sinks. This file
-# intentionally re-exports both layers' public observability-facing entrypoints
-# without pretending they are the same concern.
-#
-# The goal is not to hide the split; it is to keep the rest of the repository
-# easy to read while preserving explicit responsibility boundaries inside the
-# implementation modules.
+# This file exists to define the stable runtime-observability import surface,
+# not to mix runtime observability with every post-run artifact concern.
 
 
 # ============================================================================
-# Public Observability Surface
+# Public Runtime-Observability Surface
 # ============================================================================
-# Re-export the commonly used runtime helpers, callbacks, logging helpers, and
-# post-run reporting tools so the rest of the repository can continue using
-# short package-level imports.
+# Re-export the commonly used runtime helpers, callbacks, and smaller logging
+# utilities so the rest of the repository can continue using short
+# package-level imports.
 
 from observability.callbacks import (
     ActivationStatsCallback,
@@ -76,12 +77,6 @@ from observability.logging_utils import (
     log_hyperparameters,
     log_metrics_to_loggers,
 )
-from observability.reporting import (
-    SharedReport,
-    build_shared_report,
-    export_prediction_table,
-    generate_plotly_reports,
-)
 from observability.runtime import (
     ObservabilityArtifacts,
     build_lightning_logger,
@@ -93,11 +88,13 @@ from observability.runtime import (
 # `__all__` is the stable package-level import contract for callers like
 # `train.py`, `main.py`, tests, and notebook workflows.
 #
-# Important compatibility note:
-# we keep the long-standing exports such as `export_prediction_table` and
-# `generate_plotly_reports` so existing call sites remain valid, while also
-# surfacing the newer shared-reporting primitives introduced for the Phase 1
-# reporting architecture refactor.
+# Migration note:
+# post-run reporting helpers are intentionally absent from this list. The
+# canonical import surface for reporting is now:
+# - `from reporting import SharedReport`
+# - `from reporting import build_shared_report`
+# - `from reporting import export_prediction_table`
+# - `from reporting import generate_plotly_reports`
 __all__ = [
     "ActivationStatsCallback",
     "BatchAuditCallback",
@@ -108,14 +105,10 @@ __all__ = [
     "ParameterScalarTelemetryCallback",
     "PredictionFigureCallback",
     "PredictionSanityCallback",
-    "SharedReport",
     "SystemTelemetryCallback",
     "build_lightning_logger",
     "build_observability_callbacks",
     "build_profiler",
-    "build_shared_report",
-    "export_prediction_table",
-    "generate_plotly_reports",
     "log_hyperparameters",
     "log_metrics_to_loggers",
     "setup_observability",

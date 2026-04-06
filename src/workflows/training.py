@@ -6,14 +6,39 @@ from __future__ import annotations
 #
 # Responsibility boundary:
 # - translate a prepared project config into one full run
-# - coordinate evaluation, shared post-run reporting, prediction export,
-#   reports, and run summaries
+# - coordinate evaluation, post-run shared-report packaging, export sinks,
+#   lightweight reports, TensorBoard post-run report logging, and compact run
+#   summaries
 # - keep CLI and notebook callers on one shared orchestration path
 #
 # What does *not* live here:
 # - argument parsing
 # - low-level Trainer assembly details
 # - model forward/loss/optimizer behavior
+#
+# Architectural note:
+# this workflow layer intentionally sits above the model/trainer stack and above
+# the runtime-observability stack. It is the first place in the repository that
+# can see the full post-fit picture:
+# - fit artifacts
+# - optional test metrics
+# - optional raw prediction batches
+# - structured held-out evaluation
+# - post-run reporting sinks
+#
+# That makes it the correct place to integrate the reporting package without
+# pushing post-run report generation down into callbacks or model code.
+#
+# Reporting-package migration note:
+# earlier versions of this workflow imported post-run reporting helpers from
+# `observability`. The repository is now moving toward a cleaner split:
+# - `observability` handles live runtime visibility during training/evaluation
+# - `reporting` handles post-run packaging and rendering once predictions exist
+#
+# The logic below intentionally preserves the existing workflow behavior and
+# artifact flow while switching the import boundary to the new reporting
+# package and adding the next planned enhancement: a TensorBoard sink that
+# consumes the canonical `SharedReport` after prediction/evaluation complete.
 
 import json
 from dataclasses import replace
@@ -24,12 +49,12 @@ from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from config import (
     Config,
+    ConfigurationValidationError,
     ObservabilityConfig,
     SnapshotConfig,
     TrainConfig,
     config_to_dict,
     validate_runtime_configuration,
-    ConfigurationValidationError
 )
 from defaults import (
     DEFAULT_OUTPUT_DIR,
@@ -213,6 +238,9 @@ def _reset_environment_benchmark_state(environment: RuntimeEnvironment) -> None:
     except ImportError:
         return
 
+    # CUDA and MPS expose different cache/stat-reset APIs. We use whichever is
+    # available and ignore failures because benchmark hygiene should help the
+    # run, not become another reason the workflow fails.
     if environment.cuda_available and torch.cuda.is_available():
         try:
             torch.cuda.reset_peak_memory_stats()
@@ -251,6 +279,9 @@ def _collect_environment_benchmark_memory(
         "process_rss_mb": None,
     }
 
+    # CUDA and MPS use different Torch runtime surfaces for memory inspection.
+    # We normalize both into the same final metric names so later benchmark
+    # summaries remain easy to compare.
     if environment.cuda_available:
         try:
             import torch
@@ -285,6 +316,8 @@ def _collect_environment_benchmark_memory(
         except Exception:
             pass
 
+    # Process RSS complements device memory stats by answering the broader
+    # process-memory question regardless of accelerator backend.
     try:
         import psutil
 
@@ -376,6 +409,9 @@ def run_environment_benchmark_workflow(
         enable_plot_reports=False,
     )
 
+    # Synchronization around the timed section matters because accelerator
+    # backends can queue work asynchronously. Reset/synchronize first so the
+    # measured interval reflects completed benchmark work more closely.
     _reset_environment_benchmark_state(runtime_environment)
     synchronize_runtime_device(environment=runtime_environment)
     start_time = perf_counter()
@@ -407,11 +443,14 @@ def run_environment_benchmark_workflow(
         if artifacts.fit.train_batches_processed is not None
         else benchmark_train_batches
     )
+
     # This is an estimate rather than a promise of exact sample count. It is
     # still useful for quick environment comparison, but it should not be read
     # as a full profiler-grade accounting metric.
     samples_processed = actual_train_batches * config.data.batch_size
 
+    # The benchmark summary mirrors the normal run summary style but focuses on
+    # the small subset of fields that matter most for throughput comparison.
     summary = {
         "timestamp": datetime.now().astimezone().isoformat(),
         "requested_device_profile": requested_device_profile,
@@ -484,8 +523,9 @@ def run_training_workflow(
 
     Context:
     this function sits above `FusedModelTrainer`, adding environment-profile
-    resolution, summary writing, prediction export, and post-fit evaluation so
-    those concerns do not have to be rebuilt at each entrypoint.
+    resolution, summary writing, prediction export, structured evaluation, and
+    post-run reporting so those concerns do not have to be rebuilt at each
+    entrypoint.
 
     Important inputs:
     - `config` carries the semantic data/model configuration for the run
@@ -507,8 +547,10 @@ def run_training_workflow(
     # 3. build the DataModule and training wrapper
     # 4. fit the model
     # 5. optionally test and predict on the held-out split
-    # 6. build the shared post-run report surface when predictions exist
-    # 7. persist a compact run summary plus optional prediction tensors
+    # 6. build the canonical post-run shared report when predictions exist
+    # 7. mirror that shared report into configured post-run sinks
+    # 8. serialize optional prediction/report artifacts
+    # 9. persist a compact run summary
     if seed is not None and seed_everything is not None:
         seed_everything(seed, workers=True)
     # If Lightning is unavailable, we do not raise here ourselves. The later
@@ -526,6 +568,7 @@ def run_training_workflow(
     effective_train_config = train_config or build_default_train_config(
         default_root_dir=output_dir,
     )
+
     # Apple Silicon is the one place where some useful runtime controls need to
     # be exported extremely early so the later Torch import/runtime init sees
     # them. The full profile resolver still runs below; this is only the
@@ -540,12 +583,16 @@ def run_training_workflow(
     effective_observability_config = observability_config or build_default_observability_config(
         output_dir=output_dir,
     )
+
+    # Apply low-level runtime overrides before profile resolution so both direct
+    # callers and profile logic start from the same effective baseline.
     apply_runtime_environment_overrides(train_config=effective_train_config)
     effective_runtime_environment = runtime_environment or detect_runtime_environment()
     effective_config = config
     effective_applied_profile_defaults = (
         dict(applied_profile_defaults) if applied_profile_defaults is not None else {}
     )
+
     if resolved_device_profile is None:
         # Direct Python callers should receive the same environment-aware
         # defaults as the CLI path. Resolving profiles here keeps the reusable
@@ -566,11 +613,16 @@ def run_training_workflow(
         effective_train_config = profile_resolution.train_config
         effective_observability_config = profile_resolution.observability_config
         effective_applied_profile_defaults = dict(profile_resolution.applied_defaults)
+
+        # Re-apply environment overrides after profile resolution because the
+        # profile may have changed runtime-facing settings such as precision or
+        # worker defaults.
         apply_runtime_environment_overrides(train_config=effective_train_config)
     else:
         # If the caller already resolved the profile externally, this workflow
         # trusts that result and avoids second-guessing it.
         effective_resolved_device_profile = resolved_device_profile
+
     effective_preflight_diagnostics = tuple(
         preflight_diagnostics
         if preflight_diagnostics is not None
@@ -583,6 +635,7 @@ def run_training_workflow(
             observability_config=effective_observability_config,
         )
     )
+
     # If the caller supplied explicit configs we respect them verbatim.
     # Otherwise we derive defaults that are aligned with the chosen output dir.
     #
@@ -590,7 +643,6 @@ def run_training_workflow(
     # - this workflow treats observability as first-class run configuration
     # - the defaults are intentionally visibility-friendly, but callers still
     #   remain free to dial them down for very constrained hardware sessions
-
     if fail_on_preflight_errors and has_error_diagnostics(effective_preflight_diagnostics):
         raise RuntimeError(
             "Runtime preflight checks failed "
@@ -619,10 +671,11 @@ def run_training_workflow(
 
     from data.datamodule import AZT1DDataModule
     from evaluation import evaluate_prediction_batches
-    from observability import (
+    from reporting import (
         build_shared_report,
         export_prediction_table,
         generate_plotly_reports,
+        log_shared_report_to_tensorboard,
     )
     from train import FusedModelTrainer as DefaultFusedModelTrainer
 
@@ -630,6 +683,7 @@ def run_training_workflow(
         trainer_class = DefaultFusedModelTrainer
 
     datamodule = AZT1DDataModule(effective_config.data)
+
     # The training wrapper deliberately sits between the top-level workflow and
     # Lightning. That keeps this module focused on orchestration while
     # `src/train.py` owns fit/test/predict policy.
@@ -643,7 +697,13 @@ def run_training_workflow(
         observability_config=effective_observability_config,
     )
     trainer_observability = getattr(trainer, "observability_artifacts", None)
+
+    # The runtime observability bundle may provide several useful paths and
+    # logger surfaces. We pull them out once here because the workflow needs:
+    # - a plain-text logger for lifecycle notes
+    # - the active experiment logger for post-run reporting sinks
     text_logger = getattr(trainer_observability, "text_logger", None)
+    active_logger = getattr(trainer_observability, "logger", None)
     if text_logger is not None:
         text_logger.info("starting training workflow")
 
@@ -663,9 +723,10 @@ def run_training_workflow(
             f"Preflight diagnostics:\n{format_runtime_diagnostics(effective_preflight_diagnostics)}\n\n"
             f"Failure analysis:\n{format_runtime_diagnostics(runtime_failure_diagnostics)}"
         ) from exc
-    # Evaluation may target `"best"`, `"last"`, an explicit checkpoint path,
-    # or the current in-memory model. We normalize that choice once here so
-    # test and prediction stay consistent.
+
+    # Evaluation may target "best", "last", an explicit checkpoint path, or
+    # the current in-memory model. We normalize that choice once here so test
+    # and prediction stay consistent.
     resolved_eval_ckpt_path = _resolve_eval_ckpt_path(fit_artifacts, eval_ckpt_path)
 
     test_metrics: list[Mapping[str, float]] | None = None
@@ -674,10 +735,11 @@ def run_training_workflow(
     predictions_path: Path | None = None
     prediction_table_path: Path | None = None
     report_paths: dict[str, Path] = {}
-    # `shared_report` is the Phase 1 in-memory packaging layer for post-run
+
+    # `shared_report` is the canonical in-memory packaging layer for post-run
     # reporting. It is intentionally optional here so the workflow can preserve
     # the older artifact-only behavior when prediction generation is skipped or
-    # no held-out predictions are available.
+    # when no held-out predictions are available.
     shared_report = None
 
     if fit_artifacts.has_test_data and not skip_test:
@@ -697,10 +759,10 @@ def run_training_workflow(
                 f"Preflight diagnostics:\n{format_runtime_diagnostics(effective_preflight_diagnostics)}\n\n"
                 f"Failure analysis:\n{format_runtime_diagnostics(runtime_failure_diagnostics)}"
             ) from exc
-    # We intentionally treat test evaluation and raw prediction collection as
-    # separate toggles. Some workflows want metrics only, while others want the
-    # raw tensors for notebook analysis or custom visualization.
 
+    # We intentionally treat test evaluation and raw prediction collection as
+    # separate toggles. Some workflows want scalar test metrics only, while
+    # others want the raw tensors and structured post-run report surfaces.
     if fit_artifacts.has_test_data and not skip_predict:
         try:
             test_predictions = trainer.predict_test(
@@ -721,27 +783,36 @@ def run_training_workflow(
                 f"Preflight diagnostics:\n{format_runtime_diagnostics(effective_preflight_diagnostics)}\n\n"
                 f"Failure analysis:\n{format_runtime_diagnostics(runtime_failure_diagnostics)}"
             ) from exc
+
         # Detailed evaluation currently hangs off the prediction path rather
         # than the `trainer.test(...)` path because the richer evaluator needs
         # raw forecast tensors plus the aligned source batches, not just
         # Lightning's already-reduced scalar metrics.
         if test_predictions is None:
             raise RuntimeError("predict_test returned no prediction batches.")
+
         quantiles = getattr(fit_artifacts.model, "quantiles", (0.1, 0.5, 0.9))
+
+        # Structured evaluation remains the canonical source of metric truth.
+        # The reporting package consumes this evaluation output later; it does
+        # not replace or recompute it here.
         test_evaluation = evaluate_prediction_batches(
             predictions=test_predictions,
             batches=datamodule.test_dataloader(),
             quantiles=quantiles,
         )
-        # Phase 1 shared-reporting integration:
-        # build the canonical in-memory post-run report once after detailed
-        # evaluation becomes available. This keeps the reporting architecture
-        # moving toward "evaluate once, package once, render many ways" without
-        # disturbing the surrounding workflow or changing existing artifact
-        # toggles.
+
+        # Build the canonical in-memory shared report once after raw predictions
+        # and structured evaluation both exist.
+        #
+        # This is the key lifecycle boundary of the reporting architecture:
+        # - evaluation computes metric truth
+        # - reporting packages that truth into one reusable surface
+        # - sinks such as TensorBoard, CSV, and Plotly consume that surface or
+        #   stay tightly aligned with it
         #
         # Important compatibility note:
-        # the workflow still preserves the long-standing raw prediction tensor
+        # the surrounding workflow still preserves the long-standing raw tensor
         # save, CSV export, and Plotly HTML generation paths. The shared report
         # is an enhancement layer underneath those sinks rather than a new
         # mandatory artifact contract for callers.
@@ -752,6 +823,32 @@ def run_training_workflow(
             sampling_interval_minutes=effective_config.data.sampling_interval_minutes,
             evaluation_result=test_evaluation,
         )
+
+        # Mirror the canonical shared report into TensorBoard-compatible logger
+        # backends when such a backend is active for the run.
+        #
+        # Important lifecycle note:
+        # this happens only after prediction and structured evaluation complete.
+        # That keeps the split explicit:
+        # - callbacks/loggers handle live runtime observability
+        # - the reporting package handles post-run packaging and rendering
+        #
+        # Important safety note:
+        # `log_shared_report_to_tensorboard(...)` is intentionally best-effort.
+        # - if the active logger is not TensorBoard-compatible, it returns
+        #   `False`
+        # - if a particular artifact family cannot be rendered, the rest of the
+        #   workflow continues
+        # - the call does not alter training, prediction, or evaluation logic
+        log_shared_report_to_tensorboard(
+            shared_report=shared_report,
+            logger_or_trainer=active_logger,
+            global_step=0,
+            namespace="report",
+            max_table_rows=20,
+            max_forecast_subjects=effective_observability_config.max_forecast_subjects_per_report,
+        )
+
         if output_dir is not None and save_predictions:
             # Predictions are saved as raw tensors on purpose. That preserves
             # the model's direct output without forcing an opinionated export
@@ -762,10 +859,15 @@ def run_training_workflow(
                 [tensor.detach().cpu() for tensor in test_predictions],
                 predictions_path,
             )
+
         if effective_observability_config.enable_prediction_exports:
             # The CSV export is intentionally additive rather than a replacement
             # for the raw tensor artifact. We keep both because they serve
             # different debugging/research use cases.
+            #
+            # The export sink remains thin: it writes the canonical flat
+            # prediction table shape while staying aligned with the same shared
+            # report/evaluation surfaces used elsewhere in the post-run stack.
             prediction_table_path = export_prediction_table(
                 datamodule=datamodule,
                 predictions=test_predictions,
@@ -774,14 +876,15 @@ def run_training_workflow(
                 sampling_interval_minutes=effective_config.data.sampling_interval_minutes,
                 evaluation_result=test_evaluation,
             )
+
         if effective_observability_config.enable_plot_reports:
-            # Plotly reporting now prefers the shared in-memory report when it
-            # is available. We still pass the prediction-table path for
-            # backwards compatibility and as a fallback for lighter workflows.
+            # Plotly reporting lives in the reporting package because it is a
+            # post-run presentation sink, not a live training-time visibility
+            # surface.
             #
-            # This keeps current behavior intact while letting the HTML sink
-            # consume the same canonical report surface used elsewhere in the
-            # reporting stack.
+            # The sink prefers the in-memory shared report when available, but
+            # still accepts the exported prediction table path for compatibility
+            # with lighter or transitional workflows.
             report_paths = generate_plotly_reports(
                 prediction_table_path,
                 report_dir=effective_observability_config.report_dir,
@@ -801,11 +904,17 @@ def run_training_workflow(
         if runtime_tuning_report is not None
         else {}
     )
+
+    # Persist both the applied and skipped runtime-tuning decisions so later
+    # readers can understand not only what changed, but also what the runtime
+    # layer considered and declined to change.
     runtime_tuning_summary = {
         "applied": runtime_tuning_applied,
         "skipped": runtime_tuning_skipped,
     }
 
+    # Build the final run summary only after all optional post-run sinks have
+    # had a chance to populate their artifact paths and reporting outputs.
     summary = _build_run_summary(
         config=effective_config,
         train_config=effective_train_config,
