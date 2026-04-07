@@ -17,6 +17,7 @@ from __future__ import annotations
 # - model forward/loss/optimizer behavior
 
 import json
+import csv
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -1298,19 +1299,13 @@ def run_training_workflow(
         report_paths.update(structured_export_paths)
 
         if effective_observability_config.enable_plot_reports:
-            # Plotly reporting lives in the reporting package because it is a
-            # post-run presentation sink, not a live training-time visibility
-            # surface.
-            #
-            # The sink prefers the in-memory shared report when available, but
-            # still accepts the exported prediction table path for compatibility
-            # with lighter or transitional workflows.
             plotly_report_paths = generate_plotly_reports(
                 prediction_table_path,
                 report_dir=effective_observability_config.report_dir,
                 max_subjects=effective_observability_config.max_forecast_subjects_per_report,
-                evaluation_result=test_evaluation,
+                shared_report=shared_report,
             )
+            report_paths.update(plotly_report_paths)
 
     # CHANGE: Write a clean metrics artifact so results are easy to inspect
     # without digging through the full run summary.

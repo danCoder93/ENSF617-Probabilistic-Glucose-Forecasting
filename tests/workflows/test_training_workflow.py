@@ -275,11 +275,13 @@ def test_run_training_workflow_builds_shared_report_once_and_reuses_it_across_re
     # modifies the real runtime objects that `run_training_workflow(...)` will
     # import during its internal post-run reporting phase.
     import reporting
+    import workflows.training as training_module
 
     calls: dict[str, Any] = {
         "build_shared_report_count": 0,
         "tensorboard_shared_report": None,
         "export_shared_report": None,
+        "structured_export_shared_report": None,
         "plotly_shared_report": None,
         "tensorboard_logger_or_trainer": None,
     }
@@ -289,6 +291,9 @@ def test_run_training_workflow_builds_shared_report_once_and_reuses_it_across_re
     original_log_shared_report_to_tensorboard = reporting.log_shared_report_to_tensorboard
     original_export_prediction_table_from_report = reporting.export_prediction_table_from_report
     original_generate_plotly_reports = reporting.generate_plotly_reports
+    original_export_post_run_shared_report_artifacts = (
+        training_module._export_post_run_shared_report_artifacts
+    )
 
     def spy_build_shared_report(*args: object, **kwargs: object) -> object:
         # Delegate to the original builder so the workflow still executes the
@@ -326,6 +331,24 @@ def test_run_training_workflow_builds_shared_report_once_and_reuses_it_across_re
         calls["export_shared_report"] = shared_report
         return output_path
 
+    def spy_export_post_run_shared_report_artifacts(
+        *,
+        shared_report: object,
+        report_dir: Path | None,
+        text_logger: Any,
+    ) -> dict[str, Path]:
+        # Record the shared-report identity while bypassing the real structured
+        # export implementation, which expects a fully populated SharedReport
+        # object with table surfaces.
+        del text_logger
+        calls["structured_export_shared_report"] = shared_report
+        if report_dir is None:
+            return {}
+        report_dir.mkdir(parents=True, exist_ok=True)
+        structured_path = report_dir / "structured_report_index.json"
+        structured_path.write_text("{}", encoding="utf-8")
+        return {"structured_report_index": structured_path}
+
     def spy_generate_plotly_reports(
         prediction_table_path: Path | None,
         *,
@@ -356,6 +379,11 @@ def test_run_training_workflow_builds_shared_report_once_and_reuses_it_across_re
         "export_prediction_table_from_report",
         spy_export_prediction_table_from_report,
     )
+    monkeypatch.setattr(
+        training_module,
+        "_export_post_run_shared_report_artifacts",
+        spy_export_post_run_shared_report_artifacts,
+    )
     monkeypatch.setattr(reporting, "generate_plotly_reports", spy_generate_plotly_reports)
 
     try:
@@ -383,12 +411,18 @@ def test_run_training_workflow_builds_shared_report_once_and_reuses_it_across_re
             "export_prediction_table_from_report",
             original_export_prediction_table_from_report,
         )
+        monkeypatch.setattr(
+            training_module,
+            "_export_post_run_shared_report_artifacts",
+            original_export_post_run_shared_report_artifacts,
+        )
         monkeypatch.setattr(reporting, "generate_plotly_reports", original_generate_plotly_reports)
 
     assert artifacts.test_predictions is not None
     assert calls["build_shared_report_count"] == 1
     assert calls["tensorboard_shared_report"] is canonical_shared_report
     assert calls["export_shared_report"] is canonical_shared_report
+    assert calls["structured_export_shared_report"] is canonical_shared_report
     assert calls["plotly_shared_report"] is canonical_shared_report
 
     # The core contract here is SharedReport build/reuse across sinks. The
