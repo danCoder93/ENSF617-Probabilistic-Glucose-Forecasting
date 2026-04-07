@@ -47,6 +47,7 @@ INTERNAL_PREFIXES = {
     "defaults",
     "main",
     "tests",
+    "reporting",
 }
 ENTRYPOINT_MODULES = {"main", "defaults"}
 PACKAGE_FACADES = {"config", "environment", "evaluation", "observability", "workflows"}

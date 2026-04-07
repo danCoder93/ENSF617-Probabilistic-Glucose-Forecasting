@@ -711,6 +711,75 @@ once a subsystem becomes first-class, documentation, typing, and editor
 correctness eventually have to catch up so that future work is easier rather
 than harder.
 
+
+
+## April 2–7, 2026: Reporting Refactor And TensorBoard-Centric Observability
+
+This is the most recent evolution phase and reflects a shift from
+artifact-heavy reporting toward a unified, TensorBoard-first observability
+strategy.
+
+#### What changed
+
+The repository introduced a structured reporting layer under
+`src/reporting/` and significantly expanded the observability system:
+
+- reporting logic was decomposed into responsibility-focused modules:
+  - `prediction_rows.py`
+  - `report_tables.py`
+  - `report_text.py`
+  - `builders.py`
+- TensorBoard became the primary surface for:
+  - scalar metrics
+  - distribution tracking
+  - prediction visualization
+  - structured summaries
+- observability callbacks were further specialized:
+  - system-level signals
+  - parameter/gradient inspection
+  - prediction-level logging
+- large monolithic reports were replaced with:
+  - smaller structured artifacts (CSV/JSON)
+  - TensorBoard-native visualizations
+
+#### Why it changed
+
+Earlier reporting approaches relied heavily on external HTML artifacts,
+which created friction:
+
+- harder to navigate compared to interactive dashboards
+- duplication between logging and reporting layers
+- limited drill-down capability during training
+
+At the same time, observability had matured enough that:
+
+- most useful signals were already being computed during runtime
+- TensorBoard could serve as a single unified inspection surface
+
+This phase therefore shifted the design toward:
+
+- “log once, visualize everywhere”
+- reducing post-hoc report generation
+- making training runs self-explanatory without external artifacts
+
+#### Lasting impact
+
+This phase completes the observability story:
+
+- observability is no longer just debugging support
+- it becomes the primary interface for understanding model behavior
+
+It also reinforces a key architectural principle:
+
+- reporting is now a *projection* of observability data, not a separate system
+
+This keeps:
+
+- training logic unchanged
+- observability centralized
+- reporting modular and lightweight
+
+
 ## Cross-Cutting Design Decisions
 
 Several design decisions repeat throughout the codebase's evolution. These are
