@@ -4,7 +4,7 @@
 
 This document is a formal, repository-scale primer intended to explain the entire codebase at a level suitable for a serious first reading. Its purpose is not merely to describe individual files, but to explain the repository as a system: its research objective, architectural decomposition, execution flow, data contracts, model logic, runtime policy, evaluation methodology, and artifact surface.
 
-The repository implements a research-oriented probabilistic glucose forecasting pipeline centered on a fused Temporal Convolutional Network (TCN) and Temporal Fusion Transformer (TFT) architecture. The implementation is layered deliberately. Raw dataset acquisition, preprocessing, semantic feature typing, window indexing, model construction, runtime profile resolution, training orchestration, structured evaluation, and observability are separated into distinct packages so that the code can be understood, tested, and extended without collapsing into a monolithic script.
+The repository implements a research-oriented probabilistic glucose forecasting pipeline centered on a fused Temporal Convolutional Network (TCN) and Temporal Fusion Transformer (TFT) architecture. The implementation is layered deliberately. Raw dataset acquisition, preprocessing, semantic feature typing, window indexing, model construction, runtime profile resolution, training orchestration, structured evaluation, observability, and reporting are separated into distinct packages so that the code can be understood, tested, and extended without collapsing into a monolithic script.
 
 This primer is written for a reader who wants to understand not only "what the files are called," but also:
 
@@ -49,7 +49,7 @@ This document covers:
 - the model architecture and forward pass
 - the training loop semantics delegated to Lightning
 - the detailed evaluation path
-- the observability and artifact path
+- the observability and reporting path
 - navigation guidance and external references
 
 This document does not attempt to:
@@ -90,7 +90,7 @@ That broader system requirement explains the codebase's layered architecture.
 
 Before examining any package in detail, it is useful to compress the entire repository into one conceptual sentence:
 
-> The repository converts a raw glucose dataset into semantically typed sequence windows, binds those runtime-discovered data facts into a hybrid TCN-TFT forecasting model, delegates the epoch loop to PyTorch Lightning, and then performs structured evaluation and artifact generation from the resulting probabilistic forecasts.
+> The repository converts a raw glucose dataset into semantically typed sequence windows, binds those runtime-discovered data facts into a hybrid TCN-TFT forecasting model, delegates the epoch loop to PyTorch Lightning, and then performs structured evaluation plus observability- and reporting-driven artifact generation from the resulting probabilistic forecasts.
 
 That sentence already contains the repository's most important causal chain:
 
@@ -143,7 +143,11 @@ Training-time metrics are not treated as the entire evaluation story. The reposi
 
 ### 4.5 First-Class Observability
 
-The repository does not reduce observability to print statements. It provides a dedicated package for logging, callback-driven instrumentation, prediction table export, report generation, and run summaries.
+The repository does not reduce observability to print statements. It provides a dedicated package for logging, callback-driven instrumentation, TensorBoard integration, profiler setup, and run summaries.
+
+### 4.6 Reporting As A Separate Projection Layer
+
+The repository now treats reporting as adjacent to observability rather than identical to it. Observability captures run-time signals and logging policy; reporting reshapes predictions and evaluation outputs into tables, summaries, and lightweight figures suitable for inspection after or alongside a run.
 
 ## 5. Repository Structure
 
@@ -161,6 +165,7 @@ src/
   evaluation/
   models/
   observability/
+  reporting/
   train.py
   workflows/
 tests/
@@ -322,17 +327,41 @@ Representative files:
 
 - [`../src/observability/runtime.py`](../src/observability/runtime.py)
 - [`../src/observability/callbacks.py`](../src/observability/callbacks.py)
-- [`../src/observability/reporting.py`](../src/observability/reporting.py)
+- [`../src/observability/debug_callbacks.py`](../src/observability/debug_callbacks.py)
+- [`../src/observability/system_callbacks.py`](../src/observability/system_callbacks.py)
+- [`../src/observability/parameter_callbacks.py`](../src/observability/parameter_callbacks.py)
+- [`../src/observability/prediction_callbacks.py`](../src/observability/prediction_callbacks.py)
 
 Responsibilities:
 
-- construct logging and profiler surfaces
+- construct logger and profiler surfaces
 - attach callback-driven instrumentation
-- export prediction tables
-- generate HTML reports
-- leave readable run artifacts behind
+- expose a stable callback facade while keeping callback implementations split by responsibility
+- log system, parameter, activation, gradient, and prediction-facing signals
+- leave readable run telemetry behind
 
-This package expresses how a run becomes inspectable.
+This package expresses how a run becomes inspectable while it is executing.
+
+### 5.10 Reporting Package
+
+Representative files:
+
+- [`../src/reporting/prediction_rows.py`](../src/reporting/prediction_rows.py)
+- [`../src/reporting/report_tables.py`](../src/reporting/report_tables.py)
+- [`../src/reporting/report_text.py`](../src/reporting/report_text.py)
+- [`../src/reporting/builders.py`](../src/reporting/builders.py)
+- [`../src/reporting/tensorboard.py`](../src/reporting/tensorboard.py)
+- [`../src/reporting/plotly_reports.py`](../src/reporting/plotly_reports.py)
+
+Responsibilities:
+
+- reshape raw predictions into row-oriented tables
+- build compact textual and tabular summaries
+- project evaluation outputs into TensorBoard-friendly forms
+- generate lightweight report artifacts when enabled
+- keep post-run reporting logic modular rather than burying it in workflow code
+
+This package expresses how run outputs become readable summaries after model execution.
 
 ## 6. Execution Lifecycle
 
@@ -351,7 +380,7 @@ The normal execution lifecycle of the repository is the single most important th
 9. PyTorch Lightning runs the epoch loop.
 10. The workflow optionally runs held-out test and prediction.
 11. The evaluation package computes structured metrics from raw predictions.
-12. The observability package exports logs, tables, and reports.
+12. The observability package exports logs and runtime telemetry, while the reporting package builds prediction tables, summaries, TensorBoard views, and optional lightweight reports.
 13. The workflow writes a compact run summary.
 
 ### 6.2 Order Constraints
@@ -404,8 +433,8 @@ flowchart TB
     Q --> R[Optional Trainer.test]
     R --> S[Optional Trainer.predict]
     S --> T[evaluation.evaluate_prediction_batches]
-    T --> U[observability.export_prediction_table]
-    U --> V[observability.generate_plotly_reports]
+    T --> U[reporting.build prediction rows and summaries]
+    U --> V[reporting.tensorboard and optional Plotly artifacts]
     V --> W[run_summary.json and artifacts]
 ```
 
@@ -1531,8 +1560,9 @@ The workflow layer adds:
 - post-fit test and prediction orchestration
 - structured evaluation
 - prediction tensor export
-- prediction table export
-- Plotly report generation
+- reporting-table export
+- TensorBoard-facing reporting projection
+- optional Plotly/lightweight report generation
 - run summary writing
 
 ### 27.2 Run summary
@@ -1597,8 +1627,9 @@ run_training_workflow(...)
   -> trainer.test(...)
   -> trainer.predict_test(...)
   -> evaluation.evaluate_prediction_batches(...)
-  -> observability.export_prediction_table(...)
-  -> observability.generate_plotly_reports(...)
+  -> reporting.build_prediction_rows(...)
+  -> reporting.write_tensorboard_artifacts(...)
+  -> reporting.generate_plotly_reports(...)
   -> write run_summary.json
 ```
 
@@ -1737,16 +1768,21 @@ These types are defined in:
 
 This typed surface keeps evaluation results inspectable and serializable.
 
-## 31. Observability and Artifacts
+## 31. Observability, Reporting, and Artifacts
 
-Observability in this repository is broader than metric logging.
+Observability in this repository is broader than metric logging, but it is also
+more structured than it was in earlier snapshots.
 
 ### 31.1 Runtime observability
 
-Files:
+Representative files:
 
 - [`../src/observability/runtime.py`](../src/observability/runtime.py)
 - [`../src/observability/callbacks.py`](../src/observability/callbacks.py)
+- [`../src/observability/debug_callbacks.py`](../src/observability/debug_callbacks.py)
+- [`../src/observability/system_callbacks.py`](../src/observability/system_callbacks.py)
+- [`../src/observability/parameter_callbacks.py`](../src/observability/parameter_callbacks.py)
+- [`../src/observability/prediction_callbacks.py`](../src/observability/prediction_callbacks.py)
 
 Runtime observability includes:
 
@@ -1762,28 +1798,49 @@ Runtime observability includes:
   - activation statistics
   - parameter histograms
   - prediction figures
+  - model-visualization artifacts
 
-### 31.2 Post-Run Reporting
+A useful architectural distinction in the current repository is that
+observability primarily answers:
 
-File:
+- what happened during this run?
+- what did the runtime, model, and tensors look like while training proceeded?
 
-- [`../src/observability/reporting.py`](../src/observability/reporting.py)
+### 31.2 Reporting layer
 
-Post-run observability includes:
+Representative files:
 
-- export of a flat prediction table CSV
-- Plotly residual histogram
-- horizon-metric report
-- subject-level overview plots
+- [`../src/reporting/prediction_rows.py`](../src/reporting/prediction_rows.py)
+- [`../src/reporting/report_tables.py`](../src/reporting/report_tables.py)
+- [`../src/reporting/report_text.py`](../src/reporting/report_text.py)
+- [`../src/reporting/builders.py`](../src/reporting/builders.py)
+- [`../src/reporting/tensorboard.py`](../src/reporting/tensorboard.py)
+- [`../src/reporting/plotly_reports.py`](../src/reporting/plotly_reports.py)
+
+The reporting layer includes:
+
+- export of flat prediction tables
+- compact summary tables
+- text summaries for evaluation results
+- TensorBoard-friendly report projection
+- optional Plotly figures and lightweight HTML outputs when enabled
+
+This layer primarily answers:
+
+- how should the outputs of this run be summarized for later reading?
+- which post-run tables and views are worth preserving?
 
 ### 31.3 Prediction Table Rationale
 
-The raw `.pt` prediction tensor preserves fidelity for programmatic analysis. The prediction table serves a different purpose: it denormalizes the result into a row-oriented format suitable for:
+The raw `.pt` prediction tensor preserves fidelity for programmatic analysis.
+The prediction table serves a different purpose: it denormalizes the result into
+a row-oriented format suitable for:
 
 - pandas inspection
 - plotting
 - manual debugging
-- report generation
+- summary generation
+- downstream report builders
 
 ### 31.4 Artifact Layout
 
@@ -1823,7 +1880,7 @@ More specifically:
 - telemetry is typically `artifacts/main_run/telemetry.csv`
 - exported prediction tables are typically `artifacts/main_run/test_predictions.csv`
 - raw prediction tensors are typically `artifacts/main_run/test_predictions.pt`
-- Plotly reports are typically written under `artifacts/main_run/reports/`
+- reporting outputs, including TensorBoard-linked summaries and optional Plotly artifacts, are typically written under `artifacts/main_run/reports/`
 - profiler artifacts, when enabled, are written under `artifacts/main_run/profiler/`
 - Torchview/model-visualization artifacts are typically written under `artifacts/main_run/model_viz/`
 
@@ -1856,7 +1913,8 @@ As a result, it is usually possible to answer two different questions quickly:
 - "Where is the cleaned dataset?"
 - "Where did this particular experiment write its outputs?"
 
-This artifact surface is one of the repository's strongest signs of maturity as a research system rather than merely a model implementation.
+This artifact surface is one of the repository's strongest signs of maturity as
+a research system rather than merely a model implementation.
 
 ## 32. Navigation
 
@@ -1876,7 +1934,8 @@ A reader attempting to understand the repository in one sitting should not move 
 10. [`../src/models/tcn.py`](../src/models/tcn.py)
 11. [`../src/models/tft.py`](../src/models/tft.py)
 12. [`../src/evaluation/evaluator.py`](../src/evaluation/evaluator.py)
-13. [`../src/observability/reporting.py`](../src/observability/reporting.py)
+13. [`../src/observability/callbacks.py`](../src/observability/callbacks.py)
+14. [`../src/reporting/builders.py`](../src/reporting/builders.py)
 
 ### 32.2 Minimal reading set for rapid orientation
 
@@ -1887,6 +1946,7 @@ If time is limited, the five most informative files are:
 3. [`../src/data/datamodule.py`](../src/data/datamodule.py)
 4. [`../src/models/fused_model.py`](../src/models/fused_model.py)
 5. [`../src/evaluation/evaluator.py`](../src/evaluation/evaluator.py)
+6. [`../src/reporting/builders.py`](../src/reporting/builders.py)
 
 ### 32.3 Tests as Evidence
 
@@ -1937,7 +1997,11 @@ Because Lightning's `test()` path naturally yields reduced scalar outputs, while
 
 ### 33.5 Observability as a Package
 
-Because logging, callback-driven instrumentation, profiler setup, prediction export, and report generation are too substantial and too reusable to remain scattered across workflow code.
+Because logger setup, callback-driven instrumentation, profiler setup, and runtime telemetry are too substantial and too reusable to remain scattered across workflow code.
+
+### 33.6 Why Reporting Is Separate From Observability
+
+Because prediction reshaping, tabular summaries, TensorBoard report projection, and optional Plotly artifacts are post-run presentation concerns. Keeping them in `src/reporting/` avoids overloading the observability layer with every artifact-generation responsibility.
 
 ## 34. Core Takeaways
 
