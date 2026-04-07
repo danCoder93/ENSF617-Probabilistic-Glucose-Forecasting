@@ -303,6 +303,7 @@ def _dashboard_text_items(shared_report: SharedReport) -> list[tuple[str, str]]:
         if key in {
             "dataset_overview",
             "metric_overview",
+            "data_summary_overview",
             "probabilistic_overview",
             "horizon_overview",
         }:
@@ -441,6 +442,7 @@ def _ordered_report_text_items(shared_report: SharedReport) -> list[tuple[str, s
     preferred_order = [
         "dataset_overview",
         "metric_overview",
+        "data_summary_overview",
         "quantile_overview",
         "horizon_overview",
         "probabilistic_overview",
@@ -491,6 +493,7 @@ def _text_section_title(text_key: str) -> str:
     interpretation-oriented labels rather than raw internal key names.
     """
     titles = {
+        "data_summary_overview": "Data Summary Overview",
         "dataset_overview": "Dataset Overview",
         "metric_overview": "Metric Overview",
         "quantile_overview": "Quantile Overview",

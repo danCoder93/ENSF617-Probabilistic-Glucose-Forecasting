@@ -38,6 +38,19 @@ from __future__ import annotations
 # That split keeps the exported artifacts convenient for both humans and
 # downstream tooling without forcing every surface into an awkward one-format
 # representation.
+#
+# Packaging enhancement note:
+# Earlier revisions exported everything flat under one folder. That worked, but
+# the bundle became harder to scan as the shared report grew. The current
+# version keeps the same shared-report truth and the same file formats while
+# introducing a slightly clearer folder layout:
+# - top-level JSON summaries remain easy to discover
+# - tabular artifacts live under `tables/`
+# - optional data-oriented add-on artifacts live under `data/`
+#
+# Important compatibility rule:
+# This is still a sink-only change. The export layer is allowed to package files
+# more clearly, but it must not invent new report truth or recompute metrics.
 
 import json
 from pathlib import Path
@@ -122,10 +135,36 @@ def _write_json(path: Path, payload: Any) -> Path:
     return path
 
 
+def _build_export_layout(*, export_dir: Path) -> dict[str, Path]:
+    """Return the concrete folder layout for one structured-export bundle.
+
+    Context:
+        The reporting package now exports a few more artifact families, so the
+        sink keeps the directory policy centralized here rather than scattering
+        folder names across multiple helpers.
+
+    Design note:
+        The layout intentionally stays shallow and human-readable:
+        - root directory for bundle-level index files and compact summaries
+        - `tables/` for CSV-backed tabular surfaces
+        - `data/` for optional dataset-oriented JSON artifacts
+    """
+    layout = {
+        "root": export_dir,
+        "tables": export_dir / "tables",
+        "data": export_dir / "data",
+    }
+
+    for directory in layout.values():
+        directory.mkdir(parents=True, exist_ok=True)
+
+    return layout
+
+
 def _export_report_tables(
     *,
     shared_report: SharedReport,
-    export_dir: Path,
+    tables_dir: Path,
 ) -> dict[str, Path]:
     """Export the tabular shared-report surfaces as CSV files.
 
@@ -152,7 +191,7 @@ def _export_report_tables(
         if not isinstance(frame, pd.DataFrame):
             continue
 
-        output_path = export_dir / file_name
+        output_path = tables_dir / file_name
 
         # Preserve the current table exactly as packaged in the shared report.
         # CSV is chosen here because these surfaces are naturally tabular and
@@ -199,6 +238,54 @@ def _export_report_json_surfaces(
         shared_report.metadata,
     )
 
+    # A small metrics summary file gives downstream tooling one focused place to
+    # read compact numeric report outputs without loading the broader metadata or
+    # text surfaces. This remains packaging-only because it is just a curated
+    # subset of already-canonical shared-report content.
+    exported_paths["metrics_summary"] = _write_json(
+        export_dir / "metrics_summary.json",
+        {
+            "scalars": shared_report.scalars,
+            "has_evaluation_result": shared_report.metadata.get(
+                "has_evaluation_result",
+                False,
+            ),
+            "quantiles": shared_report.metadata.get("quantiles", ()),
+            "sampling_interval_minutes": shared_report.metadata.get(
+                "sampling_interval_minutes"
+            ),
+        },
+    )
+
+    return exported_paths
+
+
+def _export_optional_data_surfaces(
+    *,
+    export_dir: Path,
+    report_dir: Path,
+) -> dict[str, Path]:
+    """Export optional data-oriented artifacts that already exist beside the bundle.
+
+    Context:
+        The workflow may now write a best-effort `data_summary.json` sourced from
+        the DataModule. That file is not part of the canonical `SharedReport`
+        itself, but it still belongs logically with the rest of the structured
+        report artifacts.
+
+    Important policy:
+        - this helper never computes data summary content itself
+        - it only mirrors an already-written artifact into the structured bundle
+        - missing optional artifacts are skipped cleanly
+    """
+    exported_paths: dict[str, Path] = {}
+
+    source_path = report_dir / "data_summary.json"
+    if source_path.exists():
+        output_path = export_dir / "data_summary.json"
+        output_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
+        exported_paths["data_summary"] = output_path
+
     return exported_paths
 
 
@@ -207,6 +294,8 @@ def _build_manifest(
     shared_report: SharedReport,
     exported_tables: Mapping[str, Path],
     exported_json_surfaces: Mapping[str, Path],
+    exported_data_surfaces: Mapping[str, Path],
+    export_dir: Path,
 ) -> dict[str, Any]:
     """Build the manifest describing one structured-report export bundle.
 
@@ -220,14 +309,29 @@ def _build_manifest(
         if isinstance(frame, pd.DataFrame):
             row_counts[table_name] = int(len(frame))
 
+    def _relative(path: Path) -> str:
+        return path.relative_to(export_dir).as_posix()
+
     export_entries = {
-        **{name: path.name for name, path in exported_tables.items()},
-        **{name: path.name for name, path in exported_json_surfaces.items()},
+        "json": {
+            name: _relative(path) for name, path in exported_json_surfaces.items()
+        },
+        "tables": {
+            name: _relative(path) for name, path in exported_tables.items()
+        },
+        "data": {
+            name: _relative(path) for name, path in exported_data_surfaces.items()
+        },
     }
 
     return {
-        "version": 1,
+        "version": 2,
         "export_type": "shared_report_artifacts",
+        "layout": {
+            "root": ".",
+            "tables": "tables",
+            "data": "data",
+        },
         "has_prediction_table": bool(
             isinstance(shared_report.tables.get("prediction_table"), pd.DataFrame)
             and not shared_report.tables.get("prediction_table", pd.DataFrame()).empty
@@ -235,6 +339,7 @@ def _build_manifest(
         "has_evaluation_result": bool(
             shared_report.metadata.get("has_evaluation_result", False)
         ),
+        "has_data_summary": bool(exported_data_surfaces),
         "quantiles": _json_ready_report_value(
             shared_report.metadata.get("quantiles", ())
         ),
@@ -265,16 +370,21 @@ def export_shared_report_artifacts(
               scalars.json
               text.json
               metadata.json
-              prediction_table.csv
-              by_horizon.csv
-              by_subject.csv
-              by_glucose_range.csv
+              metrics_summary.json
+              tables/
+                prediction_table.csv
+                by_horizon.csv
+                by_subject.csv
+                by_glucose_range.csv
+              data/
+                data_summary.json
 
     Important behavior:
         - returns an empty mapping when `report_dir` is not configured
         - creates the export folder on demand
         - writes report tables as CSV
         - writes keyed/nested surfaces as JSON
+        - mirrors optional data-oriented artifacts into the bundle when present
         - returns the concrete file paths that were produced
 
     Important compatibility rule:
@@ -285,28 +395,36 @@ def export_shared_report_artifacts(
     if report_dir is None:
         return {}
 
-    export_dir = Path(report_dir) / "artifacts" / "shared_report"
-    export_dir.mkdir(parents=True, exist_ok=True)
+    report_dir_path = Path(report_dir)
+    export_dir = report_dir_path / "artifacts" / "shared_report"
+    layout = _build_export_layout(export_dir=export_dir)
 
     exported_tables = _export_report_tables(
         shared_report=shared_report,
-        export_dir=export_dir,
+        tables_dir=layout["tables"],
     )
     exported_json_surfaces = _export_report_json_surfaces(
         shared_report=shared_report,
-        export_dir=export_dir,
+        export_dir=layout["root"],
+    )
+    exported_data_surfaces = _export_optional_data_surfaces(
+        export_dir=layout["data"],
+        report_dir=report_dir_path,
     )
 
     manifest = _build_manifest(
         shared_report=shared_report,
         exported_tables=exported_tables,
         exported_json_surfaces=exported_json_surfaces,
+        exported_data_surfaces=exported_data_surfaces,
+        export_dir=layout["root"],
     )
-    manifest_path = _write_json(export_dir / "manifest.json", manifest)
+    manifest_path = _write_json(layout["root"] / "manifest.json", manifest)
 
     exported_paths: dict[str, Path] = {
         **exported_tables,
         **exported_json_surfaces,
+        **exported_data_surfaces,
         "manifest": manifest_path,
     }
     return exported_paths

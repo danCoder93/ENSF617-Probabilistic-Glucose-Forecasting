@@ -468,6 +468,110 @@ def _export_post_run_shared_report_artifacts(
     return exported_paths
 
 
+def _collect_datamodule_data_summary(
+    *,
+    datamodule: Any,
+    text_logger: logging.Logger | None = None,
+) -> dict[str, Any] | None:
+    """
+    Best-effort handoff into the DataModule-owned dataset summary surface.
+
+    Purpose:
+    ask the DataModule for its already-canonical dataset description without
+    moving dataset-summary computation into the workflow.
+
+    Context:
+    the workflow is allowed to orchestrate post-run collection of the summary,
+    but the DataModule remains the source of truth for what that summary means
+    and how it is computed.
+
+    Important compatibility rule:
+    failures here must never break training, evaluation, or prediction export.
+    Dataset-summary collection is an additive reporting enhancement only.
+    """
+    describe_data = getattr(datamodule, "describe_data", None)
+    if describe_data is None:
+        if text_logger is not None:
+            text_logger.info(
+                "skipped dataset summary collection because the active DataModule does not expose describe_data()"
+            )
+        return None
+
+    try:
+        data_summary = describe_data()
+    except Exception as exc:
+        if text_logger is not None:
+            text_logger.warning(
+                "failed to collect dataset summary from DataModule.describe_data(); continuing without data summary export: %s",
+                exc,
+            )
+        return None
+
+    if text_logger is not None:
+        text_logger.info("collected dataset summary from DataModule.describe_data()")
+
+    return data_summary
+
+
+def _export_datamodule_data_summary(
+    *,
+    data_summary: Mapping[str, Any] | None,
+    report_dir: PathInput | None,
+    text_logger: logging.Logger | None = None,
+) -> Path | None:
+    """
+    Best-effort export of the DataModule-provided dataset summary.
+
+    Purpose:
+    write the DataModule-owned summary to a stable JSON artifact so later
+    reporting sinks and manual inspection can reuse it.
+
+    Output shape:
+    this workflow currently writes the summary to:
+    `<report_dir>/data_summary.json`
+
+    Design note:
+    the export location is intentionally simple for now. A later structured-
+    export patch can move this into a richer subfolder layout without changing
+    the fact that the DataModule remains the summary source of truth.
+    """
+    if data_summary is None:
+        if text_logger is not None:
+            text_logger.info(
+                "skipped dataset summary export because no dataset summary was collected"
+            )
+        return None
+
+    if report_dir is None:
+        if text_logger is not None:
+            text_logger.info(
+                "skipped dataset summary export because report_dir was not configured"
+            )
+        return None
+
+    resolved_report_dir = Path(report_dir)
+    resolved_report_dir.mkdir(parents=True, exist_ok=True)
+    output_path = resolved_report_dir / "data_summary.json"
+
+    try:
+        output_path.write_text(
+            json.dumps(_json_ready(dict(data_summary)), indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        if text_logger is not None:
+            text_logger.warning(
+                "failed to export dataset summary JSON; continuing without data summary artifact: %s",
+                exc,
+            )
+        return None
+
+    if text_logger is not None:
+        text_logger.info("exported dataset summary JSON to %s", output_path)
+
+    return output_path
+
+
 def run_environment_benchmark_workflow(
     config: Config,
     *,
@@ -874,6 +978,7 @@ def run_training_workflow(
     test_metrics: list[Mapping[str, float]] | None = None
     test_evaluation: EvaluationResult | None = None
     test_predictions: list[torch.Tensor] | None = None
+    data_summary: dict[str, Any] | None = None
     predictions_path: Path | None = None
     prediction_table_path: Path | None = None
     report_paths: dict[str, Path] = {}
@@ -964,7 +1069,28 @@ def run_training_workflow(
             quantiles=quantiles,
             sampling_interval_minutes=effective_config.data.sampling_interval_minutes,
             evaluation_result=test_evaluation,
+            data_summary=data_summary,
         )
+
+        # Collect a best-effort dataset summary from the DataModule after setup
+        # has already happened through the normal fit/test/predict lifecycle.
+        #
+        # Important architectural rule:
+        # the workflow only asks for the summary and optionally exports it. The
+        # DataModule still owns the underlying summary computation and remains
+        # the source of truth for what the dataset summary contains.
+        data_summary = _collect_datamodule_data_summary(
+            datamodule=datamodule,
+            text_logger=text_logger,
+        )
+
+        data_summary_path = _export_datamodule_data_summary(
+            data_summary=data_summary,
+            report_dir=effective_observability_config.report_dir,
+            text_logger=text_logger,
+        )
+        if data_summary_path is not None:
+            report_paths["data_summary"] = data_summary_path
 
         # Mirror the canonical shared report into TensorBoard-compatible logger
         # backends when such a backend is active for the run.
