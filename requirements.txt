@@ -1,0 +1,13 @@
+matplotlib
+numpy
+pandas
+plotly
+psutil
+pytorch-lightning
+pytest
+requests
+tensorboard
+tensorflow
+torch
+torchmetrics
+torchview

@@ -1,0 +1,5 @@
+{
+  "include": ["src", "tests", "main.py", "defaults.py"],
+  "extraPaths": [".", "src"],
+  "reportMissingImports": "none"
+}
