@@ -26,6 +26,6 @@ python main.py \
   --device-profile slurm-cuda \
   --batch-size 128 \
   --max-epochs 1 \
-  --observability-mode basic \
+  --observability-mode baseline \
   --enable-activation-stats \
   --output-dir "${SLURM_SUBMIT_DIR}/artifacts/glucose_${SLURM_JOB_ID}"
