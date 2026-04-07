@@ -78,6 +78,7 @@ from config import (
     config_to_dict,
     validate_runtime_configuration,
 )
+from config.types import PathInput
 from defaults import (
     DEFAULT_OUTPUT_DIR,
     build_default_observability_config,
@@ -420,7 +421,7 @@ def _log_post_run_shared_report_to_tensorboard(
 def _export_post_run_shared_report_artifacts(
     *,
     shared_report: SharedReport,
-    report_dir: Path | None,
+    report_dir: PathInput | None,
     text_logger: logging.Logger | None = None,
 ) -> dict[str, Path]:
     """
