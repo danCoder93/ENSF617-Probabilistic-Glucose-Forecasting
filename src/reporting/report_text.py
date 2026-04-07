@@ -229,7 +229,7 @@ def build_probabilistic_overview(
 
     summary = evaluation_result.summary
     text = (
-        "Probabilistic forecast summary: overall_pinball_loss="
+        "Probabilistic overview: overall_pinball_loss="
         f"{format_optional_metric(summary.overall_pinball_loss)}, "
         "mean_interval_width="
         f"{format_optional_metric(summary.mean_interval_width)}, "
@@ -420,7 +420,11 @@ def build_health_warning_text(
 
         numeric_frame = prediction_table.select_dtypes(include=["number"])
         if not numeric_frame.empty:
-            nonfinite_count = int((~numeric_frame.applymap(pd.notna)).sum().sum())
+            # CHANGE: Use DataFrame.isna() directly instead of applymap(pd.notna).
+            # This keeps the health-warning summary compatible with the pandas
+            # version in the environment and still answers the same question:
+            # how many numeric cells are missing/non-finite at a high level.
+            nonfinite_count = int(numeric_frame.isna().sum().sum())
             if nonfinite_count > 0:
                 warning_parts.append(f"nonfinite_numeric_cells={nonfinite_count}")
 
