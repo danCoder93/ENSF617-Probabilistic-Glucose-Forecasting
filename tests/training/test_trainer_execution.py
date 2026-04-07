@@ -27,7 +27,7 @@ from pytorch_lightning import Trainer
 from data.datamodule import AZT1DDataModule
 from models.fused_model import FusedModel
 from train import FitArtifacts, FusedModelTrainer
-from config import TrainConfig
+from config import SnapshotConfig, TrainConfig
 from tests.support import build_base_config
 
 
@@ -141,9 +141,21 @@ def test_fit_falls_back_to_eager_model_when_compile_raises(
     csv_path = write_processed_csv()
     data_config = build_data_config(csv_path)
     datamodule = AZT1DDataModule(data_config)
+
+    # CHANGE:
+    # This test runs through a no-validation path, so the runtime config needs
+    # to be consistent with the repo's stricter validation rules. We disable
+    # sanity validation, early stopping, and ranked checkpoint saving here so
+    # the test actually reaches the compile-fallback logic it is meant to
+    # protect.
     trainer = FusedModelTrainer(
         build_base_config(data_config),
-        trainer_config=TrainConfig(compile_model=True),
+        trainer_config=TrainConfig(
+            compile_model=True,
+            num_sanity_val_steps=0,
+            early_stopping_patience=None,
+        ),
+        snapshot_config=SnapshotConfig(save_top_k=0),
     )
 
     class FakeTrainer:
