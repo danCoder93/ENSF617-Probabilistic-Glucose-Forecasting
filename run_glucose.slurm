@@ -25,10 +25,9 @@ mkdir -p "${SLURM_SUBMIT_DIR}/artifacts"
 
 python main.py \
   --device-profile slurm-cuda \
-  --batch-size 256 \
-  --max-epochs 20 \
+  --batch-size 128 \
+  --max-epochs 1 \
   --observability-mode trace \
   --device-stats \
   --enable-activation-stats \
-  --enable-profiler \
   --output-dir "${SLURM_SUBMIT_DIR}/artifacts/glucose_${SLURM_JOB_ID}"
