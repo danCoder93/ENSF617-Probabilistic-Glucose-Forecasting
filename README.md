@@ -74,27 +74,29 @@ prediction exports, and reports.
 
 What is in good shape today:
 
-- the repository has a runnable end-to-end script and notebook workflow
-- the codebase is documented by both hand-authored architecture prose and
-  generated dependency graphs
-- typed config, runtime profiles, diagnostics, structured evaluation, and
-  observability/reporting are all first-class subsystems
+- the repository has a runnable end-to-end training + evaluation workflow
+- the codebase is documented by both hand-authored architecture prose and generated dependency graphs
+- typed config, runtime profiles, diagnostics, structured evaluation, and observability/reporting are all first-class subsystems
+- TensorBoard integration is being actively enhanced with richer logging, hierarchical views, and interpretable summaries
+- reporting now supports structured outputs (JSON, CSV) and visual artifacts (Plotly), with a direction toward unifying everything under TensorBoard
+- prediction-level outputs (per-row, per-horizon) and aggregated summaries are available for downstream analysis
 - the test suite covers multiple layers beyond just the model itself
 
 What is still in progress:
 
-- the README is a living paper-style scaffold rather than a finalized paper
-- the bibliography and related-work sections are not complete yet
-- the repo is still AZT1D-oriented rather than fully multi-dataset
-- some evaluation/reporting flows still depend on the prediction path after
-  fitting
+- consolidation of reporting outputs into a fully TensorBoard-native experience
+- improving interpretability of logged metrics (legends, grouping, semantic naming)
+- expanding data-level statistics logging
+- README is still a living paper-style scaffold
+- bibliography and related-work sections incomplete
+- AZT1D-oriented pipeline
 
-Who this README currently serves best:
+Who this README serves best:
 
-- teammates trying to understand the project and extend the codebase
-- collaborators turning the repo into a paper-backed research artifact
-- new contributors who need one document that connects code, docs, and
-  provenance
+- contributors extending observability/reporting
+- collaborators converting repo into research artifact
+- developers improving interpretability and diagnostics
+
 
 ## Environment Requirements
 
@@ -174,19 +176,21 @@ TODO for final paper version:
 
 At the repository level, the current project contributes:
 
-- a fused TCN + TFT forecasting architecture with quantile outputs
-- a typed configuration layer for data, model, runtime, and observability
-- a Lightning-oriented training wrapper and workflow surface
-- a structured evaluation package separate from observability/reporting
-- runtime-environment profiles, diagnostics, and backend-tuning helpers
-- static dependency graphs that document the current code architecture
-- subsystem-aligned tests across config, data, models, training, evaluation,
-  observability, environment behavior, and workflows
+- fused TCN + TFT probabilistic forecasting architecture with quantile outputs
+- typed configuration layer
+- Lightning-based training workflow
+- structured evaluation system
+- observability system (TensorBoard, diagnostics, tracing)
+- modular reporting system (`src/reporting/`)
+- prediction-level exports (row + aggregated)
+- runtime-aware execution profiles
+- dependency graph documentation
+- subsystem-aligned tests
 
-TODO for final paper version:
-- convert this section into paper-style contribution bullets
-- separate scientific contributions from software-engineering contributions
-- remove any claim that is not supported by experiments or citations
+TODO for final paper:
+- formalize contributions
+- separate scientific vs engineering
+
 
 ## Current Source Map
 
@@ -420,6 +424,36 @@ Important instruction for later:
   dataset source or its official documentation
 - if dataset terms are uncertain, say so explicitly instead of guessing
 
+## Observability And Reporting Architecture
+
+The repository separates:
+
+- evaluation → compute metrics
+- reporting → structure outputs
+- observability → logging and visualization
+
+### Reporting Layer (`src/reporting/`)
+
+- report_tables.py
+- prediction_rows.py
+- plotly_reports.py
+- builders.py
+- tensorboard.py
+
+### Observability Layer (`src/observability/`)
+
+- TensorBoard logging
+- runtime diagnostics
+- model visualization
+- environment-aware logging
+
+### Design Direction
+
+- unify outputs into TensorBoard
+- enable drill-down views
+- ensure reproducibility and traceability
+
+
 ## Model Overview
 
 The current forecasting model is a late-fusion hybrid:
@@ -543,33 +577,32 @@ python main.py --device-profile auto --run-benchmark-only --benchmark-train-batc
 
 ### Expected Outputs
 
-Depending on the run mode and observability settings, the workflow can produce:
+Core artifacts:
 
-- `run_summary.json`
-- checkpoint files under the configured checkpoint directory
-- `test_predictions.pt`
-- `test_predictions.csv`
+- run_summary.json
+- checkpoints
+- test_predictions.pt / .csv
+
+Structured outputs:
+
+- per-horizon metrics
+- aggregated summaries
+- prediction rows
+
+Visualization outputs:
+
 - Plotly HTML reports
-- `benchmark_summary.json` for benchmark-only runs
+- TensorBoard dashboards
 
-The default top-level output directory is `artifacts/main_run/`.
+Default directory:
 
-### Reproducibility Notes
+artifacts/main_run/
 
-What the current codebase already supports:
+Direction:
 
-- shared defaults for script and notebook paths
-- typed config serialization
-- runtime-environment detection and device profiles
-- structured held-out evaluation helpers
-- artifact output directories for reports, predictions, and checkpoints
-- generated static architecture graphs
+- move toward TensorBoard-native reporting
+- enable hierarchical drill-down
 
-TODO for final paper version:
-- document exact experiment seeds
-- document full hyperparameter table
-- document hardware/software environment for headline runs
-- add a clean experiment registry or results table linked to artifacts
 
 ## Experimental Setup Placeholder
 
