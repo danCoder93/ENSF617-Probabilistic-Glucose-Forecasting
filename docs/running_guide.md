@@ -306,12 +306,7 @@ python main.py \
   --device-profile slurm-cuda \
   --batch-size 128 \
   --max-epochs 20 \
-  --pin-memory \
-  --precision 16-mixed \
-  --observability-mode debug \
-  --rich-progress-bar \
-  --device-stats \
-  --enable-activation-stats \
+  --observability-mode baseline \
   --output-dir "$SLURM_SUBMIT_DIR/artifacts/slurm_run"
 ```
 
