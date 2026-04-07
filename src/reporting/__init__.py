@@ -61,20 +61,23 @@ from reporting.exports import (
     export_prediction_table_from_report,
 )
 from reporting.plotly_reports import generate_plotly_reports
+from reporting.structured_exports import export_shared_report_artifacts
 from reporting.types import SharedReport, TestDataloaderProvider
 from reporting.tensorboard import log_shared_report_to_tensorboard
 
 # `__all__` is the stable package-level reporting API.
 #
 # Important compatibility note:
-# this list intentionally exposes the same core reporting entrypoints the
-# workflow currently needs:
+# this list intentionally exposes the core reporting entrypoints the workflow
+# currently needs:
 # - build the canonical shared report
 # - export the flat prediction table
+# - export the structured shared-report artifact bundle
 # - generate lightweight HTML reports
+# - mirror the shared report into TensorBoard
 #
-# As the package grows, new sinks (for example TensorBoard) can be added here
-# without changing the import style used by the rest of the repository.
+# As the package grows, new sinks can be added here without changing the import
+# style used by the rest of the repository.
 __all__ = [
     "SharedReport",
     "TestDataloaderProvider",
@@ -82,6 +85,7 @@ __all__ = [
     "export_prediction_table",
     "export_prediction_table_from_report",
     "export_grouped_tables_from_report",
+    "export_shared_report_artifacts",
     "generate_plotly_reports",
     "log_shared_report_to_tensorboard",
 ]

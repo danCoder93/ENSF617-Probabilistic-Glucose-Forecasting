@@ -48,10 +48,19 @@ from __future__ import annotations
 # - the structured evaluation result
 # - the canonical `SharedReport`
 #
+# Structured-export enhancement note:
+# the reporting package now also exposes a machine-readable structured export
+# sink that serializes the same canonical `SharedReport` into a mixed
+# CSV/JSON artifact bundle under the report directory. The workflow is again
+# the correct place to call that sink because it already owns:
+# - the resolved report directory
+# - the canonical shared report
+# - the final artifact map that is later surfaced in the run summary
+#
 # In other words, the enhancement remains architectural rather than ad hoc:
 # - callbacks still own live runtime visibility
 # - the workflow still owns post-run packaging orchestration
-# - the reporting package still owns post-run rendering
+# - the reporting package still owns post-run rendering/export
 
 import json
 from dataclasses import replace
@@ -406,6 +415,56 @@ def _log_post_run_shared_report_to_tensorboard(
             )
 
     return logged
+
+
+def _export_post_run_shared_report_artifacts(
+    *,
+    shared_report: SharedReport,
+    report_dir: Path | None,
+    text_logger: logging.Logger | None = None,
+) -> dict[str, Path]:
+    """
+    Best-effort bridge from the canonical shared report into structured artifacts.
+
+    Purpose:
+    centralize the workflow's call into the reporting package's structured
+    export sink so CSV/JSON artifact export stays aligned with the same
+    post-run package used by TensorBoard and Plotly.
+
+    Context:
+    this helper exists for the same architectural reason as the TensorBoard
+    handoff helper:
+    - the workflow owns the final resolved report directory
+    - the workflow owns the canonical shared report
+    - the workflow owns the final artifact map surfaced in summaries
+
+    Output shape:
+    the reporting sink writes a mixed-format bundle under:
+    `<report_dir>/artifacts/shared_report/`
+
+    Important compatibility rule:
+    this helper is best-effort and sink-only. It does not change evaluation
+    truth, prediction export semantics, or table-building logic.
+    """
+    from reporting.structured_exports import export_shared_report_artifacts
+
+    exported_paths = export_shared_report_artifacts(
+        shared_report=shared_report,
+        report_dir=report_dir,
+    )
+
+    if text_logger is not None:
+        if exported_paths:
+            text_logger.info(
+                "exported structured shared-report artifacts to %s",
+                report_dir,
+            )
+        else:
+            text_logger.info(
+                "skipped structured shared-report artifact export because report_dir was not configured"
+            )
+
+    return exported_paths
 
 
 def run_environment_benchmark_workflow(
@@ -962,6 +1021,25 @@ def run_training_workflow(
                 output_path=effective_observability_config.prediction_table_path,
             )
 
+        # Export a machine-readable mixed CSV/JSON artifact bundle from the same
+        # canonical shared report used by the other post-run sinks.
+        #
+        # Why this happens here:
+        # - the workflow already owns the resolved report directory
+        # - the workflow already owns the canonical `SharedReport`
+        # - the workflow already collects `report_paths` for later summary
+        #   writing and CLI/notebook visibility
+        #
+        # Important policy:
+        # this is additive to, not a replacement for, the existing raw tensor
+        # and single prediction-table exports.
+        structured_export_paths = _export_post_run_shared_report_artifacts(
+            shared_report=shared_report,
+            report_dir=effective_observability_config.report_dir,
+            text_logger=text_logger,
+        )
+        report_paths.update(structured_export_paths)
+
         if effective_observability_config.enable_plot_reports:
             # Plotly reporting lives in the reporting package because it is a
             # post-run presentation sink, not a live training-time visibility
@@ -970,12 +1048,13 @@ def run_training_workflow(
             # The sink prefers the in-memory shared report when available, but
             # still accepts the exported prediction table path for compatibility
             # with lighter or transitional workflows.
-            report_paths = generate_plotly_reports(
+            plotly_report_paths = generate_plotly_reports(
                 prediction_table_path,
                 report_dir=effective_observability_config.report_dir,
                 max_subjects=effective_observability_config.max_forecast_subjects_per_report,
                 shared_report=shared_report,
             )
+            report_paths.update(plotly_report_paths)
 
     runtime_tuning_report = getattr(trainer, "runtime_tuning_report", None)
     runtime_tuning_applied = (
