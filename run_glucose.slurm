@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=16gb
-#SBATCH --time=08:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=%x-%j.out
 
 set -euo pipefail
