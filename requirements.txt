@@ -10,4 +10,5 @@ tensorboard
 tensorflow
 torch
 torchmetrics
+graphviz
 torchview

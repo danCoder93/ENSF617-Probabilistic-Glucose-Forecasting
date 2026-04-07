@@ -44,6 +44,7 @@ from evaluation import (
 )
 
 from config import Config, config_from_dict, config_to_dict
+from observability.tensors import _tensor_stats, _time_axis_constant_fraction
 
 
 class FusedModel(LightningModule):
@@ -491,14 +492,31 @@ class FusedModel(LightningModule):
             "target": target_history,
         }
 
-    def forward(self, batch: dict[str, Tensor]) -> Tensor:
+    def _forward_intermediates(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
         """
-        Produce horizon-aligned quantile forecasts from one prepared batch.
+        Compute the staged branch tensors used by the late-fusion architecture.
 
         Context:
-        the forward pass is intentionally staged into branch-specific feature
-        extraction followed by late fusion so the TCN and TFT paths can learn
-        complementary representations before final quantile prediction.
+        the fused model has several semantically meaningful internal tensors
+        that are valuable for debugging and sanity checking:
+        - the shared encoder-only TCN input
+        - each multiscale TCN branch feature tensor
+        - the TFT decoder feature tensor
+        - the concatenated pre-fusion representation
+        - the post-GRN fused representation
+        - the final quantile prediction tensor
+
+        Why this helper exists:
+        keeping these stages in one private helper lets the module expose
+        lightweight forward-stage observability without changing the public
+        ``forward(batch) -> predictions`` contract used by Lightning,
+        callbacks, prediction export, and visualization code.
+
+        Safety / compatibility:
+        this helper intentionally preserves the existing model logic. It does
+        not alter branch wiring, tensor order, feature grouping, or output
+        semantics; it only makes the already-existing staged tensors available
+        to the rest of the class in one explicit structure.
         """
         # -----------------------------
         # Step 1: Build TCN branch input
@@ -544,7 +562,7 @@ class FusedModel(LightningModule):
         # -----------------------------
         # Step 4: Fuse branch features
         # -----------------------------
-        fused_features = torch.cat(
+        pre_fusion_features = torch.cat(
             [tft_features, tcn3_features, tcn5_features, tcn7_features],
             dim=-1,
         )
@@ -566,8 +584,314 @@ class FusedModel(LightningModule):
         # -----------------------------
         # The GRN acts as the nonlinear gated mixer over branch features, and
         # the final MLP head converts that fused hidden state into quantiles.
-        fused_features = self.grn(fused_features)
-        return self.fcn(fused_features)
+        post_fusion_features = self.grn(pre_fusion_features)
+        predictions = self.fcn(post_fusion_features)
+
+        return {
+            "tcn_inputs": tcn_inputs,
+            "tcn3_features": tcn3_features,
+            "tcn5_features": tcn5_features,
+            "tcn7_features": tcn7_features,
+            "tft_features": tft_features,
+            "pre_fusion_features": pre_fusion_features,
+            "post_fusion_features": post_fusion_features,
+            "predictions": predictions,
+        }
+
+    def _forward_semantic_logging_enabled(self) -> bool:
+        """Return whether model-side forward-stage semantic logging should run.
+
+        Context:
+        the repository already has generic activation / gradient callbacks. This
+        helper is for a narrower kind of observability: architecture-aware
+        summaries of the specific tensors that only `FusedModel` itself knows
+        how to interpret semantically.
+
+        Why this stays conservative:
+        forward-stage logging executes on the real model path, so it should be
+        treated as an opt-in debugging feature rather than something that adds
+        noise to every ordinary training run.
+
+        Current policy:
+        - disabled when no observability config is bound
+        - enabled for explicitly debug-oriented observability modes
+        - optionally overridable by a future dedicated config flag without
+          requiring this module's call sites to change
+        """
+        observability_config = getattr(self.config, "observability", None)
+        if observability_config is None:
+            return False
+
+        explicit_flag = getattr(
+            observability_config,
+            "enable_forward_stage_logging",
+            None,
+        )
+        if explicit_flag is not None:
+            return bool(explicit_flag)
+
+        mode = getattr(observability_config, "observability_mode", None)
+        return mode in {"debug", "sanity", "development"}
+
+    def _should_log_forward_semantics(self, stage: str, batch_idx: int | None) -> bool:
+        """Apply sparse cadence rules for model-side semantic stage logging.
+
+        Why a separate helper exists:
+        even when forward-stage logging is enabled conceptually, we still want
+        strong protection against noisy logs and unnecessary overhead. Keeping
+        the cadence policy centralized makes the training path easier to read
+        and safer to evolve.
+
+        Current cadence:
+        - training: every N global steps
+        - validation: first batch only
+        - test: first batch only
+
+        The default training cadence intentionally uses a moderate interval so a
+        local debug run still captures repeated snapshots without emitting one
+        semantic dump per minibatch.
+        """
+        if not self._forward_semantic_logging_enabled():
+            return False
+        if getattr(self, "_trainer", None) is None:
+            return False
+        if batch_idx is None:
+            return False
+
+        if stage == "train":
+            observability_config = getattr(self.config, "observability", None)
+            every_n_steps = int(
+                getattr(observability_config, "forward_stage_log_every_n_steps", 100)
+            )
+            if every_n_steps <= 0:
+                return False
+            global_step = int(getattr(self, "global_step", 0))
+            return global_step % every_n_steps == 0
+
+        if stage in {"val", "test"}:
+            return batch_idx == 0
+
+        return False
+
+    def _safe_log_scalar(
+        self,
+        name: str,
+        value: float | Tensor,
+        *,
+        stage: str,
+        batch_size: int,
+    ) -> None:
+        """Emit one scalar metric without letting observability break training.
+
+        Context:
+        model-side semantic logging is useful only if it remains operationally
+        safe. A logging failure should never become a training failure, so this
+        helper isolates the actual `self.log(...)` call behind a defensive
+        boundary.
+        """
+        try:
+            self.log(
+                name,
+                value,
+                prog_bar=False,
+                on_step=stage == "train",
+                on_epoch=stage != "train",
+                logger=True,
+                batch_size=batch_size,
+                sync_dist=stage != "train",
+            )
+        except Exception:
+            # Observability should help diagnose model issues, not create new
+            # ones. If logging backends reject a value or a logger is in an
+            # unusual state, training/inference should continue normally.
+            return
+
+    def _log_forward_tensor_summary(
+        self,
+        *,
+        stage: str,
+        tag: str,
+        tensor: Tensor,
+        batch_size: int,
+    ) -> None:
+        """Log a compact tensor-health summary for one semantic forward stage.
+
+        Reuse:
+        the repo already centralizes tensor-health summaries in
+        `observability.tensors`. Reusing that helper here ensures that callback
+        logs and model-side semantic logs speak the same statistical language
+        for mean/std, finite health, zero prevalence, and constantness hints.
+        """
+        summary = _tensor_stats(tensor)
+        for metric_name, metric_value in summary.items():
+            self._safe_log_scalar(
+                f"forward/{stage}/{tag}/{metric_name}",
+                metric_value,
+                stage=stage,
+                batch_size=batch_size,
+            )
+
+        self._safe_log_scalar(
+            f"forward/{stage}/{tag}/time_axis_constant_fraction",
+            _time_axis_constant_fraction(tensor),
+            stage=stage,
+            batch_size=batch_size,
+        )
+
+    def _log_forward_scale_ratio(
+        self,
+        *,
+        stage: str,
+        tag: str,
+        numerator: Tensor,
+        denominator: Tensor,
+        batch_size: int,
+    ) -> None:
+        """Log a simple abs-mean scale ratio between two semantic tensors.
+
+        Why this matters:
+        branch summaries tell us whether each pathway is numerically alive;
+        ratios tell us whether one pathway is beginning to dominate another.
+        That is especially important in a fused architecture, where silent
+        branch collapse can be easy to miss if we only inspect each tensor in
+        isolation.
+        """
+        numerator_scale = numerator.detach().float().abs().mean()
+        denominator_scale = denominator.detach().float().abs().mean().clamp_min(1e-8)
+        ratio = numerator_scale / denominator_scale
+        self._safe_log_scalar(
+            f"forward/{stage}/{tag}",
+            ratio,
+            stage=stage,
+            batch_size=batch_size,
+        )
+
+    def _log_forward_semantics(
+        self,
+        intermediates: Mapping[str, Tensor],
+        *,
+        stage: str,
+        batch_idx: int | None,
+        batch_size: int,
+    ) -> None:
+        """Emit sparse, architecture-aware summaries for the real forward path.
+
+        Context:
+        the generic debug callbacks can tell us that "some activation" or
+        "some gradient" looks suspicious. This helper answers the more specific
+        repo-aware questions that only the fused model itself can answer:
+        - are the three TCN branches numerically alive?
+        - is the TFT branch alive?
+        - what does the pre-fusion representation look like?
+        - does the GRN substantially compress or amplify feature scale?
+        - are the final probabilistic outputs already collapsing internally?
+
+        Important design boundary:
+        this helper logs only compact scalars. It does not dump raw tensors,
+        create artifacts, or mutate the forward graph. Its purpose is semantic
+        visibility with minimal operational risk.
+        """
+        if not self._should_log_forward_semantics(stage, batch_idx):
+            return
+
+        self._log_forward_tensor_summary(
+            stage=stage,
+            tag="tcn_inputs",
+            tensor=intermediates["tcn_inputs"],
+            batch_size=batch_size,
+        )
+        self._log_forward_tensor_summary(
+            stage=stage,
+            tag="tcn3_features",
+            tensor=intermediates["tcn3_features"],
+            batch_size=batch_size,
+        )
+        self._log_forward_tensor_summary(
+            stage=stage,
+            tag="tcn5_features",
+            tensor=intermediates["tcn5_features"],
+            batch_size=batch_size,
+        )
+        self._log_forward_tensor_summary(
+            stage=stage,
+            tag="tcn7_features",
+            tensor=intermediates["tcn7_features"],
+            batch_size=batch_size,
+        )
+        self._log_forward_tensor_summary(
+            stage=stage,
+            tag="tft_features",
+            tensor=intermediates["tft_features"],
+            batch_size=batch_size,
+        )
+        self._log_forward_tensor_summary(
+            stage=stage,
+            tag="pre_fusion_features",
+            tensor=intermediates["pre_fusion_features"],
+            batch_size=batch_size,
+        )
+        self._log_forward_tensor_summary(
+            stage=stage,
+            tag="post_fusion_features",
+            tensor=intermediates["post_fusion_features"],
+            batch_size=batch_size,
+        )
+        self._log_forward_tensor_summary(
+            stage=stage,
+            tag="predictions",
+            tensor=intermediates["predictions"],
+            batch_size=batch_size,
+        )
+
+        # Ratio-style interpretation metrics help answer branch-balance and
+        # fusion-dominance questions more directly than raw tensor summaries.
+        self._log_forward_scale_ratio(
+            stage=stage,
+            tag="tft_vs_tcn3_abs_mean_ratio",
+            numerator=intermediates["tft_features"],
+            denominator=intermediates["tcn3_features"],
+            batch_size=batch_size,
+        )
+        self._log_forward_scale_ratio(
+            stage=stage,
+            tag="tft_vs_tcn5_abs_mean_ratio",
+            numerator=intermediates["tft_features"],
+            denominator=intermediates["tcn5_features"],
+            batch_size=batch_size,
+        )
+        self._log_forward_scale_ratio(
+            stage=stage,
+            tag="tft_vs_tcn7_abs_mean_ratio",
+            numerator=intermediates["tft_features"],
+            denominator=intermediates["tcn7_features"],
+            batch_size=batch_size,
+        )
+        self._log_forward_scale_ratio(
+            stage=stage,
+            tag="post_vs_pre_fusion_abs_mean_ratio",
+            numerator=intermediates["post_fusion_features"],
+            denominator=intermediates["pre_fusion_features"],
+            batch_size=batch_size,
+        )
+
+    def forward(self, batch: dict[str, Tensor]) -> Tensor:
+        """
+        Produce horizon-aligned quantile forecasts from one prepared batch.
+
+        Context:
+        the public forward contract intentionally stays simple and stable even
+        though the underlying architecture has several meaningful internal
+        stages. That stability matters because callbacks, visualization tools,
+        Lightning prediction hooks, and downstream evaluation code all expect
+        ``forward(...)`` to return only the final quantile forecast tensor.
+
+        Internal design note:
+        the actual staged computation now lives in `_forward_intermediates(...)`
+        so the model can optionally inspect semantic branch/fusion tensors
+        during train/validation/test without changing this externally visible
+        contract.
+        """
+        return self._forward_intermediates(batch)["predictions"]
 
     def _target_tensor(self, batch: dict[str, Any]) -> Tensor:
         """Normalize the batch target into the `[batch, horizon]` shape used by loss and metrics."""
@@ -813,7 +1137,13 @@ class FusedModel(LightningModule):
                 sync_dist=stage != "train",
             )
 
-    def _shared_step(self, batch: dict[str, Any], stage: str) -> Tensor:
+    def _shared_step(
+        self,
+        batch: dict[str, Any],
+        stage: str,
+        *,
+        batch_idx: int | None = None,
+    ) -> Tensor:
         """
         Run the common prediction, loss, metric, and logging path for one stage.
 
@@ -833,7 +1163,8 @@ class FusedModel(LightningModule):
         # - future metric changes are made once instead of three times
         # - the public step methods remain simple enough that they are easy to
         #   scan in `train.py` or in notebook experiments
-        predictions = self(batch)
+        intermediates = self._forward_intermediates(batch)
+        predictions = intermediates["predictions"]
         target = self._target_tensor(batch)
         loss = self.quantile_loss(predictions, target)
 
@@ -872,32 +1203,47 @@ class FusedModel(LightningModule):
             predictions=predictions,
             batch_size=target.shape[0],
         )
+
+        self._log_forward_semantics(
+            intermediates,
+            stage=stage,
+            batch_idx=batch_idx,
+            batch_size=target.shape[0],
+        )
         return loss
 
     def training_step(self, batch: dict[str, Any], batch_idx: int) -> Tensor:
         """Lightning training hook that delegates to the shared stage implementation."""
-        del batch_idx
         # Returning the loss tensor is the Lightning contract: the Trainer will
         # take care of backward propagation, optimizer stepping, gradient
         # accumulation, mixed precision, multi-device reduction, and the rest of
         # the boilerplate that the tutorial is trying to remove from user code.
-        return self._shared_step(batch, "train")
+        #
+        # We now keep `batch_idx` because sparse forward-stage semantic logging
+        # uses it to avoid spamming every minibatch while still giving us one
+        # architecture-aware snapshot at controlled intervals.
+        return self._shared_step(batch, "train", batch_idx=batch_idx)
 
     def validation_step(self, batch: dict[str, Any], batch_idx: int) -> Tensor:
         """Lightning validation hook that reuses the same supervision path as training."""
-        del batch_idx
         # Validation reuses the same supervision path but leaves optimization to
         # Lightning. The explicit method still matters because Lightning uses it
         # as the hook boundary for validation scheduling and metric collection.
-        return self._shared_step(batch, "val")
+        #
+        # We keep `batch_idx` here so forward-stage semantic logging can remain
+        # sparse by default, typically logging only the first validation batch
+        # of each epoch.
+        return self._shared_step(batch, "val", batch_idx=batch_idx)
 
     def test_step(self, batch: dict[str, Any], batch_idx: int) -> Tensor:
         """Lightning test hook that keeps held-out evaluation aligned with train/val semantics."""
-        del batch_idx
         # Test follows the same pattern as validation so the model's reported
         # held-out performance is computed with exactly the same loss/metric
         # semantics used during development.
-        return self._shared_step(batch, "test")
+        #
+        # Keeping `batch_idx` available also lets semantic forward logging stay
+        # sparse and predictable on held-out evaluation runs.
+        return self._shared_step(batch, "test", batch_idx=batch_idx)
 
     def predict_step(
         self,

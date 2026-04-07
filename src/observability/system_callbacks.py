@@ -7,10 +7,39 @@ from __future__ import annotations
 # Why group them together:
 # - both callbacks describe the environment around the model, not the training
 #   signal itself
-# - they share filesystem/logging helpers and depend on optional visualization
-#   integrations
-# - keeping them separate from the smaller debug callbacks reduces the amount
-#   of unrelated code a reader has to hold in their head at once
+# - both callbacks produce observability artifacts that are useful outside the
+#   immediate training step
+# - both callbacks depend on helper utilities for logger discovery, tensor
+#   normalization, and filesystem-safe artifact writing
+# - keeping them separate from smaller debug callbacks reduces the amount of
+#   unrelated code a reader has to hold in their head at once
+#
+# Design boundary:
+# - this file orchestrates observability work
+# - it does not define model architecture
+# - it does not define data preprocessing
+# - it does not define optimizer or training-step logic
+#
+# Practical reading guide:
+# - `SystemTelemetryCallback` answers: "what was the machine doing while the
+#   run progressed?"
+# - `ModelTensorBoardCallback` answers: "what model did we run, and can we
+#   render its structure as text/graph artifacts?"
+#
+# Dashboard-first enhancement note:
+# Earlier revisions of this file already exposed valuable system and model-
+# structure artifacts, but several tag names were still closer to raw logging
+# implementation detail than to a readable TensorBoard hierarchy. The current
+# version preserves the same core behavior while making the namespace policy
+# clearer:
+# - machine/runtime telemetry now lives under `system/...`
+# - model-structure artifacts now live under `text/model/...` and
+#   `debug/model/...`
+#
+# Important compatibility rule:
+# This file still performs best-effort observability only. The enhancements
+# below reorganize presentation and comments, but they do not change training
+# behavior, model semantics, or evaluation truth.
 
 import csv
 import json
@@ -27,6 +56,11 @@ from observability.logging_utils import (
     _tensorboard_experiments,
     log_metrics_to_loggers,
 )
+from observability.model_visualization import (
+    SemanticTorchviewAdapter,
+    TorchviewFusedAdapter,
+    warmup_visualization_model,
+)
 from observability.tensors import (
     _move_batch_to_device,
     _tensor_only_structure,
@@ -39,18 +73,50 @@ except ImportError:  # pragma: no cover - optional dependency until installed
     draw_graph = None  # type: ignore[assignment]
 
 
-class SystemTelemetryCallback(Callback):
-    """
-    Record host and device telemetry alongside model metrics.
-
-    Purpose:
-    log runtime system telemetry alongside training metrics.
+def _system_tag(metric_name: str) -> str:
+    """Return the canonical namespace for one runtime/system telemetry metric.
 
     Context:
-    this callback logs CPU, RAM, and GPU memory telemetry to the active
-    Lightning logger and mirrors the same metrics to a CSV file for later
-    offline inspection. GPU utilization percentage is best-effort and depends
-    on optional NVML bindings being available at runtime.
+        System telemetry is useful and should remain visible, but it should not
+        be mixed into the same namespace as model-quality or per-parameter
+        debug metrics. Grouping it under `system/...` makes the TensorBoard
+        surface easier to browse and collapse.
+    """
+    return f"system/{metric_name}"
+
+
+def _model_text_tag(name: str) -> str:
+    """Return the canonical namespace for one model text artifact."""
+    return f"text/model/{name}"
+
+
+def _model_debug_tag(name: str) -> str:
+    """Return the canonical namespace for one model visualization artifact."""
+    return f"debug/model/{name}"
+
+
+class SystemTelemetryCallback(Callback):
+    """Record host and device telemetry alongside model metrics.
+
+    Purpose:
+        Log runtime system telemetry alongside training metrics so the user can
+        correlate model behavior with machine behavior.
+
+    Context:
+        This callback emits lightweight host/device telemetry during training
+        and mirrors that telemetry into two places:
+        - active Lightning loggers for live inspection
+        - a CSV artifact for offline inspection after the run
+
+        The callback is intentionally best-effort:
+        - missing GPU backends should not break training
+        - missing NVML bindings should not break training
+        - unsupported utilization APIs should degrade gracefully to zeros
+
+    Why this callback exists:
+        Scalar metrics like train loss or val loss tell us whether the model is
+        learning, but they do not explain whether the machine was memory-bound,
+        under-utilized, or unstable. This callback fills that gap.
     """
 
     def __init__(
@@ -59,30 +125,67 @@ class SystemTelemetryCallback(Callback):
         *,
         text_logger: logging.Logger | None = None,
     ) -> None:
-        """Store telemetry policy and optional plain-text logging surface for the callback."""
+        """Store telemetry policy and optional plain-text logging surface.
+
+        Parameters:
+            config:
+                Observability settings controlling whether telemetry is enabled,
+                how often it is sampled, and where CSV artifacts are written.
+            text_logger:
+                Optional human-readable logger used for plain-text run logs in
+                addition to structured logger backends.
+        """
         self.config = config
         self.text_logger = text_logger
+
+        # We write the telemetry CSV incrementally over the course of training.
+        # This flag ensures the header is written exactly once, using the first
+        # observed row as the canonical column order.
         self._telemetry_header_written = False
 
     def _gpu_metrics(self) -> dict[str, float]:
-        """
-        Collect best-effort GPU or MPS telemetry in the same metric shape used by host logging.
+        """Collect best-effort GPU or MPS telemetry in a stable metric shape.
 
-        Context:
-        returning one stable dictionary keeps downstream metric logging and CSV
-        export simple even when only some backend-specific telemetry is available.
+        Returns:
+            A dictionary with the same keys regardless of backend availability.
+
+        Why the return shape is fixed:
+            Downstream logging is much simpler when telemetry always uses the
+            same metric names. Even when a backend cannot provide utilization,
+            returning zeros is preferable to changing the schema mid-run.
+
+        Backend behavior:
+            - Apple Silicon / MPS:
+                Use MPS memory APIs when available. Utilization is reported as
+                `0.0` because a reliable utilization percentage is not exposed
+                in the same way as CUDA+NVML.
+            - CUDA without NVML:
+                Report CUDA memory stats and leave utilization at `0.0`.
+            - CUDA with NVML:
+                Add GPU utilization percentage when supported.
+            - CPU-only:
+                Return zeros for all GPU-related metrics.
+
+        Failure behavior:
+            Any optional-backend failure should degrade to partial telemetry,
+            never to a training error.
         """
         # CUDA memory stats are always available when CUDA is active, but
         # utilization percentage depends on optional NVML bindings. We return a
         # consistent metric dictionary either way so downstream logging stays
-        # stable.
+        # stable and CSV columns do not drift across environments.
         mps_backend = getattr(getattr(torch, "backends", None), "mps", None)
         mps_runtime = getattr(torch, "mps", None)
+
         if (
             mps_backend is not None
             and bool(getattr(mps_backend, "is_available", lambda: False)())
             and mps_runtime is not None
         ):
+            # On Apple Silicon we use the runtime memory counters that are
+            # exposed through torch.mps. These values are still useful for
+            # capacity debugging even though utilization percentage is not
+            # available in the same backend-neutral form as CUDA+NVML.
             allocated = float(
                 getattr(mps_runtime, "current_allocated_memory", lambda: 0)()
             )
@@ -90,26 +193,32 @@ class SystemTelemetryCallback(Callback):
                 getattr(mps_runtime, "driver_allocated_memory", lambda: 0)()
             )
             return {
-                "telemetry/gpu_memory_allocated_mb": allocated / (1024.0 * 1024.0),
-                "telemetry/gpu_memory_reserved_mb": reserved / (1024.0 * 1024.0),
-                "telemetry/gpu_utilization_percent": 0.0,
+                _system_tag("device/gpu_memory_allocated_mb"): (
+                    allocated / (1024.0 * 1024.0)
+                ),
+                _system_tag("device/gpu_memory_reserved_mb"): (
+                    reserved / (1024.0 * 1024.0)
+                ),
+                _system_tag("device/gpu_utilization_percent"): 0.0,
             }
 
         if not torch.cuda.is_available():
+            # CPU-only runs should still produce a stable telemetry schema so
+            # downstream dashboards and CSV readers do not need special cases.
             return {
-                "telemetry/gpu_memory_allocated_mb": 0.0,
-                "telemetry/gpu_memory_reserved_mb": 0.0,
-                "telemetry/gpu_utilization_percent": 0.0,
+                _system_tag("device/gpu_memory_allocated_mb"): 0.0,
+                _system_tag("device/gpu_memory_reserved_mb"): 0.0,
+                _system_tag("device/gpu_utilization_percent"): 0.0,
             }
 
         metrics = {
-            "telemetry/gpu_memory_allocated_mb": (
+            _system_tag("device/gpu_memory_allocated_mb"): (
                 torch.cuda.memory_allocated() / (1024.0 * 1024.0)
             ),
-            "telemetry/gpu_memory_reserved_mb": (
+            _system_tag("device/gpu_memory_reserved_mb"): (
                 torch.cuda.memory_reserved() / (1024.0 * 1024.0)
             ),
-            "telemetry/gpu_utilization_percent": 0.0,
+            _system_tag("device/gpu_utilization_percent"): 0.0,
         }
 
         if _has_module("pynvml"):
@@ -121,24 +230,44 @@ class SystemTelemetryCallback(Callback):
                     torch.cuda.current_device()
                 )
                 utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
-                metrics["telemetry/gpu_utilization_percent"] = float(utilization.gpu)
+                metrics[_system_tag("device/gpu_utilization_percent")] = float(
+                    utilization.gpu
+                )
             except Exception:
+                # NVML access should never be allowed to interrupt the run.
+                # Memory telemetry is still useful even without utilization.
                 pass
 
         return metrics
 
     def _append_csv_row(self, row: Mapping[str, float]) -> None:
-        """Append one telemetry snapshot to the configured CSV artifact when that output is enabled."""
+        """Append one telemetry snapshot to the configured CSV artifact.
+
+        Why CSV is written in addition to live logger backends:
+            TensorBoard and other logger backends are convenient for live
+            inspection, but a simple CSV is often easier to load later for:
+            - quick spreadsheet inspection
+            - custom plotting
+            - comparing telemetry against other run artifacts
+            - attaching plain tabular evidence to bug reports
+
+        Behavior:
+            - no-op when CSV output is disabled
+            - creates parent directories on demand
+            - writes header once using the first observed row
+        """
         # The CSV output mirrors what is logged live. This is useful when the
         # user wants to inspect runtime telemetry after the run without opening
-        # TensorBoard.
+        # TensorBoard or relying on any specific experiment-tracking backend.
         if self.config.telemetry_path is None:
             return
+
         # The callback keeps `ObservabilityConfig` as its source of truth, but
         # converts path-like config values into a concrete `Path` right before
         # filesystem access so static typing and runtime behavior stay aligned.
         telemetry_path = Path(self.config.telemetry_path)
         _ensure_parent(telemetry_path)
+
         with telemetry_path.open("a", newline="", encoding="utf-8") as file:
             writer = csv.DictWriter(file, fieldnames=list(row.keys()))
             if not self._telemetry_header_written:
@@ -157,23 +286,45 @@ class SystemTelemetryCallback(Callback):
         batch: Any,
         batch_idx: int,
     ) -> None:
-        """Sample and publish host/device telemetry at the configured step interval."""
+        """Sample and publish host/device telemetry at the configured interval.
+
+        Hook choice:
+            `on_train_batch_end` is a good place to sample telemetry because:
+            - the model has just completed useful work
+            - trainer step/epoch counters are current
+            - the callback can sample at a predictable step cadence
+            - it avoids interfering with forward-path control flow
+
+        Intentional non-use of some hook parameters:
+            The hook signature is fixed by Lightning even though this callback
+            does not need the actual model outputs or batch payload.
+        """
         del pl_module, outputs, batch, batch_idx
+
+        # Respect the observability configuration first. This keeps the callback
+        # cheap to keep registered even in runs where telemetry is disabled.
         if not self.config.enable_system_telemetry:
             return
+
+        # Skip sanity checking to avoid mixing pre-training validation probes
+        # with real training telemetry in the same time series.
         if trainer.sanity_checking:
             return
+
+        # Sample only on the configured cadence so the callback remains low
+        # overhead even during long runs.
         if trainer.global_step % self.config.telemetry_every_n_steps != 0:
             return
 
         memory = psutil.virtual_memory()
         metrics = {
-            "telemetry/cpu_percent": float(psutil.cpu_percent(interval=None)),
-            "telemetry/ram_percent": float(memory.percent),
-            "telemetry/ram_used_gb": float(memory.used / (1024.0 ** 3)),
-            "telemetry/global_step": float(trainer.global_step),
-            "telemetry/current_epoch": float(trainer.current_epoch),
+            _system_tag("host/cpu_percent"): float(psutil.cpu_percent(interval=None)),
+            _system_tag("host/ram_percent"): float(memory.percent),
+            _system_tag("host/ram_used_gb"): float(memory.used / (1024.0**3)),
+            _system_tag("runtime/global_step"): float(trainer.global_step),
+            _system_tag("runtime/current_epoch"): float(trainer.current_epoch),
         }
+
         # The metrics dictionary is intentionally a mix of host telemetry and
         # run-position metadata:
         # - CPU/RAM/GPU fields describe system health
@@ -186,26 +337,35 @@ class SystemTelemetryCallback(Callback):
         log_metrics_to_loggers(trainer, metrics, step=trainer.global_step)
         self._append_csv_row(metrics)
 
+        # The plain-text log is useful as a forensic fallback when richer
+        # backends are unavailable, disabled, or incomplete in saved artifacts.
         if self.text_logger is not None:
             self.text_logger.info("telemetry %s", json.dumps(metrics, sort_keys=True))
 
 
 class ModelTensorBoardCallback(Callback):
-    """
-    Push model architecture visualizations and text into TensorBoard.
+    """Push model architecture text and graph artifacts into observability sinks.
 
     Purpose:
-    expose the model itself, not just its scalar metrics, inside the
-    TensorBoard experience.
+        Expose the model itself, not just scalar metrics, inside the run's
+        observability outputs.
 
     Context:
-    this callback covers three complementary model-visualization surfaces:
-    - plain-text architecture via `repr(pl_module)`
-    - Lightning execution graph tracing when `add_graph(...)` succeeds
-    - optional `torchview` rendering for a more presentation-oriented diagram
+        This callback covers three complementary model-visibility surfaces:
+        - plain-text architecture via `repr(pl_module)`
+        - TensorBoard-native graph tracing via `add_graph(...)`
+        - optional `torchview` rendering for a cleaner presentation-oriented
+          static architecture diagram
 
-    All visualization work is best-effort. Failures to trace the model or
-    render a graph are logged and ignored so training can continue normally.
+        All visualization work is best-effort. Failures to trace the model or
+        render a graph are logged and ignored so training can continue normally.
+
+    Why this callback exists:
+        When debugging a complex model, scalar metrics alone are not enough.
+        We also want evidence of:
+        - what module structure was actually instantiated
+        - whether the graph can be traced
+        - whether the model surface seen by observability tools is stable
     """
 
     def __init__(
@@ -214,14 +374,51 @@ class ModelTensorBoardCallback(Callback):
         *,
         text_logger: logging.Logger | None = None,
     ) -> None:
-        """Store visualization policy and the one-shot state used by model-graph logging."""
+        """Store visualization policy and one-shot callback state.
+
+        State flags:
+            `_graph_logged`
+                Prevents repeated TensorBoard graph tracing.
+            `_torchview_logged`
+                Prevents repeated torchview rendering.
+
+        Why one-shot behavior matters:
+            Model architecture is effectively static within a run, so repeated
+            graph export adds overhead and artifact noise without providing
+            additional insight.
+        """
         self.config = config
         self.text_logger = text_logger
         self._graph_logged = False
         self._torchview_logged = False
 
     def _sample_tensor_batch(self, trainer: Any, pl_module: Any) -> Any:
-        """Sample one tensor-only training batch suitable for graph/architecture visualization."""
+        """Sample one tensor-only training batch for model visualization.
+
+        Why a real batch is needed:
+            Graphing tools need concrete input data to infer:
+            - tensor shapes
+            - execution paths
+            - connectivity between submodules
+
+        Why a training batch is used:
+            - it matches the real model contract
+            - it reflects true dataset preprocessing and collation behavior
+            - it avoids divergence between synthetic dummy inputs and actual
+              runtime inputs
+
+        Normalization steps:
+            1. `_tensor_only_structure(batch)`
+               Removes metadata and other non-tensor values that graph tools
+               are not designed to consume.
+            2. `_move_batch_to_device(...)`
+               Ensures the sample is on the same device as the model before
+               tracing, avoiding device mismatch failures.
+
+        Failure behavior:
+            If the datamodule is missing or batch sampling fails, this returns
+            `None` and the caller should skip graph export gracefully.
+        """
         # We intentionally use a single sampled train batch for graph/model
         # visualization. This avoids perturbing the training loop while still
         # giving Lightning and torchview realistic tensor shapes.
@@ -234,7 +431,8 @@ class ModelTensorBoardCallback(Callback):
         except Exception as exc:
             if self.text_logger is not None:
                 self.text_logger.info(
-                    "unable to sample batch for model visualization: %s", exc
+                    "unable to sample batch for model visualization: %s",
+                    exc,
                 )
             return None
 
@@ -242,6 +440,7 @@ class ModelTensorBoardCallback(Callback):
             _tensor_only_structure(batch),
             pl_module.device,
         )
+
         # Two normalizations happen before graphing:
         # - `_tensor_only_structure(...)` drops metadata fields that graph
         #   tools cannot consume
@@ -249,24 +448,79 @@ class ModelTensorBoardCallback(Callback):
         #   device as the model so tracing does not fail due to device mismatch
         return batch_on_device
 
+    def _build_torchview_model(self, pl_module: Any) -> torch.nn.Module:
+        """Select the graph surface used for the main torchview artifact.
+
+        Why this helper exists:
+            The repo now distinguishes between two related but different
+            visualization goals:
+
+            1. a debugging-oriented trace surface that preserves the model's
+               real internal graph as faithfully as possible
+            2. a cleaner, presentation-oriented semantic surface that groups the
+               fused architecture into a smaller number of human-readable stages
+
+        Current Phase 1 policy:
+            Use the semantic adapter as the primary torchview export so the
+            default artifact is easier to read, while keeping the low-level
+            adapter available in the codebase for future debugging or deeper
+            visualization paths.
+
+        Important boundary:
+            This helper changes only the visualization *surface*, not the real
+            training or inference logic. The wrapped Lightning module remains
+            untouched.
+        """
+        # Phase 1 intentionally makes the clean semantic graph the main
+        # torchview artifact. This improves readability without requiring model
+        # refactors or trainer changes.
+        return SemanticTorchviewAdapter(pl_module).to(pl_module.device)
+
     def _log_torchview(
         self,
         trainer: Any,
         pl_module: Any,
         batch_on_device: Any,
     ) -> None:
-        """Render the optional torchview artifact and surface it back into TensorBoard when possible."""
-        # torchview is complementary to TensorBoard, not a replacement for it.
+        """Render the optional torchview artifact and surface it into loggers.
+
+        What this path does:
+            - wraps the model in a visualization adapter
+            - runs a single graph-building pass using one sampled batch
+            - renders a PNG via Graphviz
+            - optionally mirrors the result into TensorBoard as text/image
+
+        Why torchview is treated separately from `add_graph(...)`:
+            TensorBoard graph tracing and torchview solve related but different
+            problems:
+            - `add_graph(...)` is a TensorBoard-native tracing surface
+            - `torchview` aims to generate a cleaner architecture diagram
+
+            Either one may succeed when the other fails, so they are attempted
+            independently.
+
+        Why an adapter is used:
+            The wrapped Lightning module may be a more complicated tracing
+            surface than visualization tools prefer. The adapter presents a
+            narrower and more intentional `nn.Module` surface without changing
+            real model behavior.
+
+        Failure behavior:
+            This path is strictly best-effort:
+            - if torchview is disabled, missing, or fails, training continues
+            - failures are logged for debugging
+            - no exception is allowed to escape into training control flow
+        """
+        # Torchview is complementary to TensorBoard, not a replacement for it.
         # The goal here is to create one static architecture artifact per run
-        # that can also be surfaced back into TensorBoard as an image/text
-        # pair.
+        # that can also be surfaced back into TensorBoard as an image/text pair.
         if not self.config.enable_torchview or self._torchview_logged:
             return
         if draw_graph is None or batch_on_device is None:
             return
 
-        # The torchview artifact path is configured externally and may arrive
-        # as a string. We normalize it once here before interacting with the
+        # The torchview artifact path is configured externally and may arrive as
+        # a string. We normalize it once here before interacting with the
         # Graphviz render API or the filesystem.
         base_path = (
             None
@@ -275,32 +529,117 @@ class ModelTensorBoardCallback(Callback):
         )
         if base_path is None:
             return
+
         base_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Build the visualization-facing wrapper.
+        #
+        # Design note:
+        # - Phase 1 prefers the semantic adapter so the saved diagram is easier
+        #   to understand at a glance
+        # - the underlying model, callbacks, metrics, and training path are not
+        #   modified
+        # - the low-level adapter still exists in the codebase as a future
+        #   debug-oriented surface if needed
+        graph_model = self._build_torchview_model(pl_module)
+
+        # Perform a one-time warmup forward pass before invoking torchview graph
+        # capture.
+        #
+        # Rationale:
+        #   - Some submodules (for example lazy layers or dynamically
+        #     constructed components) finalize their internal structure only
+        #     after the first forward pass.
+        #   - Torchview may internally traverse or trace the model multiple
+        #     times and expects that graph surface to remain stable.
+        #   - Running an explicit warmup here helps ensure that deferred
+        #     initialization happens before graph capture begins.
+        #
+        # Design notes:
+        #   - The warmup runs under `torch.no_grad()` and temporary `eval()` mode
+        #     inside the helper, so it does not affect gradients or optimizer
+        #     state.
+        #   - The helper restores the original training/eval mode afterward.
+        #
+        # Failure handling:
+        #   - Warmup is best-effort only. If it fails, we log and skip
+        #     visualization rather than interrupting training.
+        try:
+            warmup_visualization_model(graph_model, batch_on_device)
+        except Exception as exc:
+            if self.text_logger is not None:
+                self.text_logger.exception("torchview warmup failed: %s", exc)
+            return
+
+        # Attempt to generate a torchview graph for the selected visualization
+        # surface.
+        #
+        # Rationale:
+        #   - `draw_graph(...)` traces the provided module using the sampled
+        #     batch and produces a Graphviz representation of the execution
+        #     structure.
+        #   - In this repo, the semantic adapter helps the resulting diagram read
+        #     more like a human architecture sketch and less like a raw
+        #     explosion of every nested operation.
+        #
+        # Important:
+        #   - graph capture still depends on tracing stability and backend
+        #     compatibility
+        #   - the adapter improves readability but does not make torchview
+        #     infallible
         try:
             graph = draw_graph(
-                pl_module,
+                graph_model,
                 input_data=batch_on_device,
                 depth=self.config.torchview_depth,
                 roll=self.config.torchview_roll,
                 expand_nested=self.config.torchview_expand_nested,
                 device=str(pl_module.device),
             )
+
+            # Render the traced graph to a PNG file using Graphviz.
+            #
+            # Behavior:
+            #   - `graph.visual_graph` is a Graphviz Digraph produced by
+            #     torchview
+            #   - `render(...)` writes the image and a temporary source file
+            #   - `cleanup=True` removes intermediate files after rendering
             render_path = graph.visual_graph.render(
                 filename=base_path.name,
                 directory=str(base_path.parent),
                 format="png",
                 cleanup=True,
             )
+
+            # Mark visualization as successfully generated so the callback does
+            # not repeat the same work later in the run.
             self._torchview_logged = True
+
+        # Failure handling:
+        #   - Any exception during tracing or rendering is caught and logged.
+        #   - Common failure causes include:
+        #       * unstable tracing graphs across invocations
+        #       * unsupported Python control flow in forward(...)
+        #       * missing Graphviz backend (`dot` executable)
+        #   - Visualization is optional, so we fail gracefully and continue.
         except Exception as exc:
             if self.text_logger is not None:
-                self.text_logger.info("torchview rendering failed: %s", exc)
+                self.text_logger.exception("torchview rendering failed: %s", exc)
             return
 
+        # Normalize the render path to a Path object for downstream processing.
         png_path = Path(render_path)
+
+        # Extract raw Graphviz source (DOT format) if available.
+        #
+        # Purpose:
+        #   - Provides a text representation of the graph for debugging,
+        #     reproducibility, or artifact logging alongside the PNG.
+        #   - Useful when visual rendering succeeds but deeper inspection is
+        #     still needed later.
         source_text = getattr(getattr(graph, "visual_graph", None), "source", None)
-        # We surface the torchview result back into TensorBoard in two forms:
+
+        # Surface the torchview result back into TensorBoard in two forms:
         # - DOT/source text for inspection and debugging
         # - rendered PNG image for quick visual browsing
         #
@@ -309,7 +648,7 @@ class ModelTensorBoardCallback(Callback):
         for experiment in _tensorboard_experiments(trainer):
             add_text = getattr(experiment, "add_text", None)
             if callable(add_text) and source_text is not None:
-                add_text("model/torchview_dot", source_text, global_step=0)
+                add_text(_model_debug_tag("torchview_dot"), source_text, global_step=0)
 
             add_image = getattr(experiment, "add_image", None)
             if callable(add_image) and _has_module("matplotlib"):
@@ -318,7 +657,7 @@ class ModelTensorBoardCallback(Callback):
 
                     image = mpimg.imread(png_path)
                     add_image(
-                        "model/torchview",
+                        _model_debug_tag("torchview"),
                         image,
                         global_step=0,
                         dataformats="HWC",
@@ -326,20 +665,62 @@ class ModelTensorBoardCallback(Callback):
                 except Exception as exc:
                     if self.text_logger is not None:
                         self.text_logger.info(
-                            "torchview TensorBoard image logging failed: %s", exc
+                            "torchview TensorBoard image logging failed: %s",
+                            exc,
                         )
 
         if self.text_logger is not None:
             self.text_logger.info("saved torchview model diagram to %s", png_path)
 
     def on_fit_start(self, trainer: Any, pl_module: Any) -> None:
-        """Emit one-time model text, graph, and optional torchview artifacts at fit start."""
+        """Emit one-time model text, graph, and optional torchview artifacts.
+
+        Why this hook is used:
+            `on_fit_start` is late enough that:
+            - the model is fully constructed
+            - trainer state exists
+            - the datamodule is attached
+            - device placement has been resolved
+
+            But it is early enough that:
+            - visualization happens before the run has progressed far
+            - artifacts represent the initial model structure for that run
+            - repeated per-epoch export is avoided
+
+        Execution order:
+            1. Discover TensorBoard experiments, if any.
+            2. Sample one normalized batch for tracing.
+            3. Attempt torchview rendering regardless of TensorBoard presence.
+            4. If TensorBoard exists, log model text.
+            5. If enabled, attempt TensorBoard-native graph tracing.
+
+        Important design choice:
+            Torchview is intentionally not gated by TensorBoard availability.
+            The rendered PNG artifact is useful on its own, so we should still
+            produce it in runs that do not attach a TensorBoard logger.
+
+        Failure behavior:
+            Visualization errors should not stop training. This callback is for
+            observability only.
+        """
         # We do model visualization at fit start because:
         # - the model is fully constructed
         # - the datamodule is already attached
         # - we only need one representative sample input for graphing
         # - repeating this every epoch would add noise and overhead
         experiments = _tensorboard_experiments(trainer)
+
+        batch_on_device = self._sample_tensor_batch(trainer, pl_module)
+
+        # Torchview should not depend on TensorBoard logger availability.
+        #
+        # We still surface the rendered artifact into TensorBoard when a
+        # compatible experiment logger exists, but the PNG artifact itself is
+        # useful even without TensorBoard. Keeping this call outside the
+        # `experiments` gate avoids silently skipping torchview in runs that do
+        # not attach a TensorBoard logger.
+        self._log_torchview(trainer, pl_module, batch_on_device)
+
         if not experiments:
             return
 
@@ -348,23 +729,21 @@ class ModelTensorBoardCallback(Callback):
             for experiment in experiments:
                 add_text = getattr(experiment, "add_text", None)
                 if callable(add_text):
-                    add_text("model/architecture", model_text, global_step=0)
+                    add_text(_model_text_tag("architecture"), model_text, global_step=0)
             if self.text_logger is not None:
                 self.text_logger.info("model architecture\n%s", model_text)
 
-        batch_on_device = self._sample_tensor_batch(trainer, pl_module)
-        self._log_torchview(trainer, pl_module, batch_on_device)
         # Torchview and Lightning graph logging are intentionally decoupled:
         # - torchview aims for a clearer architecture diagram
         # - `add_graph(...)` aims for a TensorBoard-native traced graph view
         #
         # One can succeed even if the other fails, so each path is attempted
         # independently.
-
         if not self.config.enable_model_graph or self._graph_logged:
             return
         if batch_on_device is None:
             return
+
         for experiment in experiments:
             add_graph = getattr(experiment, "add_graph", None)
             if not callable(add_graph):

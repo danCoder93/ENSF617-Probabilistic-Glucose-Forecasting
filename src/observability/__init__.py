@@ -1,47 +1,65 @@
 from __future__ import annotations
 
 # AI-assisted maintenance note:
-# `observability` is now a small package rather than one giant module.
+# `observability` is the stable package-level facade for the repository's
+# runtime-observability stack.
 #
-# Why keep this file:
-# - existing callers already use imports like `from observability import
-#   setup_observability, BatchAuditCallback`
-# - that public import surface is convenient for `train.py`, `main.py`, tests,
-#   and notebooks
-# - this package-level facade lets us preserve those imports while moving the
-#   implementation into smaller files with tighter responsibility boundaries
+# Why this file exists:
+# - existing callers already use concise imports like
+#   `from observability import setup_observability, BatchAuditCallback`
+# - that short public surface remains convenient for `train.py`, `main.py`,
+#   tests, notebooks, and one-off debugging scripts
+# - this facade lets the internal runtime-observability package evolve into
+#   smaller, more focused files without forcing unnecessary import churn
+#   everywhere else in the repository
 #
-# Internal layout:
-# - `runtime.py` assembles loggers/profilers/path artifacts for a run
-# - `logging_utils.py` holds logger/hparameter helper functions shared by
-#   callbacks and training orchestration
-# - `tensors.py` centralizes nested tensor/batch normalization helpers
-# - `callbacks.py` is the stable public facade and callback assembly point
-# - `debug_callbacks.py`, `system_callbacks.py`, `parameter_callbacks.py`, and
-#   `prediction_callbacks.py` hold the split callback implementations
-# - `reporting.py` owns post-run exports and HTML report generation
+# Architectural clarification:
+# the repository now keeps three related concerns separate on purpose:
 #
-# Responsibility boundary:
-# - expose the repository's public observability surface in one place
-# - let orchestration code import logging/profiler/callback/reporting helpers
-#   without caring about the internal package split
-# - keep the internal modules free to evolve without forcing widespread import
-#   churn elsewhere in the codebase
+# 1. `observability`
+#    Live runtime visibility during training/evaluation, including:
+#    - logger/profiler setup
+#    - callback assembly
+#    - system telemetry
+#    - model graph/text surfaces
+#    - gradient/activation/parameter/prediction-sanity instrumentation
+#
+# 2. `reporting`
+#    Post-run packaging and presentation once predictions already exist,
+#    including:
+#    - canonical `SharedReport` construction
+#    - tabular prediction export
+#    - lightweight HTML report sinks
+#
+# 3. `evaluation`
+#    Canonical metric computation and grouped evaluation truth
+#
+# In other words:
+# - evaluation computes model-quality truth
+# - reporting packages and renders post-run artifacts from that truth
+# - observability handles live runtime visibility while the run is happening
+#
+# Important boundary for this phase:
+# this file intentionally does *not* re-export the reporting layer anymore.
+# Post-run reporting now belongs to the dedicated `reporting` package and
+# should be imported from there directly.
 #
 # What does *not* live here:
-# - the implementation details of callbacks, logging, profiling, or reporting
+# - concrete callback implementation details
+# - report-building or report-rendering logic
 # - training orchestration
-# - runtime environment policy
+# - canonical metric computation
 #
-# The goal is not to hide the split; it is to make each part easier to inspect
-# without forcing the rest of the repository to care about the file boundaries.
+# This file exists to define the stable runtime-observability import surface,
+# not to mix runtime observability with every post-run artifact concern.
 
 
 # ============================================================================
-# Public Observability Surface
+# Public Runtime-Observability Surface
 # ============================================================================
-# Re-export the commonly used runtime helpers, callbacks, and reporting tools
-# so the rest of the repository can continue using short package-level imports.
+# Re-export the commonly used runtime helpers, callbacks, and smaller logging
+# utilities so the rest of the repository can continue using short
+# package-level imports.
 
 from observability.callbacks import (
     ActivationStatsCallback,
@@ -51,16 +69,13 @@ from observability.callbacks import (
     ParameterHistogramCallback,
     ParameterScalarTelemetryCallback,
     PredictionFigureCallback,
+    PredictionSanityCallback,
     SystemTelemetryCallback,
     build_observability_callbacks,
 )
 from observability.logging_utils import (
     log_hyperparameters,
     log_metrics_to_loggers,
-)
-from observability.reporting import (
-    export_prediction_table,
-    generate_plotly_reports,
 )
 from observability.runtime import (
     ObservabilityArtifacts,
@@ -70,9 +85,16 @@ from observability.runtime import (
     setup_text_logger,
 )
 
-
-# `__all__` is the stable import contract for package-level callers like
-# `train.py`, `main.py`, and the observability-focused tests.
+# `__all__` is the stable package-level import contract for callers like
+# `train.py`, `main.py`, tests, and notebook workflows.
+#
+# Migration note:
+# post-run reporting helpers are intentionally absent from this list. The
+# canonical import surface for reporting is now:
+# - `from reporting import SharedReport`
+# - `from reporting import build_shared_report`
+# - `from reporting import export_prediction_table`
+# - `from reporting import generate_plotly_reports`
 __all__ = [
     "ActivationStatsCallback",
     "BatchAuditCallback",
@@ -82,12 +104,11 @@ __all__ = [
     "ParameterHistogramCallback",
     "ParameterScalarTelemetryCallback",
     "PredictionFigureCallback",
+    "PredictionSanityCallback",
     "SystemTelemetryCallback",
     "build_lightning_logger",
     "build_observability_callbacks",
     "build_profiler",
-    "export_prediction_table",
-    "generate_plotly_reports",
     "log_hyperparameters",
     "log_metrics_to_loggers",
     "setup_observability",

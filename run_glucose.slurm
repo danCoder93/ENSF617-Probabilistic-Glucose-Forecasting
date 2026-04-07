@@ -5,6 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
+#SBATCH --mem=8gb
 #SBATCH --time=08:00:00
 #SBATCH --output=%x-%j.out
 
@@ -25,12 +26,9 @@ mkdir -p "${SLURM_SUBMIT_DIR}/artifacts"
 python main.py \
   --device-profile slurm-cuda \
   --batch-size 256 \
-  --max-epochs 10 \
-  --observability-mode debug \
+  --max-epochs 20 \
+  --observability-mode trace \
   --device-stats \
   --enable-activation-stats \
-  --raw-dir "$JOB_SCRATCH/raw" \
-  --cache-dir "$JOB_SCRATCH/cache" \
-  --extract-dir "$JOB_SCRATCH/extracted" \
-  --processed-dir "$JOB_SCRATCH/processed" \
+  --enable-profiler \
   --output-dir "${SLURM_SUBMIT_DIR}/artifacts/glucose_${SLURM_JOB_ID}"
