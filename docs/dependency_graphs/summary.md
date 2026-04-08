@@ -2,10 +2,10 @@
 
 ## Production Overview
 
-- Production modules: 51
-- Production dependency edges: 137
-- Cross-package edges: 23
-- Test-to-production edges: 81
+- Production modules: 64
+- Production dependency edges: 175
+- Cross-package edges: 27
+- Test-to-production edges: 91
 
 ## Cycle Status
 
@@ -13,25 +13,25 @@
 
 ## Highest Fan-In
 
-- `config`: 20
-- `config.data`: 6
-- `config.runtime`: 5
-- `utils.tft_utils`: 5
-- `data.schema`: 5
-- `environment.types`: 5
-- `observability.logging_utils`: 5
-- `observability.utils`: 5
+- `config`: 23
+- `evaluation`: 8
+- `reporting.types`: 8
+- `config.data`: 7
+- `config.runtime`: 6
+- `data.schema`: 6
+- `observability.utils`: 6
+- `config.observability`: 5
 
 ## Highest Fan-Out
 
-- `workflows.training`: 9
-- `data.datamodule`: 8
-- `config`: 6
-- `models.fused_model`: 6
+- `workflows.training`: 12
+- `data.datamodule`: 9
+- `config`: 7
+- `models.fused_model`: 7
 - `observability.callbacks`: 6
+- `reporting`: 6
 - `workflows.cli`: 6
 - `environment`: 5
-- `evaluation`: 5
 
 ## Package Dependencies
 
@@ -44,8 +44,12 @@
 - `main` -> `workflows`
 - `models` -> `config`
 - `models` -> `evaluation`
+- `models` -> `observability`
 - `observability` -> `config`
-- `observability` -> `evaluation`
+- `observability` -> `reporting`
+- `reporting` -> `config`
+- `reporting` -> `evaluation`
+- `reporting` -> `observability`
 - `train` -> `config`
 - `train` -> `data`
 - `train` -> `environment`
@@ -56,5 +60,5 @@
 - `workflows` -> `defaults`
 - `workflows` -> `environment`
 - `workflows` -> `evaluation`
-- `workflows` -> `observability`
+- `workflows` -> `reporting`
 - `workflows` -> `train`

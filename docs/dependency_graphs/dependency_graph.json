@@ -51,6 +51,13 @@
       "layer": "production"
     },
     {
+      "name": "config.validation",
+      "path": "src/config/validation.py",
+      "package": "config",
+      "category": "module",
+      "layer": "production"
+    },
+    {
       "name": "data.datamodule",
       "path": "src/data/datamodule.py",
       "package": "data",
@@ -88,6 +95,13 @@
     {
       "name": "data.schema",
       "path": "src/data/schema.py",
+      "package": "data",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "data.statistics",
+      "path": "src/data/statistics.py",
       "package": "data",
       "category": "module",
       "layer": "production"
@@ -261,6 +275,13 @@
       "layer": "production"
     },
     {
+      "name": "observability.model_visualization",
+      "path": "src/observability/model_visualization.py",
+      "package": "observability",
+      "category": "module",
+      "layer": "production"
+    },
+    {
       "name": "observability.parameter_callbacks",
       "path": "src/observability/parameter_callbacks.py",
       "package": "observability",
@@ -306,6 +327,76 @@
       "name": "observability.utils",
       "path": "src/observability/utils.py",
       "package": "observability",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "reporting",
+      "path": "src/reporting/__init__.py",
+      "package": "reporting",
+      "category": "package",
+      "layer": "production"
+    },
+    {
+      "name": "reporting.builders",
+      "path": "src/reporting/builders.py",
+      "package": "reporting",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "reporting.exports",
+      "path": "src/reporting/exports.py",
+      "package": "reporting",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "reporting.plotly_reports",
+      "path": "src/reporting/plotly_reports.py",
+      "package": "reporting",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "reporting.prediction_rows",
+      "path": "src/reporting/prediction_rows.py",
+      "package": "reporting",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "reporting.report_tables",
+      "path": "src/reporting/report_tables.py",
+      "package": "reporting",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "reporting.report_text",
+      "path": "src/reporting/report_text.py",
+      "package": "reporting",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "reporting.structured_exports",
+      "path": "src/reporting/structured_exports.py",
+      "package": "reporting",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "reporting.tensorboard",
+      "path": "src/reporting/tensorboard.py",
+      "package": "reporting",
+      "category": "module",
+      "layer": "production"
+    },
+    {
+      "name": "reporting.types",
+      "path": "src/reporting/types.py",
+      "package": "reporting",
       "category": "module",
       "layer": "production"
     },
@@ -408,6 +499,13 @@
       "layer": "test"
     },
     {
+      "name": "tests.data.test_statistics",
+      "path": "tests/data/test_statistics.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
       "name": "tests.data.test_transforms",
       "path": "tests/data/test_transforms.py",
       "package": "tests",
@@ -471,6 +569,13 @@
       "layer": "test"
     },
     {
+      "name": "tests.manual.manual_real_data_validation",
+      "path": "tests/manual/manual_real_data_validation.py",
+      "package": "tests",
+      "category": "test_module",
+      "layer": "test"
+    },
+    {
       "name": "tests.models",
       "path": "tests/models/__init__.py",
       "package": "tests",
@@ -527,15 +632,15 @@
       "layer": "test"
     },
     {
-      "name": "tests.observability.test_reporting",
-      "path": "tests/observability/test_reporting.py",
+      "name": "tests.observability.test_runtime",
+      "path": "tests/observability/test_runtime.py",
       "package": "tests",
       "category": "test_module",
       "layer": "test"
     },
     {
-      "name": "tests.observability.test_runtime",
-      "path": "tests/observability/test_runtime.py",
+      "name": "tests.reporting.test_reporting",
+      "path": "tests/reporting/test_reporting.py",
       "package": "tests",
       "category": "test_module",
       "layer": "test"
@@ -695,7 +800,13 @@
       "source": "config",
       "target": "config.types",
       "edge_type": "re_export",
-      "line": 60
+      "line": 45
+    },
+    {
+      "source": "config",
+      "target": "config.validation",
+      "edge_type": "re_export",
+      "line": 68
     },
     {
       "source": "config.data",
@@ -725,7 +836,7 @@
       "source": "config.observability",
       "target": "config.types",
       "edge_type": "import",
-      "line": 12
+      "line": 68
     },
     {
       "source": "config.runtime",
@@ -752,10 +863,28 @@
       "line": 16
     },
     {
+      "source": "config.validation",
+      "target": "config.data",
+      "edge_type": "import",
+      "line": 32
+    },
+    {
+      "source": "config.validation",
+      "target": "config.observability",
+      "edge_type": "import",
+      "line": 33
+    },
+    {
+      "source": "config.validation",
+      "target": "config.runtime",
+      "edge_type": "import",
+      "line": 34
+    },
+    {
       "source": "data.datamodule",
       "target": "config",
       "edge_type": "import",
-      "line": 26
+      "line": 27
     },
     {
       "source": "data.datamodule",
@@ -789,15 +918,21 @@
     },
     {
       "source": "data.datamodule",
-      "target": "data.transforms",
+      "target": "data.statistics",
       "edge_type": "import",
       "line": 25
     },
     {
       "source": "data.datamodule",
+      "target": "data.transforms",
+      "edge_type": "import",
+      "line": 26
+    },
+    {
+      "source": "data.datamodule",
       "target": "utils.tft_utils",
       "edge_type": "import",
-      "line": 27
+      "line": 28
     },
     {
       "source": "data.dataset",
@@ -840,6 +975,30 @@
       "target": "utils.tft_utils",
       "edge_type": "import",
       "line": 17
+    },
+    {
+      "source": "data.statistics",
+      "target": "config",
+      "edge_type": "import",
+      "line": 12
+    },
+    {
+      "source": "data.statistics",
+      "target": "data.indexing",
+      "edge_type": "import",
+      "line": 13
+    },
+    {
+      "source": "data.statistics",
+      "target": "data.schema",
+      "edge_type": "import",
+      "line": 14
+    },
+    {
+      "source": "data.statistics",
+      "target": "data.transforms",
+      "edge_type": "import",
+      "line": 15
     },
     {
       "source": "data.transforms",
@@ -1106,6 +1265,12 @@
       "line": 35
     },
     {
+      "source": "models.fused_model",
+      "target": "observability.tensors",
+      "edge_type": "import",
+      "line": 47
+    },
+    {
       "source": "models.grn",
       "target": "config",
       "edge_type": "import",
@@ -1133,139 +1298,121 @@
       "source": "observability",
       "target": "observability.callbacks",
       "edge_type": "re_export",
-      "line": 46
+      "line": 66
     },
     {
       "source": "observability",
       "target": "observability.logging_utils",
       "edge_type": "re_export",
-      "line": 57
-    },
-    {
-      "source": "observability",
-      "target": "observability.reporting",
-      "edge_type": "re_export",
-      "line": 61
+      "line": 78
     },
     {
       "source": "observability",
       "target": "observability.runtime",
       "edge_type": "re_export",
-      "line": 65
+      "line": 82
+    },
+    {
+      "source": "observability",
+      "target": "reporting",
+      "edge_type": "import",
+      "line": 94
     },
     {
       "source": "observability.callbacks",
       "target": "config",
       "edge_type": "import",
-      "line": 23
+      "line": 59
     },
     {
       "source": "observability.callbacks",
       "target": "observability.debug_callbacks",
       "edge_type": "import",
-      "line": 24
+      "line": 60
     },
     {
       "source": "observability.callbacks",
       "target": "observability.parameter_callbacks",
       "edge_type": "import",
-      "line": 29
+      "line": 65
     },
     {
       "source": "observability.callbacks",
       "target": "observability.prediction_callbacks",
       "edge_type": "import",
-      "line": 33
+      "line": 69
     },
     {
       "source": "observability.callbacks",
       "target": "observability.system_callbacks",
       "edge_type": "import",
-      "line": 34
+      "line": 73
     },
     {
       "source": "observability.callbacks",
       "target": "observability.utils",
       "edge_type": "import",
-      "line": 38
+      "line": 77
     },
     {
       "source": "observability.debug_callbacks",
       "target": "config",
       "edge_type": "import",
-      "line": 19
+      "line": 71
     },
     {
       "source": "observability.debug_callbacks",
       "target": "observability.logging_utils",
       "edge_type": "import",
-      "line": 20
+      "line": 72
     },
     {
       "source": "observability.debug_callbacks",
       "target": "observability.tensors",
       "edge_type": "import",
-      "line": 21
+      "line": 73
     },
     {
       "source": "observability.parameter_callbacks",
       "target": "config",
       "edge_type": "import",
-      "line": 17
+      "line": 32
     },
     {
       "source": "observability.parameter_callbacks",
       "target": "observability.logging_utils",
       "edge_type": "import",
-      "line": 18
+      "line": 33
     },
     {
       "source": "observability.prediction_callbacks",
       "target": "config",
       "edge_type": "import",
-      "line": 19
+      "line": 59
     },
     {
       "source": "observability.prediction_callbacks",
       "target": "observability.logging_utils",
       "edge_type": "import",
-      "line": 20
+      "line": 60
     },
     {
       "source": "observability.prediction_callbacks",
       "target": "observability.tensors",
       "edge_type": "import",
-      "line": 21
+      "line": 61
     },
     {
       "source": "observability.prediction_callbacks",
       "target": "observability.utils",
       "edge_type": "import",
-      "line": 22
+      "line": 62
     },
     {
       "source": "observability.reporting",
-      "target": "config",
+      "target": "reporting",
       "edge_type": "import",
-      "line": 26
-    },
-    {
-      "source": "observability.reporting",
-      "target": "evaluation",
-      "edge_type": "import",
-      "line": 27
-    },
-    {
-      "source": "observability.reporting",
-      "target": "observability.tensors",
-      "edge_type": "import",
-      "line": 28
-    },
-    {
-      "source": "observability.reporting",
-      "target": "observability.utils",
-      "edge_type": "import",
-      "line": 29
+      "line": 9
     },
     {
       "source": "observability.runtime",
@@ -1283,61 +1430,229 @@
       "source": "observability.system_callbacks",
       "target": "config",
       "edge_type": "import",
-      "line": 25
+      "line": 54
     },
     {
       "source": "observability.system_callbacks",
       "target": "observability.logging_utils",
       "edge_type": "import",
-      "line": 26
+      "line": 55
+    },
+    {
+      "source": "observability.system_callbacks",
+      "target": "observability.model_visualization",
+      "edge_type": "import",
+      "line": 59
     },
     {
       "source": "observability.system_callbacks",
       "target": "observability.tensors",
       "edge_type": "import",
-      "line": 30
+      "line": 64
     },
     {
       "source": "observability.system_callbacks",
       "target": "observability.utils",
       "edge_type": "import",
+      "line": 68
+    },
+    {
+      "source": "reporting",
+      "target": "reporting.builders",
+      "edge_type": "re_export",
+      "line": 57
+    },
+    {
+      "source": "reporting",
+      "target": "reporting.exports",
+      "edge_type": "re_export",
+      "line": 58
+    },
+    {
+      "source": "reporting",
+      "target": "reporting.plotly_reports",
+      "edge_type": "re_export",
+      "line": 63
+    },
+    {
+      "source": "reporting",
+      "target": "reporting.structured_exports",
+      "edge_type": "re_export",
+      "line": 64
+    },
+    {
+      "source": "reporting",
+      "target": "reporting.tensorboard",
+      "edge_type": "re_export",
+      "line": 66
+    },
+    {
+      "source": "reporting",
+      "target": "reporting.types",
+      "edge_type": "re_export",
+      "line": 65
+    },
+    {
+      "source": "reporting.builders",
+      "target": "evaluation",
+      "edge_type": "import",
+      "line": 32
+    },
+    {
+      "source": "reporting.builders",
+      "target": "reporting.prediction_rows",
+      "edge_type": "import",
       "line": 34
+    },
+    {
+      "source": "reporting.builders",
+      "target": "reporting.report_tables",
+      "edge_type": "import",
+      "line": 35
+    },
+    {
+      "source": "reporting.builders",
+      "target": "reporting.report_text",
+      "edge_type": "import",
+      "line": 36
+    },
+    {
+      "source": "reporting.builders",
+      "target": "reporting.types",
+      "edge_type": "import",
+      "line": 37
+    },
+    {
+      "source": "reporting.exports",
+      "target": "config",
+      "edge_type": "import",
+      "line": 33
+    },
+    {
+      "source": "reporting.exports",
+      "target": "evaluation",
+      "edge_type": "import",
+      "line": 34
+    },
+    {
+      "source": "reporting.exports",
+      "target": "reporting.builders",
+      "edge_type": "import",
+      "line": 35
+    },
+    {
+      "source": "reporting.exports",
+      "target": "reporting.types",
+      "edge_type": "import",
+      "line": 36
+    },
+    {
+      "source": "reporting.plotly_reports",
+      "target": "config",
+      "edge_type": "import",
+      "line": 51
+    },
+    {
+      "source": "reporting.plotly_reports",
+      "target": "observability.utils",
+      "edge_type": "import",
+      "line": 52
+    },
+    {
+      "source": "reporting.plotly_reports",
+      "target": "reporting.types",
+      "edge_type": "import",
+      "line": 54
+    },
+    {
+      "source": "reporting.prediction_rows",
+      "target": "evaluation",
+      "edge_type": "import",
+      "line": 39
+    },
+    {
+      "source": "reporting.prediction_rows",
+      "target": "observability.tensors",
+      "edge_type": "import",
+      "line": 40
+    },
+    {
+      "source": "reporting.prediction_rows",
+      "target": "reporting.types",
+      "edge_type": "import",
+      "line": 42
+    },
+    {
+      "source": "reporting.report_tables",
+      "target": "evaluation",
+      "edge_type": "import",
+      "line": 35
+    },
+    {
+      "source": "reporting.report_text",
+      "target": "evaluation",
+      "edge_type": "import",
+      "line": 35
+    },
+    {
+      "source": "reporting.structured_exports",
+      "target": "config",
+      "edge_type": "import",
+      "line": 61
+    },
+    {
+      "source": "reporting.structured_exports",
+      "target": "observability.utils",
+      "edge_type": "import",
+      "line": 62
+    },
+    {
+      "source": "reporting.structured_exports",
+      "target": "reporting.types",
+      "edge_type": "import",
+      "line": 64
+    },
+    {
+      "source": "reporting.tensorboard",
+      "target": "reporting.types",
+      "edge_type": "import",
+      "line": 61
     },
     {
       "source": "tests.config.test_data_config",
       "target": "config",
       "edge_type": "import",
-      "line": 8
+      "line": 15
     },
     {
       "source": "tests.config.test_data_config",
       "target": "utils.tft_utils",
       "edge_type": "import",
-      "line": 9
+      "line": 16
     },
     {
       "source": "tests.config.test_defaults",
       "target": "defaults",
       "edge_type": "import",
-      "line": 5
+      "line": 11
     },
     {
       "source": "tests.config.test_model_config",
       "target": "config",
       "edge_type": "import",
-      "line": 9
+      "line": 17
     },
     {
       "source": "tests.config.test_model_config",
       "target": "utils.tft_utils",
       "edge_type": "import",
-      "line": 17
+      "line": 25
     },
     {
       "source": "tests.config.test_runtime_config",
       "target": "config",
       "edge_type": "import",
-      "line": 7
+      "line": 10
     },
     {
       "source": "tests.conftest",
@@ -1466,70 +1781,100 @@
       "line": 16
     },
     {
+      "source": "tests.data.test_statistics",
+      "target": "data.datamodule",
+      "edge_type": "import",
+      "line": 15
+    },
+    {
+      "source": "tests.data.test_statistics",
+      "target": "data.schema",
+      "edge_type": "import",
+      "line": 16
+    },
+    {
+      "source": "tests.data.test_statistics",
+      "target": "data.statistics",
+      "edge_type": "import",
+      "line": 17
+    },
+    {
+      "source": "tests.data.test_statistics",
+      "target": "data.transforms",
+      "edge_type": "import",
+      "line": 18
+    },
+    {
+      "source": "tests.data.test_statistics",
+      "target": "tests.support",
+      "edge_type": "import",
+      "line": 19
+    },
+    {
       "source": "tests.data.test_transforms",
       "target": "data.schema",
       "edge_type": "import",
-      "line": 9
+      "line": 13
     },
     {
       "source": "tests.data.test_transforms",
       "target": "data.transforms",
       "edge_type": "import",
-      "line": 10
+      "line": 14
     },
     {
       "source": "tests.data.test_transforms",
       "target": "tests.support",
       "edge_type": "import",
-      "line": 11
+      "line": 15
     },
     {
       "source": "tests.environment.test_diagnostics",
       "target": "config",
       "edge_type": "import",
-      "line": 3
+      "line": 6
     },
     {
       "source": "tests.environment.test_diagnostics",
       "target": "environment",
       "edge_type": "import",
-      "line": 4
+      "line": 7
     },
     {
       "source": "tests.environment.test_diagnostics",
       "target": "tests.support",
       "edge_type": "import",
-      "line": 10
+      "line": 13
     },
     {
       "source": "tests.environment.test_profiles",
       "target": "config",
       "edge_type": "import",
-      "line": 3
+      "line": 6
     },
     {
       "source": "tests.environment.test_profiles",
       "target": "environment",
       "edge_type": "import",
-      "line": 4
+      "line": 7
     },
     {
       "source": "tests.environment.test_profiles",
       "target": "tests.support",
       "edge_type": "import",
-      "line": 5
+      "line": 8
     },
     {
       "source": "tests.evaluation.test_evaluator",
       "target": "evaluation",
       "edge_type": "import",
-      "line": 17
+      "line": 20
     },
     {
       "source": "tests.evaluation.test_metrics",
       "target": "evaluation.metrics",
       "edge_type": "import",
-      "line": 17
+      "line": 20
     },
     {
       "source": "tests.manual.manual_data_smoke",
@@ -1548,6 +1893,36 @@
       "target": "data.dataset",
       "edge_type": "import",
       "line": 22
+    },
+    {
+      "source": "tests.manual.manual_real_data_validation",
+      "target": "config",
+      "edge_type": "import",
+      "line": 24
+    },
+    {
+      "source": "tests.manual.manual_real_data_validation",
+      "target": "data.datamodule",
+      "edge_type": "import",
+      "line": 25
+    },
+    {
+      "source": "tests.manual.manual_real_data_validation",
+      "target": "data.indexing",
+      "edge_type": "import",
+      "line": 26
+    },
+    {
+      "source": "tests.manual.manual_real_data_validation",
+      "target": "data.preprocessor",
+      "edge_type": "import",
+      "line": 27
+    },
+    {
+      "source": "tests.manual.manual_real_data_validation",
+      "target": "data.transforms",
+      "edge_type": "import",
+      "line": 28
     },
     {
       "source": "tests.models.test_fused_model",
@@ -1583,85 +1958,85 @@
       "source": "tests.observability.test_callbacks",
       "target": "config",
       "edge_type": "import",
-      "line": 7
+      "line": 19
     },
     {
       "source": "tests.observability.test_callbacks",
       "target": "observability.callbacks",
       "edge_type": "import",
-      "line": 8
+      "line": 20
     },
     {
       "source": "tests.observability.test_callbacks",
       "target": "tests.observability.support",
       "edge_type": "import",
-      "line": 18
+      "line": 30
     },
     {
       "source": "tests.observability.test_logging_utils",
       "target": "observability.logging_utils",
       "edge_type": "import",
-      "line": 5
+      "line": 8
     },
     {
       "source": "tests.observability.test_logging_utils",
       "target": "tests.observability.support",
       "edge_type": "import",
-      "line": 10
+      "line": 13
     },
     {
       "source": "tests.observability.test_package",
       "target": "observability",
       "edge_type": "import",
-      "line": 8
+      "line": 11
     },
     {
       "source": "tests.observability.test_package",
       "target": "observability.callbacks",
-      "edge_type": "import",
-      "line": 28
-    },
-    {
-      "source": "tests.observability.test_package",
-      "target": "observability.logging_utils",
-      "edge_type": "import",
-      "line": 29
-    },
-    {
-      "source": "tests.observability.test_package",
-      "target": "observability.reporting",
       "edge_type": "import",
       "line": 31
     },
     {
       "source": "tests.observability.test_package",
-      "target": "observability.runtime",
+      "target": "observability.logging_utils",
       "edge_type": "import",
-      "line": 33
+      "line": 32
     },
     {
-      "source": "tests.observability.test_reporting",
-      "target": "evaluation.types",
-      "edge_type": "import",
-      "line": 10
-    },
-    {
-      "source": "tests.observability.test_reporting",
+      "source": "tests.observability.test_package",
       "target": "observability.reporting",
       "edge_type": "import",
-      "line": 11
+      "line": 34
+    },
+    {
+      "source": "tests.observability.test_package",
+      "target": "observability.runtime",
+      "edge_type": "import",
+      "line": 36
     },
     {
       "source": "tests.observability.test_runtime",
       "target": "config",
       "edge_type": "import",
-      "line": 9
+      "line": 12
     },
     {
       "source": "tests.observability.test_runtime",
       "target": "observability.runtime",
       "edge_type": "import",
-      "line": 10
+      "line": 13
+    },
+    {
+      "source": "tests.reporting.test_reporting",
+      "target": "reporting",
+      "edge_type": "import",
+      "line": 16
+    },
+    {
+      "source": "tests.reporting.test_reporting",
+      "target": "reporting.builders",
+      "edge_type": "import",
+      "line": 24
     },
     {
       "source": "tests.support",
@@ -1679,211 +2054,217 @@
       "source": "tests.training.test_trainer_construction",
       "target": "config",
       "edge_type": "import",
-      "line": 29
+      "line": 44
     },
     {
       "source": "tests.training.test_trainer_construction",
       "target": "data.datamodule",
       "edge_type": "import",
-      "line": 18
+      "line": 33
     },
     {
       "source": "tests.training.test_trainer_construction",
       "target": "observability",
       "edge_type": "import",
-      "line": 19
+      "line": 34
     },
     {
       "source": "tests.training.test_trainer_construction",
       "target": "tests.support",
       "edge_type": "import",
-      "line": 30
+      "line": 45
     },
     {
       "source": "tests.training.test_trainer_construction",
       "target": "train",
       "edge_type": "import",
-      "line": 9
+      "line": 24
     },
     {
       "source": "tests.training.test_trainer_execution",
       "target": "config",
       "edge_type": "import",
-      "line": 16
+      "line": 30
     },
     {
       "source": "tests.training.test_trainer_execution",
       "target": "data.datamodule",
       "edge_type": "import",
-      "line": 13
+      "line": 27
     },
     {
       "source": "tests.training.test_trainer_execution",
       "target": "models.fused_model",
       "edge_type": "import",
-      "line": 14
+      "line": 28
     },
     {
       "source": "tests.training.test_trainer_execution",
       "target": "tests.support",
       "edge_type": "import",
-      "line": 17
+      "line": 31
     },
     {
       "source": "tests.training.test_trainer_execution",
       "target": "train",
       "edge_type": "import",
-      "line": 10
+      "line": 24
     },
     {
       "source": "tests.workflows.test_benchmark_workflow",
       "target": "defaults",
       "edge_type": "import",
-      "line": 13
+      "line": 29
     },
     {
       "source": "tests.workflows.test_benchmark_workflow",
       "target": "environment",
       "edge_type": "import",
-      "line": 19
+      "line": 35
     },
     {
       "source": "tests.workflows.test_benchmark_workflow",
       "target": "models.fused_model",
       "edge_type": "import",
-      "line": 20
+      "line": 36
     },
     {
       "source": "tests.workflows.test_benchmark_workflow",
       "target": "tests.support",
       "edge_type": "import",
-      "line": 22
+      "line": 38
     },
     {
       "source": "tests.workflows.test_benchmark_workflow",
       "target": "train",
       "edge_type": "import",
-      "line": 21
+      "line": 37
     },
     {
       "source": "tests.workflows.test_benchmark_workflow",
       "target": "workflows.training",
       "edge_type": "import",
-      "line": 23
+      "line": 39
     },
     {
       "source": "tests.workflows.test_cli",
       "target": "config",
       "edge_type": "import",
-      "line": 6
+      "line": 17
     },
     {
       "source": "tests.workflows.test_cli",
       "target": "environment",
       "edge_type": "import",
-      "line": 7
+      "line": 18
     },
     {
       "source": "tests.workflows.test_cli",
       "target": "tests.support",
       "edge_type": "import",
-      "line": 8
+      "line": 19
     },
     {
       "source": "tests.workflows.test_cli",
       "target": "workflows.cli",
       "edge_type": "import",
-      "line": 9
+      "line": 20
     },
     {
       "source": "tests.workflows.test_entrypoint",
       "target": "defaults",
       "edge_type": "import",
-      "line": 4
+      "line": 14
     },
     {
       "source": "tests.workflows.test_entrypoint",
       "target": "main",
       "edge_type": "import",
-      "line": 3
+      "line": 13
     },
     {
       "source": "tests.workflows.test_entrypoint",
       "target": "workflows.cli",
       "edge_type": "import",
-      "line": 10
+      "line": 20
     },
     {
       "source": "tests.workflows.test_entrypoint",
       "target": "workflows.helpers",
       "edge_type": "import",
-      "line": 11
+      "line": 21
     },
     {
       "source": "tests.workflows.test_entrypoint",
       "target": "workflows.training",
       "edge_type": "import",
-      "line": 12
+      "line": 22
     },
     {
       "source": "tests.workflows.test_helpers",
       "target": "config",
       "edge_type": "import",
-      "line": 9
+      "line": 20
     },
     {
       "source": "tests.workflows.test_helpers",
       "target": "tests.support",
       "edge_type": "import",
-      "line": 10
+      "line": 21
     },
     {
       "source": "tests.workflows.test_helpers",
       "target": "workflows.cli",
       "edge_type": "import",
-      "line": 11
+      "line": 22
     },
     {
       "source": "tests.workflows.test_helpers",
       "target": "workflows.helpers",
       "edge_type": "import",
-      "line": 12
+      "line": 23
     },
     {
       "source": "tests.workflows.test_training_workflow",
       "target": "defaults",
       "edge_type": "import",
-      "line": 13
+      "line": 29
     },
     {
       "source": "tests.workflows.test_training_workflow",
       "target": "environment",
       "edge_type": "import",
-      "line": 17
+      "line": 33
     },
     {
       "source": "tests.workflows.test_training_workflow",
       "target": "models.fused_model",
       "edge_type": "import",
-      "line": 15
+      "line": 31
+    },
+    {
+      "source": "tests.workflows.test_training_workflow",
+      "target": "reporting",
+      "edge_type": "import",
+      "line": 277
     },
     {
       "source": "tests.workflows.test_training_workflow",
       "target": "tests.support",
       "edge_type": "import",
-      "line": 18
+      "line": 34
     },
     {
       "source": "tests.workflows.test_training_workflow",
       "target": "train",
       "edge_type": "import",
-      "line": 16
+      "line": 32
     },
     {
       "source": "tests.workflows.test_training_workflow",
       "target": "workflows.training",
       "edge_type": "import",
-      "line": 19
+      "line": 35
     },
     {
       "source": "train",
@@ -1997,73 +2378,91 @@
       "source": "workflows.training",
       "target": "config",
       "edge_type": "import",
-      "line": 24
+      "line": 29
+    },
+    {
+      "source": "workflows.training",
+      "target": "config.types",
+      "edge_type": "import",
+      "line": 39
     },
     {
       "source": "workflows.training",
       "target": "data.datamodule",
       "edge_type": "import",
-      "line": 600
+      "line": 1098
     },
     {
       "source": "workflows.training",
       "target": "defaults",
       "edge_type": "import",
-      "line": 31
+      "line": 40
     },
     {
       "source": "workflows.training",
       "target": "environment",
       "edge_type": "import",
-      "line": 37
+      "line": 46
     },
     {
       "source": "workflows.training",
       "target": "evaluation",
       "edge_type": "import",
-      "line": 59
+      "line": 69
     },
     {
       "source": "workflows.training",
-      "target": "observability",
+      "target": "reporting",
       "edge_type": "import",
-      "line": 602
+      "line": 504
+    },
+    {
+      "source": "workflows.training",
+      "target": "reporting.structured_exports",
+      "edge_type": "import",
+      "line": 560
+    },
+    {
+      "source": "workflows.training",
+      "target": "reporting.types",
+      "edge_type": "import",
+      "line": 70
     },
     {
       "source": "workflows.training",
       "target": "train",
       "edge_type": "import",
-      "line": 60
+      "line": 71
     },
     {
       "source": "workflows.training",
       "target": "workflows.helpers",
       "edge_type": "import",
-      "line": 49
+      "line": 58
     },
     {
       "source": "workflows.training",
       "target": "workflows.types",
       "edge_type": "import",
-      "line": 54
+      "line": 63
     },
     {
       "source": "workflows.types",
       "target": "environment",
       "edge_type": "import",
-      "line": 17
+      "line": 47
     },
     {
       "source": "workflows.types",
       "target": "evaluation",
       "edge_type": "import",
-      "line": 22
+      "line": 52
     },
     {
       "source": "workflows.types",
       "target": "train",
       "edge_type": "import",
-      "line": 23
+      "line": 53
     }
   ],
   "package_edges": [
@@ -2122,6 +2521,12 @@
       "line": null
     },
     {
+      "source": "models",
+      "target": "observability",
+      "edge_type": "import",
+      "line": null
+    },
+    {
       "source": "observability",
       "target": "config",
       "edge_type": "import",
@@ -2129,7 +2534,25 @@
     },
     {
       "source": "observability",
+      "target": "reporting",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "reporting",
+      "target": "config",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "reporting",
       "target": "evaluation",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "reporting",
+      "target": "observability",
       "edge_type": "import",
       "line": null
     },
@@ -2195,7 +2618,7 @@
     },
     {
       "source": "workflows",
-      "target": "observability",
+      "target": "reporting",
       "edge_type": "import",
       "line": null
     },
@@ -2211,37 +2634,37 @@
       "source": "tests.config.test_data_config",
       "target": "config",
       "edge_type": "test_dependency",
-      "line": 8
+      "line": 15
     },
     {
       "source": "tests.config.test_data_config",
       "target": "utils.tft_utils",
       "edge_type": "test_dependency",
-      "line": 9
+      "line": 16
     },
     {
       "source": "tests.config.test_defaults",
       "target": "defaults",
       "edge_type": "test_dependency",
-      "line": 5
+      "line": 11
     },
     {
       "source": "tests.config.test_model_config",
       "target": "config",
       "edge_type": "test_dependency",
-      "line": 9
+      "line": 17
     },
     {
       "source": "tests.config.test_model_config",
       "target": "utils.tft_utils",
       "edge_type": "test_dependency",
-      "line": 17
+      "line": 25
     },
     {
       "source": "tests.config.test_runtime_config",
       "target": "config",
       "edge_type": "test_dependency",
-      "line": 7
+      "line": 10
     },
     {
       "source": "tests.conftest",
@@ -2340,52 +2763,76 @@
       "line": 16
     },
     {
+      "source": "tests.data.test_statistics",
+      "target": "data.datamodule",
+      "edge_type": "test_dependency",
+      "line": 15
+    },
+    {
+      "source": "tests.data.test_statistics",
+      "target": "data.schema",
+      "edge_type": "test_dependency",
+      "line": 16
+    },
+    {
+      "source": "tests.data.test_statistics",
+      "target": "data.statistics",
+      "edge_type": "test_dependency",
+      "line": 17
+    },
+    {
+      "source": "tests.data.test_statistics",
+      "target": "data.transforms",
+      "edge_type": "test_dependency",
+      "line": 18
+    },
+    {
       "source": "tests.data.test_transforms",
       "target": "data.schema",
       "edge_type": "test_dependency",
-      "line": 9
+      "line": 13
     },
     {
       "source": "tests.data.test_transforms",
       "target": "data.transforms",
       "edge_type": "test_dependency",
-      "line": 10
+      "line": 14
     },
     {
       "source": "tests.environment.test_diagnostics",
       "target": "config",
       "edge_type": "test_dependency",
-      "line": 3
+      "line": 6
     },
     {
       "source": "tests.environment.test_diagnostics",
       "target": "environment",
       "edge_type": "test_dependency",
-      "line": 4
+      "line": 7
     },
     {
       "source": "tests.environment.test_profiles",
       "target": "config",
       "edge_type": "test_dependency",
-      "line": 3
+      "line": 6
     },
     {
       "source": "tests.environment.test_profiles",
       "target": "environment",
       "edge_type": "test_dependency",
-      "line": 4
+      "line": 7
     },
     {
       "source": "tests.evaluation.test_evaluator",
       "target": "evaluation",
       "edge_type": "test_dependency",
-      "line": 17
+      "line": 20
     },
     {
       "source": "tests.evaluation.test_metrics",
       "target": "evaluation.metrics",
       "edge_type": "test_dependency",
-      "line": 17
+      "line": 20
     },
     {
       "source": "tests.manual.manual_data_smoke",
@@ -2404,6 +2851,36 @@
       "target": "data.dataset",
       "edge_type": "test_dependency",
       "line": 22
+    },
+    {
+      "source": "tests.manual.manual_real_data_validation",
+      "target": "config",
+      "edge_type": "test_dependency",
+      "line": 24
+    },
+    {
+      "source": "tests.manual.manual_real_data_validation",
+      "target": "data.datamodule",
+      "edge_type": "test_dependency",
+      "line": 25
+    },
+    {
+      "source": "tests.manual.manual_real_data_validation",
+      "target": "data.indexing",
+      "edge_type": "test_dependency",
+      "line": 26
+    },
+    {
+      "source": "tests.manual.manual_real_data_validation",
+      "target": "data.preprocessor",
+      "edge_type": "test_dependency",
+      "line": 27
+    },
+    {
+      "source": "tests.manual.manual_real_data_validation",
+      "target": "data.transforms",
+      "edge_type": "test_dependency",
+      "line": 28
     },
     {
       "source": "tests.models.test_fused_model",
@@ -2439,73 +2916,73 @@
       "source": "tests.observability.test_callbacks",
       "target": "config",
       "edge_type": "test_dependency",
-      "line": 7
+      "line": 19
     },
     {
       "source": "tests.observability.test_callbacks",
       "target": "observability.callbacks",
       "edge_type": "test_dependency",
-      "line": 8
+      "line": 20
     },
     {
       "source": "tests.observability.test_logging_utils",
       "target": "observability.logging_utils",
       "edge_type": "test_dependency",
-      "line": 5
+      "line": 8
     },
     {
       "source": "tests.observability.test_package",
       "target": "observability",
       "edge_type": "test_dependency",
-      "line": 8
+      "line": 11
     },
     {
       "source": "tests.observability.test_package",
       "target": "observability.callbacks",
       "edge_type": "test_dependency",
-      "line": 28
+      "line": 31
     },
     {
       "source": "tests.observability.test_package",
       "target": "observability.logging_utils",
       "edge_type": "test_dependency",
-      "line": 29
+      "line": 32
     },
     {
       "source": "tests.observability.test_package",
       "target": "observability.reporting",
       "edge_type": "test_dependency",
-      "line": 31
+      "line": 34
     },
     {
       "source": "tests.observability.test_package",
       "target": "observability.runtime",
       "edge_type": "test_dependency",
-      "line": 33
-    },
-    {
-      "source": "tests.observability.test_reporting",
-      "target": "evaluation.types",
-      "edge_type": "test_dependency",
-      "line": 10
-    },
-    {
-      "source": "tests.observability.test_reporting",
-      "target": "observability.reporting",
-      "edge_type": "test_dependency",
-      "line": 11
+      "line": 36
     },
     {
       "source": "tests.observability.test_runtime",
       "target": "config",
       "edge_type": "test_dependency",
-      "line": 9
+      "line": 12
     },
     {
       "source": "tests.observability.test_runtime",
       "target": "observability.runtime",
       "edge_type": "test_dependency",
-      "line": 10
+      "line": 13
+    },
+    {
+      "source": "tests.reporting.test_reporting",
+      "target": "reporting",
+      "edge_type": "test_dependency",
+      "line": 16
+    },
+    {
+      "source": "tests.reporting.test_reporting",
+      "target": "reporting.builders",
+      "edge_type": "test_dependency",
+      "line": 24
     },
     {
       "source": "tests.support",
@@ -2523,175 +3000,181 @@
       "source": "tests.training.test_trainer_construction",
       "target": "config",
       "edge_type": "test_dependency",
-      "line": 29
+      "line": 44
     },
     {
       "source": "tests.training.test_trainer_construction",
       "target": "data.datamodule",
       "edge_type": "test_dependency",
-      "line": 18
+      "line": 33
     },
     {
       "source": "tests.training.test_trainer_construction",
       "target": "observability",
       "edge_type": "test_dependency",
-      "line": 19
+      "line": 34
     },
     {
       "source": "tests.training.test_trainer_construction",
       "target": "train",
       "edge_type": "test_dependency",
-      "line": 9
+      "line": 24
     },
     {
       "source": "tests.training.test_trainer_execution",
       "target": "config",
       "edge_type": "test_dependency",
-      "line": 16
+      "line": 30
     },
     {
       "source": "tests.training.test_trainer_execution",
       "target": "data.datamodule",
       "edge_type": "test_dependency",
-      "line": 13
+      "line": 27
     },
     {
       "source": "tests.training.test_trainer_execution",
       "target": "models.fused_model",
       "edge_type": "test_dependency",
-      "line": 14
+      "line": 28
     },
     {
       "source": "tests.training.test_trainer_execution",
       "target": "train",
       "edge_type": "test_dependency",
-      "line": 10
+      "line": 24
     },
     {
       "source": "tests.workflows.test_benchmark_workflow",
       "target": "defaults",
       "edge_type": "test_dependency",
-      "line": 13
+      "line": 29
     },
     {
       "source": "tests.workflows.test_benchmark_workflow",
       "target": "environment",
       "edge_type": "test_dependency",
-      "line": 19
+      "line": 35
     },
     {
       "source": "tests.workflows.test_benchmark_workflow",
       "target": "models.fused_model",
       "edge_type": "test_dependency",
-      "line": 20
+      "line": 36
     },
     {
       "source": "tests.workflows.test_benchmark_workflow",
       "target": "train",
       "edge_type": "test_dependency",
-      "line": 21
+      "line": 37
     },
     {
       "source": "tests.workflows.test_benchmark_workflow",
       "target": "workflows.training",
       "edge_type": "test_dependency",
-      "line": 23
+      "line": 39
     },
     {
       "source": "tests.workflows.test_cli",
       "target": "config",
       "edge_type": "test_dependency",
-      "line": 6
+      "line": 17
     },
     {
       "source": "tests.workflows.test_cli",
       "target": "environment",
       "edge_type": "test_dependency",
-      "line": 7
+      "line": 18
     },
     {
       "source": "tests.workflows.test_cli",
       "target": "workflows.cli",
       "edge_type": "test_dependency",
-      "line": 9
+      "line": 20
     },
     {
       "source": "tests.workflows.test_entrypoint",
       "target": "defaults",
       "edge_type": "test_dependency",
-      "line": 4
+      "line": 14
     },
     {
       "source": "tests.workflows.test_entrypoint",
       "target": "main",
       "edge_type": "test_dependency",
-      "line": 3
+      "line": 13
     },
     {
       "source": "tests.workflows.test_entrypoint",
       "target": "workflows.cli",
       "edge_type": "test_dependency",
-      "line": 10
+      "line": 20
     },
     {
       "source": "tests.workflows.test_entrypoint",
       "target": "workflows.helpers",
       "edge_type": "test_dependency",
-      "line": 11
+      "line": 21
     },
     {
       "source": "tests.workflows.test_entrypoint",
       "target": "workflows.training",
       "edge_type": "test_dependency",
-      "line": 12
+      "line": 22
     },
     {
       "source": "tests.workflows.test_helpers",
       "target": "config",
       "edge_type": "test_dependency",
-      "line": 9
+      "line": 20
     },
     {
       "source": "tests.workflows.test_helpers",
       "target": "workflows.cli",
       "edge_type": "test_dependency",
-      "line": 11
+      "line": 22
     },
     {
       "source": "tests.workflows.test_helpers",
       "target": "workflows.helpers",
       "edge_type": "test_dependency",
-      "line": 12
+      "line": 23
     },
     {
       "source": "tests.workflows.test_training_workflow",
       "target": "defaults",
       "edge_type": "test_dependency",
-      "line": 13
+      "line": 29
     },
     {
       "source": "tests.workflows.test_training_workflow",
       "target": "environment",
       "edge_type": "test_dependency",
-      "line": 17
+      "line": 33
     },
     {
       "source": "tests.workflows.test_training_workflow",
       "target": "models.fused_model",
       "edge_type": "test_dependency",
-      "line": 15
+      "line": 31
+    },
+    {
+      "source": "tests.workflows.test_training_workflow",
+      "target": "reporting",
+      "edge_type": "test_dependency",
+      "line": 277
     },
     {
       "source": "tests.workflows.test_training_workflow",
       "target": "train",
       "edge_type": "test_dependency",
-      "line": 16
+      "line": 32
     },
     {
       "source": "tests.workflows.test_training_workflow",
       "target": "workflows.training",
       "edge_type": "test_dependency",
-      "line": 19
+      "line": 35
     }
   ]
 }

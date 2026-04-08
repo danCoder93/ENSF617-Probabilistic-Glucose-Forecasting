@@ -74,27 +74,29 @@ prediction exports, and reports.
 
 What is in good shape today:
 
-- the repository has a runnable end-to-end script and notebook workflow
-- the codebase is documented by both hand-authored architecture prose and
-  generated dependency graphs
-- typed config, runtime profiles, diagnostics, structured evaluation, and
-  observability/reporting are all first-class subsystems
+- the repository has a runnable end-to-end training + evaluation workflow
+- the codebase is documented by both hand-authored architecture prose and generated dependency graphs
+- typed config, runtime profiles, diagnostics, structured evaluation, and observability/reporting are all first-class subsystems
+- TensorBoard integration is being actively enhanced with richer logging, hierarchical views, and interpretable summaries
+- reporting now supports structured outputs (JSON, CSV) and visual artifacts (Plotly), with a direction toward unifying everything under TensorBoard
+- prediction-level outputs (per-row, per-horizon) and aggregated summaries are available for downstream analysis
 - the test suite covers multiple layers beyond just the model itself
 
 What is still in progress:
 
-- the README is a living paper-style scaffold rather than a finalized paper
-- the bibliography and related-work sections are not complete yet
-- the repo is still AZT1D-oriented rather than fully multi-dataset
-- some evaluation/reporting flows still depend on the prediction path after
-  fitting
+- consolidation of reporting outputs into a fully TensorBoard-native experience
+- improving interpretability of logged metrics (legends, grouping, semantic naming)
+- expanding data-level statistics logging
+- README is still a living paper-style scaffold
+- bibliography and related-work sections incomplete
+- AZT1D-oriented pipeline
 
-Who this README currently serves best:
+Who this README serves best:
 
-- teammates trying to understand the project and extend the codebase
-- collaborators turning the repo into a paper-backed research artifact
-- new contributors who need one document that connects code, docs, and
-  provenance
+- contributors extending observability/reporting
+- collaborators converting repo into research artifact
+- developers improving interpretability and diagnostics
+
 
 ## Environment Requirements
 
@@ -174,19 +176,21 @@ TODO for final paper version:
 
 At the repository level, the current project contributes:
 
-- a fused TCN + TFT forecasting architecture with quantile outputs
-- a typed configuration layer for data, model, runtime, and observability
-- a Lightning-oriented training wrapper and workflow surface
-- a structured evaluation package separate from observability/reporting
-- runtime-environment profiles, diagnostics, and backend-tuning helpers
-- static dependency graphs that document the current code architecture
-- subsystem-aligned tests across config, data, models, training, evaluation,
-  observability, environment behavior, and workflows
+- fused TCN + TFT probabilistic forecasting architecture with quantile outputs
+- typed configuration layer
+- Lightning-based training workflow
+- structured evaluation system
+- observability system (TensorBoard, diagnostics, tracing)
+- modular reporting system (`src/reporting/`)
+- prediction-level exports (row + aggregated)
+- runtime-aware execution profiles
+- dependency graph documentation
+- subsystem-aligned tests
 
-TODO for final paper version:
-- convert this section into paper-style contribution bullets
-- separate scientific contributions from software-engineering contributions
-- remove any claim that is not supported by experiments or citations
+TODO for final paper:
+- formalize contributions
+- separate scientific vs engineering
+
 
 ## Current Source Map
 
@@ -420,6 +424,36 @@ Important instruction for later:
   dataset source or its official documentation
 - if dataset terms are uncertain, say so explicitly instead of guessing
 
+## Observability And Reporting Architecture
+
+The repository separates:
+
+- evaluation → compute metrics
+- reporting → structure outputs
+- observability → logging and visualization
+
+### Reporting Layer (`src/reporting/`)
+
+- report_tables.py
+- prediction_rows.py
+- plotly_reports.py
+- builders.py
+- tensorboard.py
+
+### Observability Layer (`src/observability/`)
+
+- TensorBoard logging
+- runtime diagnostics
+- model visualization
+- environment-aware logging
+
+### Design Direction
+
+- unify outputs into TensorBoard
+- enable drill-down views
+- ensure reproducibility and traceability
+
+
 ## Model Overview
 
 The current forecasting model is a late-fusion hybrid:
@@ -543,33 +577,32 @@ python main.py --device-profile auto --run-benchmark-only --benchmark-train-batc
 
 ### Expected Outputs
 
-Depending on the run mode and observability settings, the workflow can produce:
+Core artifacts:
 
-- `run_summary.json`
-- checkpoint files under the configured checkpoint directory
-- `test_predictions.pt`
-- `test_predictions.csv`
+- run_summary.json
+- checkpoints
+- test_predictions.pt / .csv
+
+Structured outputs:
+
+- per-horizon metrics
+- aggregated summaries
+- prediction rows
+
+Visualization outputs:
+
 - Plotly HTML reports
-- `benchmark_summary.json` for benchmark-only runs
+- TensorBoard dashboards
 
-The default top-level output directory is `artifacts/main_run/`.
+Default directory:
 
-### Reproducibility Notes
+artifacts/main_run/
 
-What the current codebase already supports:
+Direction:
 
-- shared defaults for script and notebook paths
-- typed config serialization
-- runtime-environment detection and device profiles
-- structured held-out evaluation helpers
-- artifact output directories for reports, predictions, and checkpoints
-- generated static architecture graphs
+- move toward TensorBoard-native reporting
+- enable hierarchical drill-down
 
-TODO for final paper version:
-- document exact experiment seeds
-- document full hyperparameter table
-- document hardware/software environment for headline runs
-- add a clean experiment registry or results table linked to artifacts
 
 ## Experimental Setup Placeholder
 
@@ -609,32 +642,140 @@ Instruction for later:
 - state clearly whether lower or higher is better
 - avoid mixing validation-selection metrics with final test-report metrics
 
-## Outputs And Artifacts Placeholder
+## Run Artifacts and Reporting
 
-Use this section later to show what a successful run produces on disk and how
-those files should be interpreted.
+Each training run now writes a set of artifacts meant to make the workflow easier to inspect, debug, and reuse in reporting. The point is not just to train a model and hope for the best. It is to leave behind a clean record of what data was used, what happened during the run, and what results came out of it.
 
-Suggested fill-in checklist:
+By default, run outputs are written under:
 
-- example artifact directory tree
-- what `run_summary.json` contains
-- when `test_predictions.pt` is produced
-- when `test_predictions.csv` is produced
-- when Plotly HTML reports are produced
-- where checkpoints are stored
-- when `benchmark_summary.json` appears
-
-Suggested future snippet:
-
-```text
 artifacts/main_run/
-  TODO: add real example tree from a representative run
-```
 
-Instruction for later:
-- use one real successful run as the example
-- keep filenames and paths aligned with the actual current workflow rather than
-  a hypothetical layout
+Depending on the observability settings, that folder may contain logs, summaries, prediction exports, grouped metric tables, and generated visual reports.
+
+Core run artifacts
+run_summary.json
+
+This is the main high-level summary for a run. It captures the overall run setup and points to the major artifacts that were produced.
+
+It includes things like:
+
+resolved runtime configuration
+optimizer settings
+device profile information
+fit and evaluation details
+paths to prediction exports and report files
+
+If someone wants the quickest overview of a run, this is the best file to open first.
+
+data_summary.json
+
+This file captures dataset-level observability information. It is written early in the workflow so that even if training fails later, the run still leaves behind a clear record of what data it was built on.
+
+This summary is meant to help answer questions like:
+
+what data did the run actually use
+how large was the dataset
+what did the split or descriptive footprint look like
+
+This is especially useful when writing the report because it gives a cleaner way to describe the dataset and preprocessing context.
+
+metrics_summary.json
+
+This is the compact evaluation summary artifact. Its job is simple. It should tell you how the run performed without forcing you to dig through the full run summary or raw logs.
+
+It includes:
+
+the checkpoint used for evaluation
+scalar test metrics
+structured evaluation output
+links to related prediction and report artifacts
+
+This is the file you want for headline results.
+
+Grouped evaluation tables
+
+When grouped evaluation results are available, the workflow exports them as flat CSV tables. These are much easier to inspect, plot, and reuse in the report than nested JSON alone.
+
+These can include:
+
+metrics_by_horizon.csv
+metrics_by_subject.csv
+metrics_by_glucose_range.csv
+
+These tables matter because they move the analysis beyond one average number. They let us look at how performance changes across:
+
+different forecast horizons
+different subjects
+different glucose regimes
+
+That is much more useful for reporting than only quoting one overall metric.
+
+report_index.json
+
+This is the artifact map for the run. It points to the main files produced during execution so that someone opening the folder does not have to guess where things live.
+
+It links out to:
+
+run_summary.json
+data_summary.json
+metrics_summary.json
+grouped evaluation tables
+prediction artifacts
+generated report files
+logging outputs
+
+If you are opening a run folder for the first time, this is the cleanest place to start.
+
+Prediction and visualization artifacts
+Prediction tensor export
+
+If enabled, the workflow saves raw prediction tensors so downstream analysis can still access direct model outputs instead of only reduced summaries.
+
+Typical file:
+
+test_predictions.pt
+
+This is more useful for debugging and custom analysis than for reporting directly.
+
+Prediction table export
+
+If enabled, predictions are also flattened into a tabular export. This makes it much easier to build plots, inspect examples, and reuse results in reporting.
+
+This artifact is useful for:
+
+forecast plots
+residual analysis
+subject-level examples
+report figures
+Plotly reports
+
+If enabled, the workflow generates Plotly-based reports from the prediction table. These are meant to support quick visual inspection and later reuse in the final writeup.
+
+To keep the reporting path robust, Plotly reports are only generated when the prediction table exists.
+
+Logs
+run.log
+
+This is the plain-text run log. It helps track what happened during execution and where the run may have slowed down or failed.
+
+logs/
+
+This directory may contain additional logger outputs depending on the observability configuration.
+
+In general, the log files are most useful for debugging, while the JSON and CSV artifacts are better for reporting.
+
+How to Read the Results
+
+A good way to inspect a completed run is:
+
+Open report_index.json to see the full artifact map.
+Open run_summary.json for the high-level run overview.
+Open data_summary.json to understand the dataset used in the run.
+Open metrics_summary.json for the main evaluation results.
+Use the grouped evaluation CSVs to look at performance by horizon, subject, or glucose range.
+Use the prediction table and visual reports for examples and final figures.
+
+This makes the workflow easier to debug during development and much easier to reuse when writing the final report.
 
 ## Results Placeholder
 

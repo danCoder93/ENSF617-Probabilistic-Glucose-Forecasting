@@ -11,14 +11,15 @@ this shape, read [`codebase_evolution.md`](codebase_evolution.md).
 
 The repository is a research-oriented probabilistic glucose forecasting system
 built around a fused TCN + TFT architecture, a Lightning-oriented training
-runtime, structured held-out evaluation, and a richer observability surface for
-inspection and debugging.
+runtime, structured held-out evaluation, a dedicated post-run reporting layer,
+and a richer observability surface for inspection and debugging.
 
-At a high level, the system is trying to do four things well:
+At a high level, the system is trying to do five things well:
 
 - prepare AZT1D data into a stable model-facing contract
 - train a probabilistic hybrid forecasting model with clear runtime ownership
-- generate structured evaluation outputs rather than only scalar test metrics
+- compute structured held-out evaluation rather than only scalar test metrics
+- package post-run results into one canonical shared-report surface
 - leave behind enough logs and artifacts that a run can be understood later
 
 ## Repository Map
@@ -29,8 +30,11 @@ A simplified view of the repository today looks like this:
 defaults.py
 main.py
 main.ipynb
+scripts/
+  generate_dependency_graphs.py
 docs/
   assets/
+  dependency_graphs/
   history/
   codebase_evolution.md
   current_architecture.md
@@ -41,9 +45,10 @@ src/
   evaluation/
   models/
   observability/
+  reporting/
+  workflows/
   train.py
   utils/
-  workflows/
 tests/
   config/
   data/
@@ -52,6 +57,7 @@ tests/
   manual/
   models/
   observability/
+  reporting/
   training/
   workflows/
 ```
@@ -60,8 +66,8 @@ Each of those areas exists for a specific reason.
 
 ## Visual Guide To The Repository
 
-This document now includes both the hand-authored model diagrams already stored
-under `docs/assets/` and the generated static dependency graphs under
+This document includes both the hand-authored model diagrams stored under
+`docs/assets/` and the generated static dependency graphs under
 `docs/dependency_graphs/`. Together they answer two different questions:
 
 - what the forecasting system is trying to model and predict
@@ -96,8 +102,8 @@ and horizon-aligned quantile outputs.
 
 How to use it while reading the code:
 keep this mental model in mind when reading `src/data/`, `src/models/tcn.py`,
-`src/models/tft.py`, and the evaluation package, because those areas are built
-around sequence structure rather than isolated rows.
+`src/models/tft.py`, and the evaluation and reporting packages, because those
+areas are built around sequence structure rather than isolated rows.
 
 ### High-Level Package Boundaries: What Major Areas Exist
 
@@ -109,7 +115,7 @@ the top-level package dependency map for the repository's internal Python code.
 What it is doing:
 it shows how the stable entry surfaces (`main`, `defaults`) connect to the main
 subsystems (`config`, `data`, `environment`, `evaluation`, `models`,
-`observability`, `workflows`, and `train`).
+`observability`, `reporting`, `workflows`, and `train`).
 
 Why it matters:
 this is the fastest way to understand the current architectural boundary lines
@@ -128,7 +134,7 @@ the static dependency view centered on the user-facing entry surfaces.
 
 What it is doing:
 it shows how `main.py` and `defaults.py` reach into the workflow, config,
-training, and runtime-environment layers.
+training, environment, reporting, and runtime-observability layers.
 
 Why it matters:
 the repository deliberately keeps the root entrypoints thin, so this diagram
@@ -153,7 +159,8 @@ modules under `src/`.
 Why it matters:
 this is the most detailed static picture of how the current implementation is
 wired together, including architectural hubs such as `workflows.training`,
-`data.datamodule`, `train`, and `models.fused_model`.
+`data.datamodule`, `train`, `models.fused_model`, and the newer
+`reporting` package.
 
 Purpose:
 use this graph for impact analysis, refactor planning, and identifying highly
@@ -311,7 +318,7 @@ Look at:
 - `tests/config/`
 - `tests/workflows/`
 
-### If you are working on observability, exports, or reports
+### If you are working on live observability during training or evaluation
 
 Look at:
 
@@ -322,8 +329,22 @@ Look at:
 - `src/observability/system_callbacks.py`
 - `src/observability/parameter_callbacks.py`
 - `src/observability/prediction_callbacks.py`
-- `src/observability/reporting.py`
 - `tests/observability/`
+
+### If you are working on post-run reporting, exports, or report sinks
+
+Look at:
+
+- `src/reporting/types.py`
+- `src/reporting/builders.py`
+- `src/reporting/prediction_rows.py`
+- `src/reporting/report_tables.py`
+- `src/reporting/report_text.py`
+- `src/reporting/exports.py`
+- `src/reporting/structured_exports.py`
+- `src/reporting/tensorboard.py`
+- `src/reporting/plotly_reports.py`
+- `tests/reporting/`
 
 ### If you are working on canonical metric computation
 
@@ -340,11 +361,14 @@ Look at:
 The current architecture is built around a few stable principles:
 
 - semantic data contracts are preferred over raw positional tensors
-- model behavior, data lifecycle, runtime orchestration, evaluation, and
-  observability are separate concerns
+- model behavior, data lifecycle, runtime orchestration, evaluation,
+  observability, and reporting are separate concerns
 - runtime policy is expressed through typed config objects plus an explicit
   environment-aware resolution layer
 - root-level entrypoints should stay thin and user-facing
+- evaluation computes metric truth once, then reporting packages and renders it
+- post-run sinks should consume canonical shared-report surfaces rather than
+  quietly rebuilding their own metric logic
 - documentation should explain intent and boundaries, not only APIs
 
 The generated dependency graphs are a lightweight way to validate whether the
@@ -358,8 +382,8 @@ The normal run path through the repository is:
    snapshots, and observability.
 2. `main.py` or `main.ipynb` parses user-supplied overrides and converts them
    into typed config objects plus entry-surface runtime options.
-   Under the hood, the heavier orchestration now lives in `src/workflows/`,
-   while `main.py` remains the stable user-facing facade.
+   Under the hood, the heavier orchestration lives in `src/workflows/`, while
+   `main.py` remains the stable user-facing facade.
 3. `src/environment/` detects the current runtime context and resolves the
    requested device profile into effective runtime defaults.
 4. `src/environment/diagnostics.py` runs preflight validation so likely
@@ -376,15 +400,24 @@ The normal run path through the repository is:
    sequence-aligned feature details, then binds them into a new runtime config.
 10. `FusedModelTrainer` builds `FusedModel` from that runtime-bound config.
 11. `FusedModelTrainer` assembles callbacks, loggers, checkpoint policy, and the
-   Lightning `Trainer`.
+    Lightning `Trainer`.
 12. Lightning executes `fit(...)`.
 13. If test windows exist, the wrapper can run `test(...)` and `predict(...)`
     against the resolved checkpoint or the current in-memory weights.
 14. `src/workflows/training.py` uses raw predictions plus aligned test batches
     to compute structured held-out evaluation through `src/evaluation/`.
-15. `src/observability/` exports prediction tables, reports, and runtime
-    artifacts.
-16. `src/workflows/training.py` writes a compact `run_summary.json`
+15. `src/reporting/builders.py` packages raw predictions and grouped evaluation
+    into one canonical `SharedReport`.
+16. `src/workflows/training.py` can also ask the DataModule for a best-effort
+    dataset summary and export that summary as `data_summary.json`.
+17. `src/reporting/tensorboard.py` can mirror the shared report into
+    TensorBoard-compatible logger backends as a post-run dashboard sink.
+18. `src/reporting/exports.py`,
+    `src/reporting/structured_exports.py`, and
+    `src/reporting/plotly_reports.py`
+    can write CSV, JSON, and HTML report artifacts from the same post-run
+    surfaces.
+19. `src/workflows/training.py` writes a compact `run_summary.json`
     describing the run, including resolved runtime-environment metadata.
 
 That same underlying workflow is shared by the notebook path. `main.ipynb`
@@ -410,8 +443,9 @@ The most important end-to-end data flow in the repository is:
 6. `src/data/dataset.py` turns each index entry into one structured sample
 7. `AZT1DDataModule` wraps those datasets in train/validation/test dataloaders
 8. batches flow into `FusedModel` through the grouped batch contract
-9. predictions and aligned test batches later flow into `src/evaluation/` and
-   `src/observability/reporting.py`
+9. predictions and aligned test batches later flow into `src/evaluation/`
+10. grouped evaluation plus row-level prediction outputs flow into
+    `src/reporting/`
 
 The important architectural point is that the data is progressively made more
 structured as it moves through the system. The repo does not jump directly from
@@ -451,7 +485,7 @@ It expresses the intended run setup:
 - snapshot policy
 - observability policy
 
-For the AZT1D data defaults specifically, the code now treats only the public
+For the AZT1D data defaults specifically, the code treats only the public
 dataset location and the 5-minute sampling cadence as dataset-derived
 assumptions. Sequence lengths, split ratios, split mode, and window stride are
 kept as repository baseline experiment policy.
@@ -518,7 +552,8 @@ It is intentionally not the place where:
 - model internals live
 - evaluation metrics are defined
 - callback implementations are written
-- the heavier train/evaluate/predict orchestration now lives
+- post-run reporting sinks are implemented
+- the heavier train/evaluate/predict orchestration lives
 
 That separation is what keeps the script readable even as the rest of the
 system grows.
@@ -531,7 +566,7 @@ by exposing helpers that cover:
 - running preflight diagnostics before training
 - recording environment metadata in `run_summary.json`
 
-In implementation terms, that responsibility is now split across:
+In implementation terms, that responsibility is split across:
 
 - `src/workflows/cli.py`
   argument parsing, CLI config assembly, and terminal-oriented output
@@ -542,7 +577,7 @@ In implementation terms, that responsibility is now split across:
 - `src/workflows/types.py`
   stable workflow artifact dataclasses
 
-The benchmark-only workflow also now lives in `src/workflows/training.py`. It
+The benchmark-only workflow also lives in `src/workflows/training.py`. It
 focuses on environment comparison rather than full held-out evaluation while
 preserving the same runtime resolution and tuning path.
 It also owns the CUDA synchronization boundaries used to keep benchmark timing
@@ -554,14 +589,9 @@ The notebook is a convenience surface for interactive work, not a second
 architecture. It exists so teammates can explore or debug runs interactively
 without having to fork the actual pipeline into notebook-only logic.
 
-It now mirrors the same environment-aware workflow as `main.py`, including
+It mirrors the same environment-aware workflow as `main.py`, including
 profile resolution and preflight diagnostics, while exposing those controls as
 editable notebook variables instead of CLI flags.
-
-One recent follow-up also updated the notebook comments and config-building
-cell so they describe the same facade-versus-implementation split as the rest
-of the repository and include the early Apple Silicon bootstrap step used by
-the shared workflow path.
 
 ## Configuration Layer: `src/config/`
 
@@ -663,7 +693,7 @@ environment-aware runtime logic explicit and reusable.
 
 ### Runtime tuning follow-up
 
-The environment layer now also contains a narrower "last-mile tuning" step.
+The environment layer also contains a narrower "last-mile tuning" step.
 
 That step exists because profile selection alone is not enough. Once a profile
 chooses a policy, something still has to apply:
@@ -893,7 +923,8 @@ Its main public surface is `FusedModelTrainer`.
 - data preprocessing internals
 - model forward math
 - metric definitions
-- report generation internals
+- post-run report building
+- report sink rendering
 
 ### Callback and checkpoint policy
 
@@ -905,6 +936,38 @@ The wrapper uses validation presence to decide how to build checkpoints:
 This is an important detail because the repo does not pretend a meaningful
 `"best"` checkpoint exists when no validation signal exists to rank snapshots.
 
+## Workflow Layer: `src/workflows/`
+
+The workflow layer sits above `src/train.py` and below the thin root entry
+surfaces.
+
+### Main modules
+
+- `cli.py`
+  argument parsing, CLI-oriented config assembly, and terminal-facing helpers
+- `training.py`
+  shared train/evaluate/predict workflow, benchmark workflow, summary writing,
+  post-run reporting handoff, and environment-aware orchestration
+- `helpers.py`
+  smaller parsing, normalization, and serialization helpers
+- `types.py`
+  stable artifact/result dataclasses used across workflows
+
+### Why this package matters
+
+This is the first layer in the repository that can simultaneously see:
+
+- resolved runtime-environment policy
+- fit artifacts
+- optional test metrics
+- optional prediction tensors
+- grouped evaluation outputs
+- reporting/export sinks
+- final artifact paths
+
+That is why post-run packaging and sink orchestration live here rather than in
+callbacks, in the model, or inside `main.py`.
+
 ## Runtime Artifact Flow
 
 The runtime artifact flow is:
@@ -913,12 +976,16 @@ The runtime artifact flow is:
 2. `defaults.py` derives default artifact paths under that directory
 3. `src/observability/runtime.py` assembles logger/profiler/text-log objects
 4. Lightning callbacks emit run-time diagnostics during training
-5. `src/workflows/training.py` optionally saves raw prediction tensors after
-   prediction
-6. `src/observability/reporting.py` optionally exports a flat prediction CSV
-7. `src/observability/reporting.py` optionally generates Plotly HTML reports
-8. `src/workflows/training.py` writes `run_summary.json` with config,
-   environment, evaluation, and artifact metadata
+5. `src/workflows/training.py` can save raw prediction tensors after prediction
+6. `src/reporting/exports.py` can export a flat prediction CSV
+7. `src/reporting/structured_exports.py` can export a mixed CSV/JSON
+   `shared_report` bundle
+8. `src/reporting/plotly_reports.py` can generate Plotly HTML reports
+9. `src/workflows/training.py` can export `data_summary.json`
+10. `src/workflows/training.py` writes `run_summary.json` with config,
+    environment, evaluation, and artifact metadata
+11. post-run reporting and evaluation outputs may be appended or referenced back into
+    `run_summary.json` for a consolidated view of the run
 
 This matters because not all artifacts are produced at the same lifecycle
 stage. Some exist during training, while others exist only after prediction has
@@ -936,7 +1003,8 @@ part of the current runtime contract.
 
 ## Observability Layer: `src/observability/`
 
-Observability is a dedicated subsystem rather than a side effect of training.
+Observability is a dedicated live-run subsystem rather than a generic dumping
+ground for all downstream artifacts.
 
 ### Main modules
 
@@ -951,13 +1019,11 @@ Observability is a dedicated subsystem rather than a side effect of training.
 - `parameter_callbacks.py`
   parameter scalar and histogram logging
 - `prediction_callbacks.py`
-  qualitative forecast-figure logging
+  qualitative forecast-figure logging during runtime
 - `logging_utils.py`
   shared logger-aware helpers
 - `tensors.py`
   normalization helpers for nested batch/tensor structures
-- `reporting.py`
-  prediction table export and Plotly report generation
 - `utils.py`
   small utility helpers
 - `__init__.py`
@@ -972,10 +1038,8 @@ Observability includes:
 - optional profiler setup
 - callback-driven telemetry
 - parameter and gradient monitoring
-- prediction figure generation
+- prediction figure generation during the run
 - graph/model visualization support
-- prediction-table export
-- Plotly HTML report generation
 
 ### Observability policy is runtime policy
 
@@ -993,6 +1057,67 @@ The observability stack is designed to degrade gracefully where possible:
 - CSV logger can act as fallback
 - optional extras improve the run rather than defining whether the whole system
   is conceptually valid
+
+## Reporting Layer: `src/reporting/`
+
+Reporting is now a distinct post-run subsystem rather than an extension of live
+observability.
+
+### Main modules
+
+- `types.py`
+  canonical in-memory reporting contracts such as `SharedReport`
+- `builders.py`
+  construction of the shared-report surface from predictions and evaluation
+- `prediction_rows.py`
+  row-level prediction-table assembly
+- `report_tables.py`
+  grouped-table shaping and scalar extraction helpers
+- `report_text.py`
+  compact narrative text packaging
+- `exports.py`
+  CSV-oriented export helpers
+- `structured_exports.py`
+  mixed CSV/JSON shared-report artifact bundle export
+- `tensorboard.py`
+  post-run TensorBoard sink for the canonical shared report
+- `plotly_reports.py`
+  lightweight HTML/Plotly presentation sink
+- `__init__.py`
+  stable package-level reporting facade
+
+### What reporting means in this repo
+
+Reporting includes:
+
+- packaging raw predictions and grouped evaluation into one canonical
+  `SharedReport`
+- exporting the flat prediction table and grouped tables
+- emitting structured JSON summaries from the same packaged report
+- rendering lightweight post-run HTML reports
+- mirroring that same packaged report into TensorBoard as a post-run dashboard
+
+### Why reporting is separate from observability
+
+The distinction is intentional:
+
+- observability is about visibility during training and evaluation
+- reporting is about packaging and rendering what is known after predictions and
+  grouped evaluation already exist
+
+That split keeps runtime callback logic from becoming a second report builder,
+and it keeps post-run sinks from redefining live logging behavior.
+
+### Canonical packaging rule
+
+The intended reporting contract is:
+
+- `evaluation` computes the metric truth
+- `reporting.builders` packages that truth once
+- export and visualization sinks consume the same shared-report surface
+
+That rule is important because it reduces the chance that CSV, TensorBoard,
+Plotly, and structured JSON outputs silently drift apart.
 
 ## Evaluation Layer: `src/evaluation/`
 
@@ -1012,13 +1137,14 @@ The evaluation package owns structured model-quality analysis.
 - `evaluator.py`
   end-to-end evaluation assembly
 
-### Why it is separate from observability
+### Why it is separate from observability and reporting
 
 The distinction is intentional:
 
 - observability is about what happened during the run and what artifacts help a
   human inspect it
 - evaluation is about the canonical computation of model-quality metrics
+- reporting is about packaging and rendering those already-computed results
 
 This keeps metric logic from being duplicated across the model, the reporting
 layer, and top-level scripts.
@@ -1046,12 +1172,26 @@ can emit:
 - `run_summary.json`
   compact machine-readable summary of config, runtime, evaluation, and artifact
   locations
+- `report_index.json`
+  lightweight index of report artifacts and entry points into structured outputs
 - `test_predictions.pt`
   raw prediction tensors
 - `test_predictions.csv`
   flat exported prediction table
 - `reports/`
-  Plotly HTML reports
+  Plotly HTML reports and `data_summary.json`
+- `reports/artifacts/shared_report/`
+  mixed CSV/JSON structured export bundle, including:
+  - `manifest.json`
+  - `scalars.json`
+  - `text.json`
+  - `metadata.json`
+  - `metrics_summary.json`
+  - `tables/prediction_table.csv`
+  - `tables/by_horizon.csv`
+  - `tables/by_subject.csv`
+  - `tables/by_glucose_range.csv`
+  - `data/data_summary.json` when available
 - `checkpoints/`
   model checkpoints
 - `logs/`
@@ -1065,11 +1205,13 @@ can emit:
 - `model_viz/`
   torchview/model-visualization artifacts when enabled
 
-The artifact strategy is intentionally additive:
+The artifact strategy is intentionally layered:
 
 - raw tensors are preserved for flexible downstream analysis
 - flat exports exist for easy plotting and tabular inspection
-- structured evaluation is embedded in the run summary
+- structured JSON and grouped CSV exports come from the same shared-report
+  package
+- HTML and TensorBoard sinks consume that same post-run package
 - logs and telemetry capture runtime context around the same run
 
 ### Why the artifact strategy is layered
@@ -1079,7 +1221,7 @@ Different consumers need different artifact shapes:
 - PyTorch users may want raw tensors
 - analysts may want CSVs
 - teammates may want HTML reports
-- automation may want JSON summaries
+- automation may want JSON summaries and manifests
 - debugging sessions may need text logs and telemetry
 
 The repo supports all of those without forcing one representation to replace
@@ -1098,12 +1240,13 @@ It covers:
 - entrypoint behavior
 - evaluation package behavior
 - observability package behavior
+- reporting builders and sinks
 
 This matters because the repo is now a system, not just a model file.
 
 ## Documentation Layer
 
-The documentation structure under `docs/` now has three roles:
+The documentation structure under `docs/` now has four roles (expanded to reflect current usage):
 
 - `current_architecture.md`
   current-system reference
@@ -1111,12 +1254,15 @@ The documentation structure under `docs/` now has three roles:
   historical narrative
 - `history/`
   archived milestone notes written during specific refactors
+- `dependency_graphs/`
+  generated static architectural views of the current codebase
 
 The diagrams under `docs/assets/` support the model-side architecture story
 without mixing binary assets into the source package.
 
-The newest test-layout and runtime-modernization milestone is documented in
-[`history/test_layout_and_runtime_modernization_summary.md`](history/test_layout_and_runtime_modernization_summary.md).
+The dependency graphs are generated from `scripts/generate_dependency_graphs.py`
+so the documentation layer now has both hand-authored and generated
+architecture views.
 
 ## How To Extend The Codebase Safely
 
@@ -1178,14 +1324,25 @@ Usually touch:
 - `src/evaluation/evaluator.py`
 - `tests/evaluation/`
 
-### Add a new export or report
+### Add a new post-run export or report sink
 
 Usually touch:
 
-- `src/config/observability.py`
-- `src/observability/reporting.py`
+- `src/reporting/builders.py` only if the canonical shared-report surface
+  itself needs to change
+- `src/reporting/exports.py`
+- `src/reporting/structured_exports.py`
+- `src/reporting/tensorboard.py`
+- `src/reporting/plotly_reports.py`
 - maybe `src/workflows/training.py`
-- `tests/observability/`
+- `tests/reporting/`
+
+### Add a new live callback or runtime diagnostic
+
+Usually touch:
+
+- `src/observability/callbacks.py`
+- then the relevant split callback module under `src/observability/`
 
 ## Common Modification Guide
 
@@ -1198,7 +1355,7 @@ For common team tasks, here is where to start:
 - "I want to add a new device profile or preflight diagnostic"
   Start in `src/environment/`
 - "I want to change how test predictions are saved"
-  Start in `src/workflows/training.py` and `src/observability/reporting.py`
+  Start in `src/workflows/training.py` and `src/reporting/exports.py`
 - "I want to change the grouped batch contract"
   Start in `src/data/dataset.py`, `src/data/datamodule.py`, and
   `src/models/fused_model.py`
@@ -1206,10 +1363,11 @@ For common team tasks, here is where to start:
   Start in `src/config/runtime.py`, `defaults.py`, and `src/train.py`
 - "I want to add a new evaluation view"
   Start in `src/evaluation/`
-- "I want to add a new callback or runtime diagnostic"
+- "I want to change post-run shared-report packaging"
+  Start in `src/reporting/builders.py`, `src/reporting/report_tables.py`, and
+  `src/reporting/report_text.py`
+- "I want to add a new callback or live runtime diagnostic"
   Start in `src/observability/callbacks.py`
-  Then move into the relevant split callback module if the change is callback-
-  specific
 
 ## Boundaries That Should Stay Stable
 
@@ -1223,7 +1381,9 @@ a clear reason to change them:
 - `FusedModelTrainer` owns Lightning orchestration, not model math
 - `main.py` stays thin and user-facing
 - `src/workflows/` owns the reusable entry-surface orchestration logic
-- observability and evaluation remain separate subsystems
+- `evaluation` computes canonical metric truth
+- `reporting` packages and renders post-run artifacts from that truth
+- `observability` and `reporting` remain separate subsystems
 - typed config remains the canonical runtime contract
 
 ## Intentional Limitations And Current Constraints
@@ -1238,6 +1398,9 @@ A few current constraints are important to understand:
   gracefully in minimal environments
 - fallback feature-spec synthesis still exists while the repo transitions
   toward `config.data.features` as the single source of truth
+- the workflow's best-effort dataset summary export is present, but it is still
+  an additive side artifact rather than a first-class required input to every
+  reporting sink
 
 These are not hidden bugs in the documentation. They are part of the current
 shape of the codebase.
@@ -1251,12 +1414,15 @@ The current architecture assumes:
 - runtime binding of TFT categorical metadata
 - a Lightning-centered training workflow
 - prediction-driven detailed evaluation
+- post-run reporting built around a canonical shared-report package
 
 The current codebase also still carries a few transitional assumptions:
 
 - fallback feature-spec synthesis still exists alongside explicit feature specs
 - evaluation-only wrapper flows are not fully standalone yet
 - some observability features remain optional and environment-dependent
+- reporting is now structurally separated, but some callers and historical docs
+  may still think in terms of the older `observability` export path
 
 These assumptions should be revisited deliberately if the repository grows into
 multi-dataset support, alternative entry surfaces, or richer deployment-style
@@ -1270,3 +1436,5 @@ For a teammate new to the repository, the best reading order is:
 2. [`codebase_evolution.md`](codebase_evolution.md) for the historical why
 3. the relevant milestone note in [`history/`](history/) for subsystem-specific
    depth
+4. the generated graphs under [`dependency_graphs/`](dependency_graphs/) for a
+   current static map of the codebase

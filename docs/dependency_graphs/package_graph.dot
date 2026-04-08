@@ -13,6 +13,7 @@ digraph dependencies {
   "main" [label="main", shape="box", style="filled,rounded", fillcolor="#f4d35e", color="#7f6000"];
   "models" [label="models", shape="folder", style="filled", fillcolor="#d9eaf4", color="#0b3954"];
   "observability" [label="observability", shape="folder", style="filled", fillcolor="#d9eaf4", color="#0b3954"];
+  "reporting" [label="reporting", shape="folder", style="filled", fillcolor="#d9eaf4", color="#0b3954"];
   "train" [label="train", shape="folder", style="filled", fillcolor="#d9eaf4", color="#0b3954"];
   "utils" [label="utils", shape="folder", style="filled", fillcolor="#d9eaf4", color="#0b3954"];
   "workflows" [label="workflows", shape="folder", style="filled", fillcolor="#d9eaf4", color="#0b3954"];
@@ -25,8 +26,12 @@ digraph dependencies {
   "main" -> "workflows" [color="#7d8597", style="solid"];
   "models" -> "config" [color="#7d8597", style="solid"];
   "models" -> "evaluation" [color="#7d8597", style="solid"];
+  "models" -> "observability" [color="#7d8597", style="solid"];
   "observability" -> "config" [color="#7d8597", style="solid"];
-  "observability" -> "evaluation" [color="#7d8597", style="solid"];
+  "observability" -> "reporting" [color="#7d8597", style="solid"];
+  "reporting" -> "config" [color="#7d8597", style="solid"];
+  "reporting" -> "evaluation" [color="#7d8597", style="solid"];
+  "reporting" -> "observability" [color="#7d8597", style="solid"];
   "train" -> "config" [color="#7d8597", style="solid"];
   "train" -> "data" [color="#7d8597", style="solid"];
   "train" -> "environment" [color="#7d8597", style="solid"];
@@ -37,6 +42,6 @@ digraph dependencies {
   "workflows" -> "defaults" [color="#7d8597", style="solid"];
   "workflows" -> "environment" [color="#7d8597", style="solid"];
   "workflows" -> "evaluation" [color="#7d8597", style="solid"];
-  "workflows" -> "observability" [color="#7d8597", style="solid"];
+  "workflows" -> "reporting" [color="#7d8597", style="solid"];
   "workflows" -> "train" [color="#7d8597", style="solid"];
 }

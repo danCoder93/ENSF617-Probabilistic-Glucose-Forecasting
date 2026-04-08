@@ -42,7 +42,7 @@ from __future__ import annotations
 # The imports below are intentionally explicit rather than wildcard-based so
 # maintainers can answer "what exactly does `from config import ...` promise?"
 # by reading one short file.
-
+from config.types import PathInput
 from config.data import DataConfig
 from config.model import Config, TCNConfig, TFTConfig
 from config.observability import ObservabilityConfig
@@ -75,6 +75,7 @@ from config.validation import (
 # aligned with the re-export list makes the public config surface easier to
 # inspect and keeps accidental helper leakage out of auto-complete.
 __all__ = [
+    "PathInput",
     "Config",
     "DataConfig",
     "ObservabilityConfig",

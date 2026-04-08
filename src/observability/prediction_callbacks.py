@@ -1,15 +1,55 @@
 from __future__ import annotations
 
-# AI-assisted maintenance note:
-# This callback focuses on qualitative forecast examples rather than on raw
-# scalar telemetry or parameter-state inspection.
+# =============================================================================
+# Prediction-level observability callbacks for probabilistic forecasting.
 #
-# Why keep it separate:
-# - it depends on matplotlib and figure construction, unlike the lighter
-#   scalar callbacks
-# - its logic is centered on prediction batches and metadata formatting
-# - a dedicated file keeps the heavier plotting path isolated from the rest of
-#   the callback assembly code
+# Why this module exists:
+# This file owns observability that happens *after* the model has already
+# produced forecast tensors. In the current repo design, that means callbacks
+# that inspect prediction outputs from two complementary angles:
+#
+# 1. Qualitative prediction inspection
+#    - representative forecast plots in TensorBoard
+#    - target / prediction / interval visualization
+#    - human-friendly sanity checking of forecast shape and trend behavior
+#
+# 2. Quantitative prediction sanity checking
+#    - quantile crossing rate
+#    - interval width behavior
+#    - non-finite prediction detection
+#    - collapse / near-constant prediction detection
+#    - prediction-vs-target scale comparison
+#
+# Why this file is separate from other observability modules:
+# - debug_callbacks.py focuses on batches, gradients, and activations
+# - parameter_callbacks.py focuses on parameter-state telemetry
+# - system_callbacks.py focuses on graph / system-level instrumentation
+#
+# Prediction-facing observability answers a different question:
+# "Even if training is numerically running, do the actual forecasts themselves
+# look sane?"
+#
+# Design constraints for this module:
+# - keep implementation local and artifact-oriented
+# - avoid changing model architecture or dataset contract
+# - preserve the repo's existing qualitative prediction figures
+# - add numerical sanity diagnostics without removing older behavior
+# - remain reasonably robust while the output contract evolves
+# - rely on Lightning callback/logging surfaces instead of external services
+#
+# Important maintenance rule:
+# New prediction callbacks should complement older ones unless the repo makes
+# a deliberate decision to replace them. In particular:
+#
+# - PredictionFigureCallback remains the qualitative visual surface
+# - PredictionSanityCallback adds scalar diagnostics that complement figures
+#
+# AI-assisted maintenance note:
+# This file has been generated/refined with AI assistance and then adapted to
+# the repository structure. The comments aim to be explicit and maintainable,
+# but maintainers should still review extraction logic and metric semantics
+# against the repo's canonical prediction contract.
+# =============================================================================
 
 from typing import Any, Mapping
 
@@ -23,41 +63,99 @@ from observability.utils import _has_module
 
 
 class PredictionFigureCallback(Callback):
-    """
-    Log a few qualitative forecast examples directly into TensorBoard.
+    """Log a few qualitative forecast examples directly into TensorBoard.
 
     Purpose:
-    push qualitative forecast examples directly into TensorBoard.
+        Push a small number of human-readable forecast plots into TensorBoard
+        so that a run can be inspected visually without opening a separate
+        notebook or report pipeline.
 
-    Context:
-    the callback renders small matplotlib figures comparing targets, median
-    predictions, and prediction intervals for representative validation/test
-    examples. It is intentionally scoped to a handful of examples per epoch so
-    it acts as a monitoring aid rather than a full report generator.
+    What this callback tries to show:
+        - whether the predicted trajectory broadly follows the target
+        - whether the prediction interval is visibly too wide or too narrow
+        - whether forecasts appear shifted, flat, unstable, or otherwise odd
+        - whether qualitative behavior differs between validation and test
+
+    Why this callback still matters even after adding scalar sanity metrics:
+        Scalar metrics are excellent for systematic anomaly detection, but they
+        do not replace human visual judgment. A model can have acceptable
+        scalar diagnostics while still producing forecast shapes that look
+        implausible to a human reviewing representative examples.
+
+    Scope boundary:
+        This callback is intentionally lightweight and sampled. It is *not*
+        designed to produce exhaustive visual reports for every batch.
     """
 
     def __init__(self, config: ObservabilityConfig) -> None:
-        """Initialize the per-stage epoch tracking used to throttle qualitative prediction figures."""
+        """Initialize the callback and its per-stage epoch throttling state.
+
+        Parameters:
+            config:
+                Repository observability configuration that controls whether
+                prediction figures are enabled, how often they are logged, and
+                how many examples are included in each figure set.
+        """
+        super().__init__()
+
+        # Store the central observability config so later decisions come from
+        # the repo's single policy surface rather than callback-local magic
+        # constants.
         self.config = config
+
+        # Validation and test figure logging are throttled independently.
+        # Each set stores epochs that have already emitted a figure for that
+        # stage so that only one sampled batch per eligible epoch is plotted.
         self._logged_validation_epochs: set[int] = set()
         self._logged_test_epochs: set[int] = set()
 
     def _should_log(self, trainer: Any, stage: str) -> bool:
-        """Return whether one prediction figure set should be emitted for this stage and epoch."""
-        # We only log one small figure set per stage per eligible epoch. The
-        # goal is qualitative inspection, not exhaustive visualization of every
-        # batch.
+        """Return whether one prediction figure set should be emitted now.
+
+        Parameters:
+            trainer:
+                Active Lightning trainer. We use it mainly for the current
+                epoch and global logging context.
+
+            stage:
+                Expected to be either ``"val"`` or ``"test"``. This determines
+                which per-stage epoch tracking set is used.
+
+        Returns:
+            ``True`` if the current batch is the first eligible batch for a
+            figure log in this stage/epoch, otherwise ``False``.
+        """
+        # Respect the primary feature gate first. If figures are disabled, the
+        # callback should become a no-op immediately.
         if not self.config.enable_prediction_figures:
             return False
+
+        # Matplotlib is required for figure generation. Guarding it here keeps
+        # environments without plotting dependencies from failing during import
+        # or hook execution.
         if not _has_module("matplotlib"):
             return False
+
+        # Validation and test are throttled separately so each stage can emit
+        # one representative figure set per eligible epoch.
         target_set = (
-            self._logged_validation_epochs if stage == "val" else self._logged_test_epochs
+            self._logged_validation_epochs
+            if stage == "val"
+            else self._logged_test_epochs
         )
+
+        # If a figure was already emitted for this stage in the current epoch,
+        # skip subsequent batches to avoid redundant TensorBoard clutter.
         if trainer.current_epoch in target_set:
             return False
+
+        # Respect configured epoch cadence. For example, a value of 5 means
+        # figure logging occurs on epochs 5, 10, 15, ... in one-based terms.
         if (trainer.current_epoch + 1) % self.config.figure_every_n_epochs != 0:
             return False
+
+        # Record that this stage/epoch has already produced a figure so later
+        # batches in the same epoch do not duplicate the plot set.
         target_set.add(trainer.current_epoch)
         return True
 
@@ -68,51 +166,87 @@ class PredictionFigureCallback(Callback):
         batch: Mapping[str, Any],
         stage: str,
     ) -> None:
-        """
-        Render and publish one small qualitative forecast figure set for the current batch.
+        """Render and publish one small qualitative forecast figure set.
 
-        Context:
-        the callback is intentionally qualitative and sampled. It shows a few
-        representative windows instead of trying to visualize every forecast.
+        Parameters:
+            trainer:
+                Lightning trainer used to access global step and attached
+                TensorBoard experiment handles.
+
+            pl_module:
+                Active Lightning module. The live model is executed so the
+                figure reflects the model's current prediction behavior.
+
+            batch:
+                Current batch mapping. This callback assumes the current repo
+                contract includes ``metadata`` and that the module can derive
+                the target tensor through ``pl_module._target_tensor(batch)``.
+
+            stage:
+                Either ``"val"`` or ``"test"``.
         """
-        # This uses the current model directly on the observed batch so the
-        # figure reflects the live state of the run at that point in training.
+        # Exit immediately unless this batch is the single eligible batch for
+        # figure logging in the current stage/epoch.
         if not self._should_log(trainer, stage):
             return
 
+        # Import matplotlib lazily so runs that never use prediction figures do
+        # not pay the dependency/import cost at module import time.
         import matplotlib.pyplot as plt
 
+        # This callback is observational only. It should not participate in
+        # autograd or retain graph history while producing plots.
         with torch.no_grad():
+            # Run the live model on the current batch. This intentionally shows
+            # what the model predicts *now*, rather than relying on some cached
+            # intermediate from an earlier hook.
             predictions = pl_module(batch).detach().cpu()
-        target = pl_module._target_tensor(batch).detach().cpu()
-        metadata = _as_metadata_lists(batch["metadata"], int(predictions.shape[0]))
-        # We intentionally run the live model on the current batch rather than
-        # reusing some cached predictions because the point of this callback is
-        # to show what the model currently believes at this stage of training.
 
-        max_plots = min(self.config.max_prediction_plots, int(predictions.shape[0]))
+            # Use the module's own helper to obtain targets so the plotting path
+            # stays aligned with the model's canonical target extraction logic.
+            target = pl_module._target_tensor(batch).detach().cpu()
+
+            # Convert metadata into simple per-example lists so titles can
+            # include identifying context such as subject and decoder start.
+            metadata = _as_metadata_lists(
+                batch["metadata"],
+                int(predictions.shape[0]),
+            )
+
+        # Cap the number of plotted examples to keep figures readable and keep
+        # routine local runs lightweight.
+        max_plots = min(
+            self.config.max_prediction_plots,
+            int(predictions.shape[0]),
+        )
+
+        # Create one subplot row per selected example. Scale height so each row
+        # remains readable even when multiple examples are included.
         figure, axes = plt.subplots(
             max_plots,
             1,
             figsize=(10, max(4, 3 * max_plots)),
             squeeze=False,
         )
+
+        # Use the quantile nearest to 0.5 as the representative point forecast.
+        # This works even if the exact median quantile is not explicitly present
+        # but a nearby central quantile is.
         median_index = min(
             range(len(pl_module.quantiles)),
             key=lambda index: abs(float(pl_module.quantiles[index]) - 0.5),
         )
 
         for plot_index in range(max_plots):
+            # Each subplot row contains a single axis because we requested a
+            # column layout. Access the first element explicitly for clarity.
             axis = axes[plot_index][0]
+
+            # Use a simple integer horizon to answer the forecasting question
+            # "what happens over decoder step 0..H-1?"
             horizon = list(range(int(predictions.shape[1])))
-            # Each subplot shows one forecast window:
-            # - black line: ground-truth target trajectory
-            # - blue line: median / representative point forecast
-            # - shaded band: outer prediction interval if multiple quantiles
-            #   exist
-            #
-            # This gives TensorBoard a quick qualitative "does this forecast
-            # look reasonable?" surface alongside the scalar metrics.
+
+            # Plot the ground-truth target as the reference trajectory.
             axis.plot(
                 horizon,
                 target[plot_index].tolist(),
@@ -120,12 +254,18 @@ class PredictionFigureCallback(Callback):
                 color="black",
                 linewidth=2,
             )
+
+            # Plot the median or nearest-to-median quantile as the main point
+            # forecast line.
             axis.plot(
                 horizon,
                 predictions[plot_index, :, median_index].tolist(),
                 label="median prediction",
                 color="tab:blue",
             )
+
+            # If the tensor exposes at least two quantiles, shade the outermost
+            # interval as a quick visual uncertainty band.
             if predictions.shape[-1] >= 2:
                 lower = predictions[plot_index, :, 0].tolist()
                 upper = predictions[plot_index, :, -1].tolist()
@@ -137,14 +277,24 @@ class PredictionFigureCallback(Callback):
                     alpha=0.2,
                     label="prediction interval",
                 )
+
+            # Include a small amount of metadata in the title so a reviewer can
+            # relate the plotted example back to its source subject/window.
             subject_id = str(metadata.get("subject_id", ["unknown"])[plot_index])
             decoder_start = str(metadata.get("decoder_start", [""])[plot_index])
-            axis.set_title(f"{stage} subject={subject_id} decoder_start={decoder_start}")
+
+            axis.set_title(
+                f"{stage} subject={subject_id} decoder_start={decoder_start}"
+            )
             axis.set_xlabel("Horizon Step")
             axis.set_ylabel("Glucose")
             axis.legend(loc="best")
 
+        # Tight layout reduces overlap between labels, titles, and legends.
         figure.tight_layout()
+
+        # Publish the figure to every TensorBoard experiment attached to the
+        # trainer. The helper keeps this callback decoupled from logger internals.
         for experiment in _tensorboard_experiments(trainer):
             add_figure = getattr(experiment, "add_figure", None)
             if callable(add_figure):
@@ -153,6 +303,9 @@ class PredictionFigureCallback(Callback):
                     figure,
                     global_step=trainer.global_step,
                 )
+
+        # Always close the figure to avoid leaking matplotlib state or keeping
+        # unnecessary figure objects alive across repeated callback invocations.
         plt.close(figure)
 
     def on_validation_batch_end(
@@ -164,7 +317,9 @@ class PredictionFigureCallback(Callback):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
-        """Validation hook that emits at most one sampled figure set per eligible epoch."""
+        """Emit at most one sampled validation figure set per eligible epoch."""
+        # These arguments are part of Lightning's callback signature but are
+        # not needed by this callback's current logic.
         del outputs, batch_idx, dataloader_idx
         self._log_prediction_figure(trainer, pl_module, batch, "val")
 
@@ -177,6 +332,465 @@ class PredictionFigureCallback(Callback):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
-        """Test hook that emits at most one sampled figure set per eligible epoch."""
+        """Emit at most one sampled test figure set per eligible epoch."""
         del outputs, batch_idx, dataloader_idx
         self._log_prediction_figure(trainer, pl_module, batch, "test")
+
+
+class PredictionSanityCallback(Callback):
+    """Log compact numerical sanity diagnostics for forecast tensors.
+
+    Purpose:
+        Complement qualitative prediction figures with scalar diagnostics that
+        help answer whether the forecast tensor is numerically and semantically
+        healthy.
+
+    What this callback tries to detect:
+        - quantile crossing, which indicates invalid quantile ordering
+        - near-zero interval widths, which can indicate collapsed uncertainty
+        - very low prediction variance, which can indicate flat forecasts
+        - non-finite values, which indicate a serious numerical failure
+        - strong mismatch between prediction scale and target scale
+
+    Design philosophy:
+        This callback should be lightweight enough for local debug runs and
+        resilient enough to survive minor output-contract changes while the
+        repo is still evolving. For that reason, it uses best-effort extraction
+        rather than requiring one rigid output dict schema.
+    """
+
+    def __init__(
+        self,
+        config: ObservabilityConfig,
+        *,
+        text_logger: Any | None = None,
+    ) -> None:
+        """Initialize the prediction sanity callback.
+
+        Parameters:
+            config:
+                Repository observability config. This is used mainly for
+                logging cadence and to keep the callback aligned with the
+                central repo observability policy surface.
+
+            text_logger:
+                Optional plain-text logger. If provided, the callback can emit
+                human-readable warnings in addition to Lightning scalar logs.
+        """
+        super().__init__()
+
+        self.config = config
+        self.text_logger = text_logger
+
+        # Keep cadence modest so sanity logging remains useful without
+        # overwhelming step-level logs. The current file intentionally uses
+        # `debug_every_n_steps`, which exists in the repo config surface.
+        self._log_every_n_steps = max(
+            1,
+            int(getattr(config, "debug_every_n_steps", 10)),
+        )
+
+        # These thresholds are practical debugging heuristics rather than
+        # universal truths. They are intentionally conservative so the callback
+        # surfaces suspicious behavior without trying to encode a rigid notion
+        # of forecast correctness.
+        self._constant_std_threshold = 1e-6
+        self._near_zero_width_threshold = 1e-6
+        self._crossing_tolerance = 0.0
+
+    def _should_log_now(self, trainer: Any) -> bool:
+        """Return whether the current global step should emit sanity metrics."""
+        global_step = int(getattr(trainer, "global_step", 0))
+        return global_step % self._log_every_n_steps == 0
+
+    def _extract_predictions(
+        self,
+        outputs: Any,
+        batch: Mapping[str, Any],
+        pl_module: Any,
+    ) -> torch.Tensor | None:
+        """Best-effort extraction of the forecast tensor.
+
+        Extraction priority:
+            1. common keys in the step output structure
+            2. common cached attributes on the module
+            3. direct model forward pass on the current batch as fallback
+
+        Why best-effort extraction is used here:
+            During active repo development, the exact structure returned from
+            training/validation/test steps may evolve. A sanity callback should
+            avoid becoming brittle if naming changes slightly.
+        """
+        # First handle mapping-like outputs because Lightning step methods often
+        # return dictionaries containing loss plus extra diagnostic tensors.
+        if isinstance(outputs, Mapping):
+            for key in (
+                "predictions",
+                "prediction",
+                "y_hat",
+                "forecast",
+                "forecasts",
+                "quantiles",
+                "preds",
+            ):
+                value = outputs.get(key)
+                if isinstance(value, torch.Tensor):
+                    return value.detach()
+
+        # Some module implementations cache the latest predictions for later
+        # hooks. Check common attribute names before resorting to a new forward.
+        for attr_name in (
+            "latest_predictions",
+            "_latest_predictions",
+            "predictions",
+            "_predictions",
+        ):
+            value = getattr(pl_module, attr_name, None)
+            if isinstance(value, torch.Tensor):
+                return value.detach()
+
+        # As a final fallback, run the model directly on the batch. This is less
+        # ideal because it repeats the forward pass, but it is still useful when
+        # contracts are in flux and observability should remain best-effort.
+        try:
+            with torch.no_grad():
+                value = pl_module(batch)
+            if isinstance(value, torch.Tensor):
+                return value.detach()
+        except Exception:
+            return None
+
+        return None
+
+    def _extract_target(
+        self,
+        outputs: Any,
+        batch: Mapping[str, Any],
+        pl_module: Any,
+    ) -> torch.Tensor | None:
+        """Best-effort extraction of the target tensor."""
+        # Prefer step outputs first if the training/validation/test step already
+        # surfaced a target tensor explicitly.
+        if isinstance(outputs, Mapping):
+            for key in ("target", "targets", "y", "y_true"):
+                value = outputs.get(key)
+                if isinstance(value, torch.Tensor):
+                    return value.detach()
+
+        # Prefer the module's canonical target extraction helper when present so
+        # target semantics remain aligned with model-side training logic.
+        target_helper = getattr(pl_module, "_target_tensor", None)
+        if callable(target_helper):
+            try:
+                value = target_helper(batch)
+                if isinstance(value, torch.Tensor):
+                    return value.detach()
+            except Exception:
+                pass
+
+        # Fall back to common batch keys used by forecasting pipelines.
+        for key in ("target", "targets", "y", "decoder_target"):
+            value = batch.get(key)
+            if isinstance(value, torch.Tensor):
+                return value.detach()
+
+        return None
+
+    def _as_cpu_float_tensor(
+        self,
+        tensor: torch.Tensor | None,
+    ) -> torch.Tensor | None:
+        """Detach, move to CPU, and cast to float for metric computation."""
+        if tensor is None:
+            return None
+        return tensor.detach().float().cpu()
+
+    def _log_scalar(
+        self,
+        pl_module: Any,
+        name: str,
+        value: float,
+        *,
+        on_step: bool = True,
+    ) -> None:
+        """Safely log one scalar through Lightning's built-in logging surface."""
+        # Skip non-finite metric values so observability itself does not inject
+        # noisy or invalid logger payloads.
+        if not torch.isfinite(torch.tensor(value)):
+            return
+
+        pl_module.log(
+            name,
+            value,
+            on_step=on_step,
+            on_epoch=False,
+            prog_bar=False,
+            logger=True,
+        )
+
+    def _log_warning(self, message: str) -> None:
+        """Emit an optional text warning through the injected text logger."""
+        if self.text_logger is not None:
+            self.text_logger.warning(message)
+
+    def _compute_quantile_crossing_rate(
+        self,
+        predictions: torch.Tensor,
+    ) -> float | None:
+        """Compute the fraction of adjacent quantile pairs that cross.
+
+        Expected prediction shape:
+            [batch, horizon, quantile]
+
+        Interpretation:
+            A value greater than zero means at least some lower quantiles exceed
+            higher quantiles, which violates quantile ordering.
+        """
+        if predictions.ndim < 3 or predictions.shape[-1] < 2:
+            return None
+
+        adjacent_diffs = predictions[..., 1:] - predictions[..., :-1]
+        crossings = adjacent_diffs < self._crossing_tolerance
+        return float(crossings.float().mean().item())
+
+    def _compute_interval_width_stats(
+        self,
+        predictions: torch.Tensor,
+    ) -> tuple[float | None, float | None, float | None]:
+        """Return mean width, width std, and near-zero width rate."""
+        if predictions.ndim < 3 or predictions.shape[-1] < 2:
+            return None, None, None
+
+        widths = predictions[..., -1] - predictions[..., 0]
+        width_mean = float(widths.mean().item())
+        width_std = float(widths.std(unbiased=False).item())
+        near_zero_rate = float(
+            (widths.abs() <= self._near_zero_width_threshold).float().mean().item()
+        )
+        return width_mean, width_std, near_zero_rate
+
+    def _compute_variance_stats(
+        self,
+        predictions: torch.Tensor,
+    ) -> tuple[float, float]:
+        """Return overall variance and horizon-mean variance.
+
+        Overall variance:
+            Variance over all prediction elements.
+
+        Horizon-mean variance:
+            Variance computed across the batch for each horizon/quantile
+            position, then averaged. This is often more interpretable for
+            spotting whether forecasts are becoming too similar across examples.
+        """
+        overall_variance = float(predictions.var(unbiased=False).item())
+
+        if predictions.ndim >= 2:
+            batch_axis = 0
+            horizon_variance = predictions.var(dim=batch_axis, unbiased=False).mean()
+            horizon_mean_variance = float(horizon_variance.item())
+        else:
+            horizon_mean_variance = overall_variance
+
+        return overall_variance, horizon_mean_variance
+
+    def _compute_constant_rate(self, predictions: torch.Tensor) -> float:
+        """Return the fraction of examples that look nearly constant.
+
+        Heuristic meaning:
+            For each example, flatten all non-batch dimensions and compute the
+            standard deviation. If that std is extremely small, we mark the
+            forecast as near-constant.
+        """
+        if predictions.ndim == 0:
+            return 1.0
+
+        flattened = predictions.reshape(predictions.shape[0], -1)
+        per_example_std = flattened.std(dim=1, unbiased=False)
+        constant_mask = per_example_std <= self._constant_std_threshold
+        return float(constant_mask.float().mean().item())
+
+    def _compute_prediction_target_scale_ratio(
+        self,
+        predictions: torch.Tensor,
+        target: torch.Tensor | None,
+    ) -> float | None:
+        """Compare prediction magnitude scale against target magnitude scale.
+
+        Interpretation:
+            A ratio near 1.0 means prediction absolute magnitude and target
+            absolute magnitude are in the same ballpark. A very small or very
+            large value may indicate drift, collapse, or target mismatch.
+        """
+        if target is None or target.numel() == 0:
+            return None
+
+        prediction_scale = float(predictions.abs().mean().item())
+        target_scale = float(target.abs().mean().item())
+
+        # Avoid division by zero while still surfacing mismatch meaningfully.
+        if target_scale <= 1e-12:
+            return None
+
+        return prediction_scale / target_scale
+
+    def _log_prediction_metrics(
+        self,
+        trainer: Any,
+        pl_module: Any,
+        outputs: Any,
+        batch: Mapping[str, Any],
+        stage: str,
+    ) -> None:
+        """Compute and emit prediction sanity metrics for one hook invocation."""
+        if not self._should_log_now(trainer):
+            return
+
+        predictions = self._as_cpu_float_tensor(
+            self._extract_predictions(outputs, batch, pl_module)
+        )
+        target = self._as_cpu_float_tensor(
+            self._extract_target(outputs, batch, pl_module)
+        )
+
+        # If predictions cannot be extracted, emit a warning and stop quietly.
+        # Observability should aid debugging, not crash the training loop.
+        if predictions is None:
+            self._log_warning(
+                "PredictionSanityCallback could not extract predictions during "
+                f"stage={stage} at "
+                f"global_step={getattr(trainer, 'global_step', 'unknown')}."
+            )
+            return
+
+        prefix = f"prediction_sanity/{stage}"
+
+        # Non-finite rate is the highest-value first-line anomaly signal because
+        # it directly indicates a numerical breakdown in produced forecasts.
+        non_finite_rate = float((~torch.isfinite(predictions)).float().mean().item())
+        self._log_scalar(pl_module, f"{prefix}/non_finite_rate", non_finite_rate)
+
+        # Replace non-finite values before downstream metrics so a single NaN or
+        # Inf does not poison all later summaries. The non-finite rate above
+        # remains the canonical anomaly signal for that condition.
+        clean_predictions = torch.nan_to_num(
+            predictions,
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
+
+        crossing_rate = self._compute_quantile_crossing_rate(clean_predictions)
+        if crossing_rate is not None:
+            self._log_scalar(
+                pl_module,
+                f"{prefix}/quantile_crossing_rate",
+                crossing_rate,
+            )
+
+        width_mean, width_std, near_zero_width_rate = self._compute_interval_width_stats(
+            clean_predictions
+        )
+        if width_mean is not None:
+            self._log_scalar(pl_module, f"{prefix}/interval_width_mean", width_mean)
+        if width_std is not None:
+            self._log_scalar(pl_module, f"{prefix}/interval_width_std", width_std)
+        if near_zero_width_rate is not None:
+            self._log_scalar(
+                pl_module,
+                f"{prefix}/near_zero_interval_rate",
+                near_zero_width_rate,
+            )
+
+        overall_variance, horizon_mean_variance = self._compute_variance_stats(
+            clean_predictions
+        )
+        self._log_scalar(pl_module, f"{prefix}/variance_overall", overall_variance)
+        self._log_scalar(
+            pl_module,
+            f"{prefix}/variance_horizon_mean",
+            horizon_mean_variance,
+        )
+
+        constant_rate = self._compute_constant_rate(clean_predictions)
+        self._log_scalar(
+            pl_module,
+            f"{prefix}/near_constant_prediction_rate",
+            constant_rate,
+        )
+
+        scale_ratio = self._compute_prediction_target_scale_ratio(
+            clean_predictions,
+            target,
+        )
+        if scale_ratio is not None:
+            self._log_scalar(
+                pl_module,
+                f"{prefix}/prediction_target_scale_ratio",
+                scale_ratio,
+            )
+
+        # Emit lightweight human-readable warnings only when the metrics look
+        # meaningfully suspicious. These are intended to help log review rather
+        # than act as hard assertions.
+        if non_finite_rate > 0.0:
+            self._log_warning(
+                "PredictionSanityCallback detected non-finite predictions during "
+                f"stage={stage} at "
+                f"global_step={getattr(trainer, 'global_step', 'unknown')}: "
+                f"non_finite_rate={non_finite_rate:.6f}."
+            )
+
+        if crossing_rate is not None and crossing_rate > 0.0:
+            self._log_warning(
+                "PredictionSanityCallback detected quantile crossing during "
+                f"stage={stage} at "
+                f"global_step={getattr(trainer, 'global_step', 'unknown')}: "
+                f"crossing_rate={crossing_rate:.6f}."
+            )
+
+        if constant_rate >= 0.95:
+            self._log_warning(
+                "PredictionSanityCallback detected near-collapsed forecasts during "
+                f"stage={stage} at "
+                f"global_step={getattr(trainer, 'global_step', 'unknown')}: "
+                f"near_constant_prediction_rate={constant_rate:.6f}."
+            )
+
+    def on_train_batch_end(
+        self,
+        trainer: Any,
+        pl_module: Any,
+        outputs: Any,
+        batch: Mapping[str, Any],
+        batch_idx: int,
+    ) -> None:
+        """Training hook for compact prediction sanity metrics."""
+        del batch_idx
+        self._log_prediction_metrics(trainer, pl_module, outputs, batch, "train")
+
+    def on_validation_batch_end(
+        self,
+        trainer: Any,
+        pl_module: Any,
+        outputs: Any,
+        batch: Mapping[str, Any],
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> None:
+        """Validation hook for compact prediction sanity metrics."""
+        del batch_idx, dataloader_idx
+        self._log_prediction_metrics(trainer, pl_module, outputs, batch, "val")
+
+    def on_test_batch_end(
+        self,
+        trainer: Any,
+        pl_module: Any,
+        outputs: Any,
+        batch: Mapping[str, Any],
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> None:
+        """Test hook for compact prediction sanity metrics."""
+        del batch_idx, dataloader_idx
+        self._log_prediction_metrics(trainer, pl_module, outputs, batch, "test")
