@@ -9,7 +9,7 @@ principles.
 Related docs: [`../repository_primer.md`](../repository_primer.md),
 [`../system_walkthrough.md`](../system_walkthrough.md),
 [`../research/introduction.md`](../research/introduction.md),
-[`../research/probabilistic_forecasting.md`](../research/probabilistic_forecasting.md).
+[`../research/methods.md`](../research/methods.md).
 
 ## 1. Problem Statement
 

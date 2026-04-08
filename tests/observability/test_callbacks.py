@@ -31,6 +31,7 @@ from tests.observability.support import (
     ActivationModule,
     ModelVisualizationModule,
     PredictionModule,
+    RecordingExperiment,
     RecordingLogger,
     RecordingTextLogger,
     RecordingTrainer,
@@ -39,6 +40,40 @@ from tests.observability.support import (
     stub_virtual_memory,
     torch,
 )
+
+
+class ScalarParameterModule(torch.nn.Module):
+    """Single-scalar module used to exercise histogram skip paths for tiny tensors."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.bias = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
+
+
+class NonFiniteParameterModule(torch.nn.Module):
+    """Module whose parameter and gradient include non-finite values for filtering tests."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.weight = torch.nn.Parameter(
+            torch.tensor([1.0, float("nan"), 2.0, float("inf")], dtype=torch.float32)
+        )
+
+
+class RejectingHistogramExperiment(RecordingExperiment):
+    """TensorBoard-like fake that rejects histogram payloads with a ValueError."""
+
+    def add_histogram(self, tag: str, values: object, global_step: int) -> None:
+        del tag, values, global_step
+        raise ValueError("The histogram is empty, please file a bug report.")
+
+
+class RejectingHistogramLogger(RecordingLogger):
+    """Logger whose experiment surface raises on histogram writes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.experiment = RejectingHistogramExperiment()
 
 
 def test_batch_audit_callback_respects_stage_limit() -> None:
@@ -145,6 +180,73 @@ def test_parameter_histogram_callback_logs_parameter_and_gradient_histograms() -
     # histogram outputs are now namespaced under debug/histograms.
     assert "debug/histograms/parameters/weight" in tags
     assert "debug/histograms/gradients/weight" in tags
+
+
+def test_parameter_histogram_callback_filters_non_finite_values() -> None:
+    # Histogram logging should keep useful finite values rather than failing the
+    # whole callback when one tensor contains NaN or Inf entries.
+    logger = RecordingLogger()
+    trainer = RecordingTrainer(logger)
+    trainer.global_step = 12
+    module = NonFiniteParameterModule()
+    module.weight.grad = torch.tensor(
+        [float("-inf"), -0.5, 1.5, float("nan")],
+        dtype=torch.float32,
+    )
+
+    ParameterHistogramCallback(
+        ObservabilityConfig(histogram_every_n_epochs=1)
+    ).on_train_epoch_end(trainer, module)
+
+    events = {
+        tag: values for tag, values, _step in logger.experiment.histogram_events
+    }
+
+    assert torch.equal(
+        events["debug/histograms/parameters/weight"],
+        torch.tensor([1.0, 2.0], dtype=torch.float32),
+    )
+    assert torch.equal(
+        events["debug/histograms/gradients/weight"],
+        torch.tensor([-0.5, 1.5], dtype=torch.float32),
+    )
+
+
+def test_parameter_histogram_callback_skips_singleton_tensors(caplog: pytest.LogCaptureFixture) -> None:
+    # Singleton tensors are a known TensorBoard histogram edge case, so the
+    # callback should skip them and keep training alive.
+    logger = RecordingLogger()
+    trainer = RecordingTrainer(logger)
+    module = ScalarParameterModule()
+    module.bias.grad = torch.tensor(0.5, dtype=torch.float32)
+
+    with caplog.at_level("WARNING"):
+        ParameterHistogramCallback(
+            ObservabilityConfig(histogram_every_n_epochs=1)
+        ).on_train_epoch_end(trainer, module)
+
+    assert logger.experiment.histogram_events == []
+    assert "Skipping parameter histogram for bias" in caplog.text
+    assert "Skipping gradient histogram for bias" in caplog.text
+
+
+def test_parameter_histogram_callback_swallows_tensorboard_value_errors(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Backend histogram failures should not abort the epoch-end hook because
+    # this callback is best-effort observability, not core training logic.
+    logger = RejectingHistogramLogger()
+    trainer = RecordingTrainer(logger)
+    module = TinyModule()
+    module.weight.grad = torch.tensor([[0.5, -0.25]], dtype=torch.float32)
+
+    with caplog.at_level("WARNING"):
+        ParameterHistogramCallback(
+            ObservabilityConfig(histogram_every_n_epochs=1)
+        ).on_train_epoch_end(trainer, module)
+
+    assert "Skipping parameter histogram for weight after TensorBoard rejected it" in caplog.text
+    assert "Skipping gradient histogram for weight after TensorBoard rejected it" in caplog.text
 
 
 def test_system_telemetry_callback_logs_metrics_and_csv(

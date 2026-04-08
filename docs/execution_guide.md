@@ -10,14 +10,37 @@ Related docs: [`cli_reference.md`](cli_reference.md),
 [`current_architecture.md`](current_architecture.md),
 [`system_walkthrough.md`](system_walkthrough.md).
 
-This guide provides step-by-step instructions for running the ENSF617 Probabilistic Glucose Forecasting codebase on Google Colab with CUDA acceleration and locally on Apple Silicon Macs. The codebase includes automatic environment detection and device profiles for seamless setup across platforms.
+This guide is the canonical multi-platform runbook for running the ENSF617
+Probabilistic Glucose Forecasting codebase. It covers the supported execution
+paths in this repository today: Google Colab with CUDA acceleration, local Apple
+Silicon development, and TALC GPU cluster runs through Slurm.
+
+The command blocks below are intentionally operational and copy-paste oriented.
+Where a section gives a `bash` block, it is meant to be run in that
+environment's shell as written. Where a section gives a `python` block or uses
+the Colab `!` prefix, it is meant to be pasted directly into a notebook cell.
+
+The platform-specific commands in this guide are performance-refined repository
+defaults. Treat them as stable starting points unless you have a clear reason to
+override them.
+
+## How To Use This Guide
+
+- choose the section that matches the environment you are actually using
+- copy the commands in that section directly into the matching shell or notebook
+- use [`cli_reference.md`](cli_reference.md) only when you need to deviate from
+  the recommended commands here
+- use the later log, telemetry, and troubleshooting sections after the run
+  starts writing artifacts
 
 ## Prerequisites
 
-- Python 3.10+
-- Git (for cloning the repository)
-- For Colab: Google account with access to Google Colab
-- For Apple Silicon: macOS with M-series chip (M1/M2/M3)
+- Git access to the repository
+- Python 3.10+ for local or cluster-managed environments
+- For Google Colab: a Google account with access to Colab
+- For Apple Silicon: macOS on an M-series machine with local Python available
+- For TALC: cluster access, an allocated working directory, and Slurm usage
+  rights
 
 ## Google Colab Setup (CUDA)
 
@@ -83,7 +106,7 @@ from google.colab import drive
 drive.mount('/content/drive')
 ```
 
-1. Run with output directory on Drive:
+2. Run with output directory on Drive:
 
 ```bash
 !python main.py \
@@ -448,13 +471,14 @@ python main.py --raw-dir /path/to/data/raw
 
 - [Repository README](../README.md) - Quickstart and overview
 - [System Walkthrough](system_walkthrough.md) - Guided second-pass architecture read
-- [Repository Primer](repository_primer.md) - Preserved long-form systems monograph
+- [Repository Primer](repository_primer.md) - Chaptered primer path through the repository
 - [Current Architecture](current_architecture.md) - Code structure guide
 
 ## Expected Runtime
 
 - **Colab (GPU)**: ~5-10 minutes for 5 epochs with default settings
 - **Apple Silicon**: ~10-15 minutes for 5 epochs (varies by M-chip generation)
+- **TALC GPU Cluster**: runtime depends on GPU type, batch allocation, and queue delay
 - **CPU-only**: ~20-30 minutes for 5 epochs
 
 Adjust `--max-epochs` and `--batch-size` based on your hardware and time constraints.

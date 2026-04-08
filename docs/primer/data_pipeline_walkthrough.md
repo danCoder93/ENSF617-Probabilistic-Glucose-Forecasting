@@ -2,13 +2,13 @@
 
 Role: Focused walkthrough of how raw AZT1D data becomes model-facing input.
 Audience: Readers who need the data story without absorbing the entire methods
-monograph first.
+section first.
 Owns: Data lifecycle, semantic feature contract, and windowing explanation at a
 guided level.
 Related docs: [`../system_walkthrough.md`](../system_walkthrough.md),
 [`../current_architecture.md`](../current_architecture.md),
-[`../research/materials_and_methods.md`](../research/materials_and_methods.md),
-[`../research/methods_exposition.md`](../research/methods_exposition.md).
+[`../research/dataset.md`](../research/dataset.md),
+[`../research/methods.md`](../research/methods.md).
 
 ## 1. Why The Data Layer Matters Here
 
@@ -75,8 +75,8 @@ layer runs.
 ## 6. Best Next Reads
 
 - For the concise research-facing version:
-  [`../research/materials_and_methods.md`](../research/materials_and_methods.md)
-- For the full technical monograph:
-  [`../research/methods_exposition.md`](../research/methods_exposition.md)
+  [`../research/dataset.md`](../research/dataset.md)
+- For the companion methods story:
+  [`../research/methods.md`](../research/methods.md)
 - For exact present-state package boundaries:
   [`../current_architecture.md`](../current_architecture.md)

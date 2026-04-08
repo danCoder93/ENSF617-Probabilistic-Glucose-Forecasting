@@ -6,7 +6,7 @@ the project.
 Owns: High-level literature positioning and placeholder guidance for later
 human-authored synthesis.
 Related docs: [`references.md`](references.md),
-[`probabilistic_forecasting.md`](probabilistic_forecasting.md),
+[`methods.md`](methods.md),
 [`../inspiration/paper_material_notes.md`](../inspiration/paper_material_notes.md).
 
 ## Status
