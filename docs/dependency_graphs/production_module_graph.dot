@@ -47,6 +47,7 @@ digraph dependencies {
   "observability.model_visualization" [label="observability.model_visualization", shape="ellipse", style="filled", fillcolor="#f7f7f7", color="#6c757d"];
   "observability.parameter_callbacks" [label="observability.parameter_callbacks", shape="ellipse", style="filled", fillcolor="#f7f7f7", color="#6c757d"];
   "observability.prediction_callbacks" [label="observability.prediction_callbacks", shape="ellipse", style="filled", fillcolor="#f7f7f7", color="#6c757d"];
+  "observability.reporting" [label="observability.reporting", shape="ellipse", style="filled", fillcolor="#f7f7f7", color="#6c757d"];
   "observability.runtime" [label="observability.runtime", shape="ellipse", style="filled", fillcolor="#f7f7f7", color="#6c757d"];
   "observability.system_callbacks" [label="observability.system_callbacks", shape="ellipse", style="filled", fillcolor="#f7f7f7", color="#6c757d"];
   "observability.tensors" [label="observability.tensors", shape="ellipse", style="filled", fillcolor="#f7f7f7", color="#6c757d"];
@@ -159,6 +160,7 @@ digraph dependencies {
   "observability" -> "observability.callbacks" [color="#4f5d75", style="dashed"];
   "observability" -> "observability.logging_utils" [color="#4f5d75", style="dashed"];
   "observability" -> "observability.runtime" [color="#4f5d75", style="dashed"];
+  "observability" -> "reporting" [color="#7d8597", style="solid"];
   "observability.callbacks" -> "config" [color="#7d8597", style="solid"];
   "observability.callbacks" -> "observability.debug_callbacks" [color="#7d8597", style="solid"];
   "observability.callbacks" -> "observability.parameter_callbacks" [color="#7d8597", style="solid"];
@@ -174,6 +176,7 @@ digraph dependencies {
   "observability.prediction_callbacks" -> "observability.logging_utils" [color="#7d8597", style="solid"];
   "observability.prediction_callbacks" -> "observability.tensors" [color="#7d8597", style="solid"];
   "observability.prediction_callbacks" -> "observability.utils" [color="#7d8597", style="solid"];
+  "observability.reporting" -> "reporting" [color="#7d8597", style="solid"];
   "observability.runtime" -> "config" [color="#7d8597", style="solid"];
   "observability.runtime" -> "observability.utils" [color="#7d8597", style="solid"];
   "observability.system_callbacks" -> "config" [color="#7d8597", style="solid"];

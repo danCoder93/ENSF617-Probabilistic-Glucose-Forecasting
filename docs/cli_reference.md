@@ -17,6 +17,8 @@ At a high level, the CLI flow is:
 
 ## Important notes
 
+- **Effective runtime behavior may differ from CLI defaults** due to device-profile resolution and environment-aware adjustments.
+
 - **CLI defaults are not always the same as raw dataclass defaults.** The effective defaults used by the CLI come from `cli.py` plus the builder functions in `defaults.py`.
 - **Some flags do not map to a config field directly.** They control workflow dispatch, benchmarking, checkpoint selection, or artifact saving.
 - **Some booleans are tri-state in the parser.** Flags using `BooleanOptionalAction` default to `None` in argparse, then get converted later to an explicit boolean in `_build_cli_configuration(...)`.
@@ -63,7 +65,7 @@ These are still part of `DataConfig` defaults, but are not direct top-level CLI 
 | Flag | Type / Expected values | CLI default | Maps to | Effective default after build | Bounds / guidance | What it controls |
 | --- | --- | ---: | --- | ---: | --- | --- |
 | `--max-epochs` | int | `20` | `TrainConfig.max_epochs` | same | `> 0` | Maximum number of training epochs. |
-| `--device-profile` | choice string | `auto` | **not stored as a simple field**; passed to `resolve_device_profile(...)` | `auto` | must be one of `DEVICE_PROFILE_CHOICES` | High-level runtime preset. Used to derive final effective configs for the current environment. |
+| `--device-profile` | choice string | `auto` | **not stored as a simple field**; passed to `resolve_device_profile(...)` | `auto` | must be one of `DEVICE_PROFILE_CHOICES` (defined in `src/workflows/cli.py`) | High-level runtime preset. Used to derive final effective configs for the current environment. |
 | `--accelerator` | string | `auto` | `TrainConfig.accelerator` | same | backend-supported value | Lightning accelerator selection. |
 | `--devices` | string | `auto` | `TrainConfig.devices` after `_parse_devices(...)` | same logical value | `auto`, int-like string, or backend-specific form | Which devices Lightning should use. |
 | `--precision` | string | `32` | `TrainConfig.precision` | converted to `int(32)` when numeric | integer-like or Lightning precision mode such as `16-mixed` | Numeric precision mode. |
@@ -207,7 +209,7 @@ The builder also enables these by default unless changed in code:
 ### Device/runtime
 
 - Let repo auto-pick profile: `--device-profile auto`
-- Force a specific runtime preset: `--device-profile <choice>`
+- Force a specific runtime preset: `--device-profile <choice>` (see `DEVICE_PROFILE_CHOICES` in `src/workflows/cli.py`)
 - Force accelerator/devices manually: `--accelerator`, `--devices`
 - Change precision: `--precision`
 - Enable compile: `--compile-model`

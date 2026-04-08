@@ -4,7 +4,7 @@ This guide provides step-by-step instructions for running the ENSF617 Probabilis
 
 ## Prerequisites
 
-- Python 3.8+
+- Python 3.10+
 - Git (for cloning the repository)
 - For Colab: Google account with access to Google Colab
 - For Apple Silicon: macOS with M-series chip (M1/M2/M3)
@@ -16,13 +16,13 @@ This guide provides step-by-step instructions for running the ENSF617 Probabilis
 1. Go to [Google Colab](https://colab.research.google.com/)
 2. Click "File" → "Open notebook"
 3. Select "GitHub" tab
-4. Enter the repository URL: `https://github.com/your-org/ENSF617-Probabilistic-Glucose-Forecasting`
+4. Enter the repository URL: `https://github.com/danCoder93/ENSF617-Probabilistic-Glucose-Forecasting`
 5. Open `main.ipynb` or create a new notebook
 
 Alternatively, clone the repository:
 
 ```bash
-!git clone https://github.com/danCoder93/ENSF617-Probabilistic-Glucose-Forecasting.git -b danish/dev
+!git clone https://github.com/danCoder93/ENSF617-Probabilistic-Glucose-Forecasting.git
 %cd ENSF617-Probabilistic-Glucose-Forecasting
 ```
 
@@ -94,20 +94,20 @@ drive.mount('/content/drive')
 #### Viewing Logs
 
 - **Console output**: Limited in Colab; use progress bars and printed summaries
-- **Text logs**: `artifacts/main_run/run.log` (download or view in Colab file browser)
-- **Telemetry CSV**: `artifacts/main_run/telemetry.csv` (download and open in Colab or locally)
+- **Text logs**: `/content/drive/MyDrive/ENSF617/artifacts/run.log` (download or view in Colab file browser)
+- **Telemetry CSV**: `/content/drive/MyDrive/ENSF617/artifacts/telemetry.csv` (download and open in Colab or locally)
 
 - **TensorBoard**: Run in Colab cell:
 
 ```python
 %load_ext tensorboard
-%tensorboard --logdir /content/drive/MyDrive/ENSF617/artifacts/main_run/logs
+%tensorboard --logdir /content/drive/MyDrive/ENSF617/artifacts/logs
 ```
 
 #### Colab File Browser
 
 - Click the folder icon in the left sidebar
-- Navigate to `artifacts/main_run/`
+- Navigate to `/content/drive/MyDrive/ENSF617/artifacts/`
 - Right-click files to download
 
 ## Local Apple Silicon Setup (MPS)
@@ -115,7 +115,7 @@ drive.mount('/content/drive')
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/your-org/ENSF617-Probabilistic-Glucose-Forecasting.git
+git clone https://github.com/danCoder93/ENSF617-Probabilistic-Glucose-Forecasting.git
 cd ENSF617-Probabilistic-Glucose-Forecasting
 ```
 
@@ -191,11 +191,6 @@ Then open <http://localhost:6006> in your browser
 - Reports: `artifacts/main_run/reports/` (HTML files)
 - Model visualizations: `artifacts/main_run/model_viz/`
 
-Ahh got it — you want a **clean Markdown block ONLY**, no extra formatting, no `id=`, no explanation. Just paste-ready.
-
-Here it is 👇
-
----
 ## TALC GPU Cluster Setup (Slurm)
 
 ### 1. Connect to TALC
@@ -215,7 +210,7 @@ cd ~/projects
 Clone the repository (if not already done):
 
 ```bash
-git clone https://github.com/danCoder93/ENSF617-Probabilistic-Glucose-Forecasting.git -b danish/dev
+git clone https://github.com/danCoder93/ENSF617-Probabilistic-Glucose-Forecasting.git
 cd ENSF617-Probabilistic-Glucose-Forecasting
 ```
 
@@ -223,7 +218,7 @@ cd ENSF617-Probabilistic-Glucose-Forecasting
 
 ### 2. Setup Environment
 
-#### 2.1 Install your environment if not installed (using conda):
+#### 2.1 Install your environment if not installed (using conda)
 
 ##### Create env with Python 3.11 and proper channel order
 
@@ -238,14 +233,14 @@ conda activate pytorch
 conda config --env --set channel_priority strict
 ```
 
-#### 2.2 Load your environment (example using conda):
+#### 2.2 Load your environment (example using conda)
 
 ```bash
 source ~/software/init-conda
 conda activate pytorch
 ```
 
-#### 2.3 Install dependencies (if needed):
+#### 2.3 Install dependencies (if needed)
 
 ##### 2.3.1. Core PyTorch (install in sequence)
 
@@ -316,19 +311,19 @@ python main.py \
 
 After the job completes:
 
-* **Console output**: `glucose_t4-<job_id>.out`
-* **Artifacts**:
+- **Console output**: `glucose_t4-<job_id>.out`
+- **Artifacts**:
 
-  ```
+  ```bash
   artifacts/glucose_<job_id>/
   ```
 
 Includes:
 
-* model checkpoints
-* logs
-* prediction outputs
-* telemetry CSV
+- model checkpoints
+- logs
+- prediction outputs
+- telemetry CSV
 
 ---
 
@@ -366,10 +361,10 @@ Use fast local storage during jobs:
 /scratch/${SLURM_JOB_ID}
 ```
 
-* Faster than network filesystem
-* Automatically cleaned after job completion
+- Faster than network filesystem
+- Automatically cleaned after job completion
 
------
+---
 
 ## Understanding Logs and Telemetry
 
@@ -420,11 +415,6 @@ python main.py --observability-mode trace --max-epochs 2
 ```
 
 ### Common Issues
-
-#### Colab: Out of Memory
-
-- Reduce batch size: `--batch-size 16`
-- Disable expensive features: `--disable-torchview --disable-parameter-histograms`
 
 #### Apple Silicon: MPS Fallback
 

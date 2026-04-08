@@ -158,6 +158,7 @@ digraph dependencies {
   "observability" -> "observability.callbacks" [color="#4f5d75", style="dashed"];
   "observability" -> "observability.logging_utils" [color="#4f5d75", style="dashed"];
   "observability" -> "observability.runtime" [color="#4f5d75", style="dashed"];
+  "observability" -> "reporting" [color="#7d8597", style="solid"];
   "observability.callbacks" -> "config" [color="#7d8597", style="solid"];
   "observability.callbacks" -> "observability.debug_callbacks" [color="#7d8597", style="solid"];
   "observability.callbacks" -> "observability.parameter_callbacks" [color="#7d8597", style="solid"];

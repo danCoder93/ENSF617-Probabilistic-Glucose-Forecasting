@@ -2,10 +2,10 @@
 
 ## Production Overview
 
-- Production modules: 63
-- Production dependency edges: 173
-- Cross-package edges: 26
-- Test-to-production edges: 90
+- Production modules: 64
+- Production dependency edges: 175
+- Cross-package edges: 27
+- Test-to-production edges: 91
 
 ## Cycle Status
 
@@ -46,6 +46,7 @@
 - `models` -> `evaluation`
 - `models` -> `observability`
 - `observability` -> `config`
+- `observability` -> `reporting`
 - `reporting` -> `config`
 - `reporting` -> `evaluation`
 - `reporting` -> `observability`

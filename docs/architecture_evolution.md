@@ -713,34 +713,29 @@ than harder.
 
 
 
-## April 2–7, 2026: Reporting Refactor And TensorBoard-Centric Observability
+## April 2–7, 2026: Reporting Refactor And Observability Expansion
 
-This is the most recent evolution phase and reflects a shift from
-artifact-heavy reporting toward a unified, TensorBoard-first observability
-strategy.
+This is the most recent evolution phase and reflects a shift toward a **clear separation
+between runtime observability and post-run reporting**, while improving both systems.
 
 #### What changed
 
 The repository introduced a structured reporting layer under
-`src/reporting/` and significantly expanded the observability system:
+`src/reporting/` and expanded the observability system:
 
 - reporting logic was decomposed into responsibility-focused modules:
   - `prediction_rows.py`
   - `report_tables.py`
   - `report_text.py`
   - `builders.py`
-- TensorBoard became the primary surface for:
-  - scalar metrics
-  - distribution tracking
-  - prediction visualization
-  - structured summaries
 - observability callbacks were further specialized:
   - system-level signals
   - parameter/gradient inspection
   - prediction-level logging
-- large monolithic reports were replaced with:
-  - smaller structured artifacts (CSV/JSON)
-  - TensorBoard-native visualizations
+- structured outputs were standardized into:
+  - CSV/JSON artifacts
+  - shared report bundles
+- TensorBoard was strengthened as a **primary runtime visualization surface**
 
 #### Why it changed
 
@@ -754,30 +749,28 @@ which created friction:
 At the same time, observability had matured enough that:
 
 - most useful signals were already being computed during runtime
-- TensorBoard could serve as a single unified inspection surface
+- TensorBoard provided strong real-time inspection capabilities
 
 This phase therefore shifted the design toward:
 
-- “log once, visualize everywhere”
-- reducing post-hoc report generation
-- making training runs self-explanatory without external artifacts
+- richer runtime visibility via observability
+- cleaner, structured post-run reporting outputs
+- reduced reliance on large monolithic reports
 
 #### Lasting impact
 
-This phase completes the observability story:
+This phase clarifies the final architectural relationship:
 
-- observability is no longer just debugging support
-- it becomes the primary interface for understanding model behavior
+- **observability** is responsible for understanding runtime behavior
+- **reporting** is responsible for packaging structured outputs after a run
 
-It also reinforces a key architectural principle:
-
-- reporting is now a *projection* of observability data, not a separate system
+TensorBoard remains a **primary observability sink**, but not the entire system.
 
 This keeps:
 
 - training logic unchanged
-- observability centralized
-- reporting modular and lightweight
+- observability centralized during execution
+- reporting as a distinct, structured post-run system
 
 
 ## Cross-Cutting Design Decisions

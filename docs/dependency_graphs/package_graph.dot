@@ -28,6 +28,7 @@ digraph dependencies {
   "models" -> "evaluation" [color="#7d8597", style="solid"];
   "models" -> "observability" [color="#7d8597", style="solid"];
   "observability" -> "config" [color="#7d8597", style="solid"];
+  "observability" -> "reporting" [color="#7d8597", style="solid"];
   "reporting" -> "config" [color="#7d8597", style="solid"];
   "reporting" -> "evaluation" [color="#7d8597", style="solid"];
   "reporting" -> "observability" [color="#7d8597", style="solid"];

@@ -342,6 +342,8 @@ Responsibilities:
 
 This package expresses how a run becomes inspectable while it is executing.
 
+A key distinction is that observability operates during runtime, while reporting operates after prediction and evaluation have completed.
+
 ### 5.10 Reporting Package
 
 Representative files:
@@ -380,8 +382,9 @@ The normal execution lifecycle of the repository is the single most important th
 9. PyTorch Lightning runs the epoch loop.
 10. The workflow optionally runs held-out test and prediction.
 11. The evaluation package computes structured metrics from raw predictions.
-12. The observability package exports logs and runtime telemetry, while the reporting package builds prediction tables, summaries, TensorBoard views, and optional lightweight reports.
-13. The workflow writes a compact run summary.
+12. The observability package exports logs and runtime telemetry, while the evaluation package produces structured metric outputs.
+13. The reporting package packages those outputs into a canonical shared-report representation and emits tables, summaries, TensorBoard views, and optional lightweight reports.
+14. The workflow writes a compact run summary and may include references to reporting artifacts and structured outputs.
 
 ### 6.2 Order Constraints
 
@@ -1825,6 +1828,8 @@ The reporting layer includes:
 - TensorBoard-friendly report projection
 - optional Plotly figures and lightweight HTML outputs when enabled
 
+Importantly, reporting first constructs a canonical shared-report representation (e.g., `SharedReport`), which is then consumed by multiple export and visualization sinks (CSV, JSON, TensorBoard, Plotly).
+
 This layer primarily answers:
 
 - how should the outputs of this run be summarized for later reading?
@@ -1883,6 +1888,17 @@ More specifically:
 - reporting outputs, including TensorBoard-linked summaries and optional Plotly artifacts, are typically written under `artifacts/main_run/reports/`
 - profiler artifacts, when enabled, are written under `artifacts/main_run/profiler/`
 - Torchview/model-visualization artifacts are typically written under `artifacts/main_run/model_viz/`
+
+In addition, newer structured reporting outputs may include:
+
+- `artifacts/main_run/report_index.json`
+  a lightweight index of report artifacts and entry points
+- `artifacts/main_run/reports/artifacts/shared_report/`
+  canonical structured bundle containing:
+  - `metrics_summary.json`
+  - grouped metric tables (e.g., by horizon, subject, glucose range)
+  - scalar summaries and metadata
+
 
 The dataset lifecycle uses a parallel but separate storage layout:
 

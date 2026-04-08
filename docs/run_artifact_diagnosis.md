@@ -1042,3 +1042,134 @@ That is the forensic reading of the uploaded artifacts.
 
 4. **Do not treat undercoverage as symmetric unless you inspect q10 vs q90 misses.**  
    In this run the misses are overwhelmingly below q10, which changes the diagnosis completely.
+
+
+---
+
+## 19. Artifact Navigation Layer (New in Current Pipeline)
+
+A new addition to the pipeline is:
+
+- `report_index.json`
+
+This file acts as a **central artifact registry**. Its purpose is to eliminate ambiguity when navigating the artifact tree.
+
+It provides:
+- Direct paths to core summaries (`run_summary.json`, `metrics_summary.json`)
+- Links to grouped tables
+- Links to prediction exports
+- Links to analysis outputs
+
+Interpretation:
+This file upgrades the workflow from *file dumping* to **structured artifact indexing**, which is critical for reproducibility and report generation.
+
+---
+
+## 20. Run Health Summary Layer
+
+New artifact:
+
+- `run_health_summary.json`
+
+This file synthesizes multiple signals into a compact diagnostic layer.
+
+It includes:
+- Horizon degradation metrics
+- Coverage warnings
+- Bias summaries
+- Threshold-based performance indicators
+
+Interpretation:
+This acts as a **machine-readable diagnosis layer**, allowing automated checks such as:
+- “Is coverage collapsing?”
+- “Is bias increasing with horizon?”
+
+---
+
+## 21. Threshold-Based Accuracy Analysis
+
+Located under:
+- `analysis_outputs/threshold_accuracy_summary.csv`
+- `analysis_outputs/threshold_accuracy_by_horizon.csv`
+- `analysis_outputs/threshold_accuracy_by_glucose_range.csv`
+
+This layer answers:
+
+> “How often are predictions clinically close enough?”
+
+This complements MAE/RMSE by providing:
+- % within 10 mg/dL
+- % within 20 mg/dL
+- % within 30 mg/dL
+
+Interpretation:
+This is a **decision-oriented metric layer**, much closer to real-world usability than average error.
+
+---
+
+## 22. Event-Aware Analysis Layer
+
+Located under:
+- `analysis_outputs/metrics_by_meal_event.csv`
+- `analysis_outputs/metrics_by_insulin_event.csv`
+- `analysis_outputs/metrics_by_device_mode.csv`
+- `analysis_outputs/predictions_with_event_context.csv`
+
+This layer introduces **contextual evaluation**.
+
+It answers:
+- Are meal windows harder?
+- Are insulin events harder?
+- Does device mode affect performance?
+
+Interpretation:
+This transforms the model evaluation from:
+- static accuracy → **context-aware performance understanding**
+
+---
+
+## 23. Baseline Comparison Layer
+
+New artifacts include:
+- `baseline_persistence_metrics.json`
+- `baseline_vs_model_summary.csv`
+
+Purpose:
+To evaluate whether the model outperforms a simple baseline (e.g., persistence).
+
+Interpretation:
+This prevents misleading conclusions where:
+- model appears “good”
+- but performs similarly to trivial baselines
+
+---
+
+## 24. Updated Interpretation of This Run
+
+After incorporating all artifact layers, the refined interpretation is:
+
+1. The model is **systematically upward biased**.
+2. The probabilistic intervals are **not degenerate**, but are **miscalibrated and asymmetric**.
+3. Error increases sharply with horizon, but **uncertainty does not scale accordingly**.
+4. The **low-glucose regime remains the dominant failure mode**, especially at longer horizons.
+5. The pipeline now provides **sufficient observability to diagnose these failures precisely**.
+
+---
+
+## 25. Final Assessment (Patched)
+
+This run is not merely a model output; it is a **fully observable experiment**.
+
+The artifact ecosystem now supports:
+- forensic debugging
+- structured reporting
+- clinical interpretation
+- reproducible evaluation
+
+The primary limitation is no longer lack of visibility.
+
+It is now **model behavior itself**, particularly:
+- upward bias
+- weak downside sensitivity
+- insufficient uncertainty expansion
+

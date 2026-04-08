@@ -1,4 +1,5 @@
 ## OVERVIEW
+
 We took the workflow from something that trained and dumped a bunch of outputs into a folder to something that now leaves behind a much clearer trail of what data it used, how it performed, where it struggled, and which artifacts actually matter for reporting. We added cleaner run-level observability, structured metric summaries, grouped evaluation tables, automatic visual reports, threshold-based accuracy analysis, and event-aware analysis tied back to the processed data context. That gives us a much better handle on both debugging and real model interpretation, and it means the README, final report, and presentation can all build off the same artifact trail instead of us stitching the story together afterward
 
 Observability, Reporting, and Analysis Additions
@@ -84,7 +85,7 @@ logging outputs
 
 This made the artifact folder much easier to navigate and gave us a cleaner entry point for reporting.
 
-2. Prediction export improvements
+1. Prediction export improvements
 artifacts/main_run/test_predictions.pt
 
 This is the raw tensor export of the model predictions. It preserves the direct model outputs and is most useful for debugging or lower-level analysis in Python.
@@ -110,7 +111,7 @@ We also updated the export logic so it can include the last observed glucose fro
 
 This was an important step because it made the export more useful for downstream analysis rather than just acting as a thin dump of forecast values.
 
-3. Grouped evaluation artifacts
+1. Grouped evaluation artifacts
 
 To make the results easier to interpret, we added grouped metric exports so the run leaves behind more than one average score.
 
@@ -151,7 +152,7 @@ high glucose
 
 This ended up being one of the strongest findings in the whole analysis. The model was clearly strongest in the 70–180 mg/dL range and much weaker at the extremes, especially in hypoglycemia. That matters much more than a single overall MAE when thinking about real-world usefulness.
 
-4. Automatic report generation
+1. Automatic report generation
 artifacts/main_run/reports/residual_histogram.html
 
 This report shows the residual distribution. Its purpose is to help us see:
@@ -180,7 +181,7 @@ whether uncertainty bands are informative or just very wide
 
 We also made the report generation path safer by only allowing Plotly report generation when the prediction table actually exists. That way the workflow is more robust and does not assume artifacts were created when they were not.
 
-5. Analysis outputs built on top of the run artifacts
+1. Analysis outputs built on top of the run artifacts
 
 We then took the core run artifacts and built a cleaner analysis layer on top of them.
 
@@ -190,7 +191,7 @@ artifacts/main_run/analysis_outputs/
 
 This folder is where the stronger reporting and interpretation artifacts now live.
 
-6. Metrics analysis workbook and executive summary
+1. Metrics analysis workbook and executive summary
 artifacts/main_run/analysis_outputs/metrics_analysis_workbook.xlsx
 
 This is the main analysis workbook.
@@ -221,7 +222,7 @@ what the next experiments should be
 
 This was useful because it forced the raw metrics into a cleaner narrative instead of just leaving them as numbers.
 
-7. Core analysis plots
+1. Core analysis plots
 artifacts/main_run/analysis_outputs/horizon_error_plot.png
 
 This plot shows how error grows with forecast horizon.
@@ -240,7 +241,7 @@ This plot shows MAE by subject.
 
 Its purpose is to show subject-to-subject variability and make heterogeneity obvious instead of hiding it inside a single overall average.
 
-8. Threshold-based accuracy analysis
+1. Threshold-based accuracy analysis
 
 One of the most useful additions was moving beyond only MAE and RMSE and asking a much more practical question:
 
@@ -307,7 +308,7 @@ Its purpose is to translate the grouped threshold numbers into plain language an
 
 This was a major step because it turned the evaluation into something much easier to understand from a real-use perspective.
 
-9. Event-aware analysis
+1. Event-aware analysis
 
 After that, we added event-aware analysis so we could move past general accuracy and start asking:
 
@@ -392,7 +393,7 @@ This layer was important because it moved the analysis much closer to real opera
 
 That gives us much better guidance for improvement.
 
-10. What the current results say
+1. What the current results say
 
 From the 3-epoch local Apple Silicon run, the overall picture is:
 

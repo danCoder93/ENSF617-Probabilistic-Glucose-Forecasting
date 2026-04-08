@@ -984,6 +984,8 @@ The runtime artifact flow is:
 9. `src/workflows/training.py` can export `data_summary.json`
 10. `src/workflows/training.py` writes `run_summary.json` with config,
     environment, evaluation, and artifact metadata
+11. post-run reporting and evaluation outputs may be appended or referenced back into
+    `run_summary.json` for a consolidated view of the run
 
 This matters because not all artifacts are produced at the same lifecycle
 stage. Some exist during training, while others exist only after prediction has
@@ -1170,6 +1172,8 @@ can emit:
 - `run_summary.json`
   compact machine-readable summary of config, runtime, evaluation, and artifact
   locations
+- `report_index.json`
+  lightweight index of report artifacts and entry points into structured outputs
 - `test_predictions.pt`
   raw prediction tensors
 - `test_predictions.csv`
@@ -1242,7 +1246,7 @@ This matters because the repo is now a system, not just a model file.
 
 ## Documentation Layer
 
-The documentation structure under `docs/` now has four roles:
+The documentation structure under `docs/` now has four roles (expanded to reflect current usage):
 
 - `current_architecture.md`
   current-system reference

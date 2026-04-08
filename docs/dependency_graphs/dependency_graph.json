@@ -296,6 +296,13 @@
       "layer": "production"
     },
     {
+      "name": "observability.reporting",
+      "path": "src/observability/reporting.py",
+      "package": "observability",
+      "category": "module",
+      "layer": "production"
+    },
+    {
       "name": "observability.runtime",
       "path": "src/observability/runtime.py",
       "package": "observability",
@@ -1291,19 +1298,25 @@
       "source": "observability",
       "target": "observability.callbacks",
       "edge_type": "re_export",
-      "line": 64
+      "line": 66
     },
     {
       "source": "observability",
       "target": "observability.logging_utils",
       "edge_type": "re_export",
-      "line": 76
+      "line": 78
     },
     {
       "source": "observability",
       "target": "observability.runtime",
       "edge_type": "re_export",
-      "line": 80
+      "line": 82
+    },
+    {
+      "source": "observability",
+      "target": "reporting",
+      "edge_type": "import",
+      "line": 94
     },
     {
       "source": "observability.callbacks",
@@ -1394,6 +1407,12 @@
       "target": "observability.utils",
       "edge_type": "import",
       "line": 62
+    },
+    {
+      "source": "observability.reporting",
+      "target": "reporting",
+      "edge_type": "import",
+      "line": 9
     },
     {
       "source": "observability.runtime",
@@ -2359,73 +2378,73 @@
       "source": "workflows.training",
       "target": "config",
       "edge_type": "import",
-      "line": 72
+      "line": 29
     },
     {
       "source": "workflows.training",
       "target": "config.types",
       "edge_type": "import",
-      "line": 81
+      "line": 39
     },
     {
       "source": "workflows.training",
       "target": "data.datamodule",
       "edge_type": "import",
-      "line": 919
+      "line": 1098
     },
     {
       "source": "workflows.training",
       "target": "defaults",
       "edge_type": "import",
-      "line": 82
+      "line": 40
     },
     {
       "source": "workflows.training",
       "target": "environment",
       "edge_type": "import",
-      "line": 88
+      "line": 46
     },
     {
       "source": "workflows.training",
       "target": "evaluation",
       "edge_type": "import",
-      "line": 111
+      "line": 69
     },
     {
       "source": "workflows.training",
       "target": "reporting",
       "edge_type": "import",
-      "line": 394
+      "line": 504
     },
     {
       "source": "workflows.training",
       "target": "reporting.structured_exports",
       "edge_type": "import",
-      "line": 450
+      "line": 560
     },
     {
       "source": "workflows.training",
       "target": "reporting.types",
       "edge_type": "import",
-      "line": 112
+      "line": 70
     },
     {
       "source": "workflows.training",
       "target": "train",
       "edge_type": "import",
-      "line": 113
+      "line": 71
     },
     {
       "source": "workflows.training",
       "target": "workflows.helpers",
       "edge_type": "import",
-      "line": 100
+      "line": 58
     },
     {
       "source": "workflows.training",
       "target": "workflows.types",
       "edge_type": "import",
-      "line": 105
+      "line": 63
     },
     {
       "source": "workflows.types",
@@ -2510,6 +2529,12 @@
     {
       "source": "observability",
       "target": "config",
+      "edge_type": "import",
+      "line": null
+    },
+    {
+      "source": "observability",
+      "target": "reporting",
       "edge_type": "import",
       "line": null
     },
@@ -2922,6 +2947,12 @@
       "target": "observability.logging_utils",
       "edge_type": "test_dependency",
       "line": 32
+    },
+    {
+      "source": "tests.observability.test_package",
+      "target": "observability.reporting",
+      "edge_type": "test_dependency",
+      "line": 34
     },
     {
       "source": "tests.observability.test_package",

@@ -24,6 +24,7 @@ digraph dependencies {
   "observability" [label="observability", shape="folder", style="filled", fillcolor="#d9eaf4", color="#0b3954"];
   "observability.callbacks" [label="observability.callbacks", shape="ellipse", style="filled", fillcolor="#f7f7f7", color="#6c757d"];
   "observability.logging_utils" [label="observability.logging_utils", shape="ellipse", style="filled", fillcolor="#f7f7f7", color="#6c757d"];
+  "observability.reporting" [label="observability.reporting", shape="ellipse", style="filled", fillcolor="#f7f7f7", color="#6c757d"];
   "observability.runtime" [label="observability.runtime", shape="ellipse", style="filled", fillcolor="#f7f7f7", color="#6c757d"];
   "reporting" [label="reporting", shape="folder", style="filled", fillcolor="#d9eaf4", color="#0b3954"];
   "reporting.builders" [label="reporting.builders", shape="ellipse", style="filled", fillcolor="#f7f7f7", color="#6c757d"];
@@ -130,6 +131,7 @@ digraph dependencies {
   "tests.observability.test_package" -> "observability" [color="#7d8597", style="dashed"];
   "tests.observability.test_package" -> "observability.callbacks" [color="#7d8597", style="dashed"];
   "tests.observability.test_package" -> "observability.logging_utils" [color="#7d8597", style="dashed"];
+  "tests.observability.test_package" -> "observability.reporting" [color="#7d8597", style="dashed"];
   "tests.observability.test_package" -> "observability.runtime" [color="#7d8597", style="dashed"];
   "tests.observability.test_runtime" -> "config" [color="#7d8597", style="dashed"];
   "tests.observability.test_runtime" -> "observability.runtime" [color="#7d8597", style="dashed"];
