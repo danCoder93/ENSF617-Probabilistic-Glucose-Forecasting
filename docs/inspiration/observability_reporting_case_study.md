@@ -1,3 +1,12 @@
+# Observability Reporting Case Study Notes
+
+Role: Preserved inspiration note from an earlier narrative analysis pass.
+Audience: Human authors preparing reports, slides, or narrative writeups.
+Owns: Historical case-study framing and descriptive commentary on run artifacts.
+Related docs: [`../artifact_diagnosis.md`](../artifact_diagnosis.md),
+[`paper_material_notes.md`](paper_material_notes.md),
+[`../current_architecture.md`](../current_architecture.md).
+
 ## OVERVIEW
 
 We took the workflow from something that trained and dumped a bunch of outputs into a folder to something that now leaves behind a much clearer trail of what data it used, how it performed, where it struggled, and which artifacts actually matter for reporting. We added cleaner run-level observability, structured metric summaries, grouped evaluation tables, automatic visual reports, threshold-based accuracy analysis, and event-aware analysis tied back to the processed data context. That gives us a much better handle on both debugging and real model interpretation, and it means the README, final report, and presentation can all build off the same artifact trail instead of us stitching the story together afterward

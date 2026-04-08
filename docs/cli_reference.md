@@ -1,5 +1,12 @@
 # CLI Argument Map
 
+Role: Canonical command-line interface reference for workflow configuration.
+Audience: Engineers and power users tuning runs from `main.py`.
+Owns: Flag-to-config mapping and runtime-default interpretation notes.
+Related docs: [`execution_guide.md`](execution_guide.md),
+[`current_architecture.md`](current_architecture.md),
+[`system_walkthrough.md`](system_walkthrough.md).
+
 This document maps the current `src/workflows/cli.py` flags to the typed config objects and workflow parameters used by the training entrypoint.
 
 ## How the CLI is wired

@@ -1,5 +1,24 @@
 # An Exposition of the Data Contract, Fused Forecasting Model, and Training Procedure
 
+Role: Preserved full-length methods monograph for the data-to-model-to-training
+pipeline.
+Audience: Researchers and advanced contributors studying implementation and
+method choices in depth.
+Owns: Detailed methodological exposition, tensor semantics, and optimization
+reasoning.
+Related docs: [`../../README.md`](../../README.md),
+[`../system_walkthrough.md`](../system_walkthrough.md),
+[`materials_and_methods.md`](materials_and_methods.md),
+[`../current_architecture.md`](../current_architecture.md),
+[`../repository_primer.md`](../repository_primer.md),
+[`probabilistic_forecasting.md`](probabilistic_forecasting.md).
+
+This document is intentionally not the first deep read after the README. Start
+with [`../system_walkthrough.md`](../system_walkthrough.md) if you want the
+broad system story first, or [`materials_and_methods.md`](materials_and_methods.md)
+if you want the shorter paper-oriented methods path. Use this file when you
+want the full monograph-length methods treatment.
+
 ## Abstract
 
 This document is a self-contained academic exposition of the glucose forecasting pipeline implemented in the `danCoder93/ENSF617-Probabilistic-Glucose-Forecasting` repository. It aims to answer the practical questions that matter most when one first encounters a modern research codebase:
@@ -28,7 +47,7 @@ This document reconstructs the conceptual algorithm that the code implements, ma
 2. [Scientific Objective](#2-scientific-objective)
 3. [Dataset Provenance and Research Context](#3-dataset-provenance-and-research-context)
 4. [The Foundational Forecasting Question](#4-the-foundational-forecasting-question)
-5. [The Repository’s Current Experimental Contract](#5-the-repositorys-current-experimental-contract)
+5. [The Current Experimental Contract](#5-the-current-experimental-contract)
 6. [Raw Data to Canonical Table](#6-raw-data-to-canonical-table)
 7. [Canonical Columns and Their Meaning](#7-canonical-columns-and-their-meaning)
 8. [Cleaning and Table-Wide Normalization](#8-cleaning-and-table-wide-normalization)
