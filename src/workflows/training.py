@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 import csv
+import subprocess
+import sys
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -844,6 +846,75 @@ def run_environment_benchmark_workflow(
 
     return EnvironmentBenchmarkArtifacts(summary=summary, summary_path=summary_path)
 
+def _run_post_run_analysis_scripts(
+    *,
+    artifact_dir: Path,
+) -> dict[str, str]:
+    """
+    Run optional post-run analysis scripts after the core workflow finishes.
+
+    Design choice:
+    - these scripts are best-effort post-processing only
+    - failures here should not invalidate a successful train/test/predict run
+    - each script receives the same artifact directory so outputs stay aligned
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    scripts_dir = repo_root / "scripts"
+
+    script_names = [
+        "build_metrics_analysis.py",
+        "build_threshold_accuracy_analysis.py",
+        "build_persistence_baseline.py",
+        "build_event_aware_analysis.py",
+        "build_run_health_summary.py",
+    ]
+
+    results: dict[str, str] = {}
+
+    for script_name in script_names:
+        script_path = scripts_dir / script_name
+        label = script_path.stem
+
+        if not script_path.exists():
+            results[label] = "missing"
+            print(f"[post-run] Skipping missing script: {script_path}")
+            continue
+
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--artifact-dir",
+            str(artifact_dir),
+        ]
+
+        try:
+            completed = subprocess.run(
+                cmd,
+                cwd=repo_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            results[label] = "ok"
+            print(f"[post-run] Completed: {script_name}")
+            if completed.stdout.strip():
+                print(completed.stdout.strip())
+            if completed.stderr.strip():
+                print(completed.stderr.strip())
+
+        except subprocess.CalledProcessError as exc:
+            results[label] = f"failed ({exc.returncode})"
+            print(f"[post-run] FAILED: {script_name} (exit code {exc.returncode})")
+            if exc.stdout.strip():
+                print(exc.stdout.strip())
+            if exc.stderr.strip():
+                print(exc.stderr.strip())
+
+        except Exception as exc:
+            results[label] = f"error ({type(exc).__name__})"
+            print(f"[post-run] ERROR running {script_name}: {exc}")
+
+    return results
 
 def run_training_workflow(
     config: Config,
@@ -1459,6 +1530,21 @@ def run_training_workflow(
         # outside Python.
         summary_path = output_dir / "run_summary.json"
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+        # Run best-effort post-run analysis scripts only after the core summary
+        # and artifact bundle already exist on disk.
+        post_run_analysis_results = _run_post_run_analysis_scripts(
+            artifact_dir=output_dir,
+        )
+
+        # Persist the script statuses into the run summary and rewrite it so the
+        # final summary reflects both the core workflow and any post-run
+        # analysis outcomes.
+        summary["post_run_analysis"] = post_run_analysis_results
+        summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+        print("Post-run analysis script results:")
+        print(post_run_analysis_results)
 
     return MainRunArtifacts(
         fit=fit_artifacts,
