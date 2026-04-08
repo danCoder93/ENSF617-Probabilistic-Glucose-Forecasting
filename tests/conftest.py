@@ -7,7 +7,9 @@ pipeline.
 
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,20 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
+
+# Some optional training/reporting dependencies import Matplotlib during test
+# collection. In the sandboxed environment the default user cache locations are
+# not writable, which produces noisy cache/fontconfig errors before the tests
+# even start. Point those caches into a pytest-safe temp directory so the suite
+# can run cleanly with the default `pytest` command.
+TEST_CACHE_DIR = Path(tempfile.gettempdir()) / "ensf617-pytest-cache"
+TEST_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+MATPLOTLIB_CACHE_DIR = TEST_CACHE_DIR / "matplotlib"
+XDG_CACHE_DIR = TEST_CACHE_DIR / "xdg-cache"
+MATPLOTLIB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+XDG_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", str(MATPLOTLIB_CACHE_DIR))
+os.environ.setdefault("XDG_CACHE_HOME", str(XDG_CACHE_DIR))
 
 from config import DataConfig
 from tests.support import BuildDataConfig, WriteProcessedCsv
