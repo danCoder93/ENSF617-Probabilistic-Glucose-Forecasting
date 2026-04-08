@@ -1,8 +1,37 @@
-# Repository Primer
+# Repository Primer (Full)
 
-## Abstract
+Role: Preserved full-length version of the repository primer for readers who
+want one continuous long-form explanation.
+Audience: Engineers, contributors, reviewers, and researchers who want one
+coherent deep read before diving into narrower docs.
+Owns: Extended systems narrative, conceptual flow, and orientation guidance.
+Related docs: [`../../README.md`](../../README.md),
+[`../system_walkthrough.md`](../system_walkthrough.md),
+[`../current_architecture.md`](../current_architecture.md),
+[`../codebase_evolution.md`](../codebase_evolution.md),
+[`../repository_primer.md`](../repository_primer.md),
+[`../research/methods_exposition.md`](../research/methods_exposition.md),
+[`../research/probabilistic_forecasting.md`](../research/probabilistic_forecasting.md).
 
-This document is a formal, repository-scale primer intended to explain the entire codebase at a level suitable for a serious first reading. Its purpose is not merely to describe individual files, but to explain the repository as a system: its research objective, architectural decomposition, execution flow, data contracts, model logic, runtime policy, evaluation methodology, and artifact surface.
+If the root `README.md` is the interface to the repository, the recommended
+next reads are now [`../system_walkthrough.md`](../system_walkthrough.md) and
+[`../repository_primer.md`](../repository_primer.md). This file preserves the
+older continuous, essay-style treatment of the repository.
+
+Use [`current_architecture.md`](../current_architecture.md) when you need the
+authoritative current package boundaries, runtime ownership, or artifact
+policy. This primer intentionally overlaps with some of those topics because it
+is written as an onboarding lens, but it prioritizes conceptual flow and
+systems understanding over acting as the canonical fact owner.
+
+## Overview
+
+This document is a formal, repository-scale primer intended to explain the
+entire codebase at a level suitable for a serious long-form reading. Its
+purpose is not merely to describe individual files, but to explain the
+repository as a system: its research objective, architectural decomposition,
+execution flow, data contracts, model logic, runtime policy, evaluation
+methodology, and artifact surface.
 
 The repository implements a research-oriented probabilistic glucose forecasting pipeline centered on a fused Temporal Convolutional Network (TCN) and Temporal Fusion Transformer (TFT) architecture. The implementation is layered deliberately. Raw dataset acquisition, preprocessing, semantic feature typing, window indexing, model construction, runtime profile resolution, training orchestration, structured evaluation, observability, and reporting are separated into distinct packages so that the code can be understood, tested, and extended without collapsing into a monolithic script.
 
@@ -24,7 +53,12 @@ this repository is a research codebase for probabilistic glucose forecasting. It
 
 ### 1.1 Document Aim
 
-The immediate purpose of this primer is to serve as an architectural reading companion for the repository. The longer-term purpose is to reduce onboarding cost. A codebase of this kind is difficult to understand if approached file by file without a systems view. This document therefore proceeds from system-level intent down to individual packages, interfaces, and algorithms.
+The immediate purpose of this primer is to serve as the repository's main
+architectural reading companion after the README. The longer-term purpose is to
+reduce onboarding cost. A codebase of this kind is difficult to understand if
+approached file by file without a systems view. This document therefore
+proceeds from system-level intent down to individual packages, interfaces, and
+algorithms.
 
 ### 1.2 Intended Reader
 
@@ -57,6 +91,10 @@ This document does not attempt to:
 - prove empirical superiority of the model
 - provide a clinical interpretation of outputs
 - replace source-level reading when implementation detail matters
+
+When this primer overlaps with the present-state reference, treat
+[`current_architecture.md`](../current_architecture.md) as the source of truth for
+exact current boundaries and behavior.
 
 ## 2. Problem Statement
 
@@ -177,8 +215,8 @@ The most useful way to understand this layout is by responsibility.
 
 Files:
 
-- [`../main.py`](../main.py)
-- [`../defaults.py`](../defaults.py)
+- [`../main.py`](../../main.py)
+- [`../defaults.py`](../../defaults.py)
 - `main.ipynb`
 
 Responsibilities:
@@ -193,10 +231,10 @@ The root files are intentionally thin. Their function is not to contain the syst
 
 Representative files:
 
-- [`../src/config/data.py`](../src/config/data.py)
-- [`../src/config/model.py`](../src/config/model.py)
-- [`../src/config/runtime.py`](../src/config/runtime.py)
-- [`../src/config/observability.py`](../src/config/observability.py)
+- [`../src/config/data.py`](../../src/config/data.py)
+- [`../src/config/model.py`](../../src/config/model.py)
+- [`../src/config/runtime.py`](../../src/config/runtime.py)
+- [`../src/config/observability.py`](../../src/config/observability.py)
 
 Responsibilities:
 
@@ -210,10 +248,10 @@ This package expresses what the system should try to do.
 
 Representative files:
 
-- [`../src/environment/detection.py`](../src/environment/detection.py)
-- [`../src/environment/profiles.py`](../src/environment/profiles.py)
-- [`../src/environment/diagnostics.py`](../src/environment/diagnostics.py)
-- [`../src/environment/tuning.py`](../src/environment/tuning.py)
+- [`../src/environment/detection.py`](../../src/environment/detection.py)
+- [`../src/environment/profiles.py`](../../src/environment/profiles.py)
+- [`../src/environment/diagnostics.py`](../../src/environment/diagnostics.py)
+- [`../src/environment/tuning.py`](../../src/environment/tuning.py)
 
 Responsibilities:
 
@@ -228,13 +266,13 @@ This package expresses what the current machine can do and how the repository sh
 
 Representative files:
 
-- [`../src/data/downloader.py`](../src/data/downloader.py)
-- [`../src/data/preprocessor.py`](../src/data/preprocessor.py)
-- [`../src/data/transforms.py`](../src/data/transforms.py)
-- [`../src/data/schema.py`](../src/data/schema.py)
-- [`../src/data/indexing.py`](../src/data/indexing.py)
-- [`../src/data/dataset.py`](../src/data/dataset.py)
-- [`../src/data/datamodule.py`](../src/data/datamodule.py)
+- [`../src/data/downloader.py`](../../src/data/downloader.py)
+- [`../src/data/preprocessor.py`](../../src/data/preprocessor.py)
+- [`../src/data/transforms.py`](../../src/data/transforms.py)
+- [`../src/data/schema.py`](../../src/data/schema.py)
+- [`../src/data/indexing.py`](../../src/data/indexing.py)
+- [`../src/data/dataset.py`](../../src/data/dataset.py)
+- [`../src/data/datamodule.py`](../../src/data/datamodule.py)
 
 Responsibilities:
 
@@ -252,11 +290,11 @@ This package expresses how raw data becomes a valid model input contract.
 
 Representative files:
 
-- [`../src/models/fused_model.py`](../src/models/fused_model.py)
-- [`../src/models/tcn.py`](../src/models/tcn.py)
-- [`../src/models/tft.py`](../src/models/tft.py)
-- [`../src/models/grn.py`](../src/models/grn.py)
-- [`../src/models/nn_head.py`](../src/models/nn_head.py)
+- [`../src/models/fused_model.py`](../../src/models/fused_model.py)
+- [`../src/models/tcn.py`](../../src/models/tcn.py)
+- [`../src/models/tft.py`](../../src/models/tft.py)
+- [`../src/models/grn.py`](../../src/models/grn.py)
+- [`../src/models/nn_head.py`](../../src/models/nn_head.py)
 
 Responsibilities:
 
@@ -272,7 +310,7 @@ This package expresses how grouped tensors become probabilistic forecasts.
 
 File:
 
-- [`../src/train.py`](../src/train.py)
+- [`../src/train.py`](../../src/train.py)
 
 Responsibilities:
 
@@ -287,10 +325,10 @@ This file is the bridge between repository semantics and Lightning mechanics.
 
 Representative files:
 
-- [`../src/workflows/cli.py`](../src/workflows/cli.py)
-- [`../src/workflows/training.py`](../src/workflows/training.py)
-- [`../src/workflows/helpers.py`](../src/workflows/helpers.py)
-- [`../src/workflows/types.py`](../src/workflows/types.py)
+- [`../src/workflows/cli.py`](../../src/workflows/cli.py)
+- [`../src/workflows/training.py`](../../src/workflows/training.py)
+- [`../src/workflows/helpers.py`](../../src/workflows/helpers.py)
+- [`../src/workflows/types.py`](../../src/workflows/types.py)
 
 Responsibilities:
 
@@ -306,11 +344,11 @@ This package expresses how the entire repository behaves as one experiment pipel
 
 Representative files:
 
-- [`../src/evaluation/core.py`](../src/evaluation/core.py)
-- [`../src/evaluation/metrics.py`](../src/evaluation/metrics.py)
-- [`../src/evaluation/grouping.py`](../src/evaluation/grouping.py)
-- [`../src/evaluation/evaluator.py`](../src/evaluation/evaluator.py)
-- [`../src/evaluation/types.py`](../src/evaluation/types.py)
+- [`../src/evaluation/core.py`](../../src/evaluation/core.py)
+- [`../src/evaluation/metrics.py`](../../src/evaluation/metrics.py)
+- [`../src/evaluation/grouping.py`](../../src/evaluation/grouping.py)
+- [`../src/evaluation/evaluator.py`](../../src/evaluation/evaluator.py)
+- [`../src/evaluation/types.py`](../../src/evaluation/types.py)
 
 Responsibilities:
 
@@ -325,12 +363,12 @@ This package expresses how forecasts are judged after they have been produced.
 
 Representative files:
 
-- [`../src/observability/runtime.py`](../src/observability/runtime.py)
-- [`../src/observability/callbacks.py`](../src/observability/callbacks.py)
-- [`../src/observability/debug_callbacks.py`](../src/observability/debug_callbacks.py)
-- [`../src/observability/system_callbacks.py`](../src/observability/system_callbacks.py)
-- [`../src/observability/parameter_callbacks.py`](../src/observability/parameter_callbacks.py)
-- [`../src/observability/prediction_callbacks.py`](../src/observability/prediction_callbacks.py)
+- [`../src/observability/runtime.py`](../../src/observability/runtime.py)
+- [`../src/observability/callbacks.py`](../../src/observability/callbacks.py)
+- [`../src/observability/debug_callbacks.py`](../../src/observability/debug_callbacks.py)
+- [`../src/observability/system_callbacks.py`](../../src/observability/system_callbacks.py)
+- [`../src/observability/parameter_callbacks.py`](../../src/observability/parameter_callbacks.py)
+- [`../src/observability/prediction_callbacks.py`](../../src/observability/prediction_callbacks.py)
 
 Responsibilities:
 
@@ -348,12 +386,12 @@ A key distinction is that observability operates during runtime, while reporting
 
 Representative files:
 
-- [`../src/reporting/prediction_rows.py`](../src/reporting/prediction_rows.py)
-- [`../src/reporting/report_tables.py`](../src/reporting/report_tables.py)
-- [`../src/reporting/report_text.py`](../src/reporting/report_text.py)
-- [`../src/reporting/builders.py`](../src/reporting/builders.py)
-- [`../src/reporting/tensorboard.py`](../src/reporting/tensorboard.py)
-- [`../src/reporting/plotly_reports.py`](../src/reporting/plotly_reports.py)
+- [`../src/reporting/prediction_rows.py`](../../src/reporting/prediction_rows.py)
+- [`../src/reporting/report_tables.py`](../../src/reporting/report_tables.py)
+- [`../src/reporting/report_text.py`](../../src/reporting/report_text.py)
+- [`../src/reporting/builders.py`](../../src/reporting/builders.py)
+- [`../src/reporting/tensorboard.py`](../../src/reporting/tensorboard.py)
+- [`../src/reporting/plotly_reports.py`](../../src/reporting/plotly_reports.py)
 
 Responsibilities:
 
@@ -447,7 +485,7 @@ flowchart TB
 
 File:
 
-- [`../main.py`](../main.py)
+- [`../main.py`](../../main.py)
 
 This file is intentionally minimal. It re-exports a number of public surfaces, including config builders and workflow functions, but its most important role is to preserve the repository's stable entrypoint:
 
@@ -462,7 +500,7 @@ The key architectural point is that `main.py` does not itself contain the heavy 
 
 File:
 
-- [`../defaults.py`](../defaults.py)
+- [`../defaults.py`](../../defaults.py)
 
 This module defines baseline builders for:
 
@@ -482,7 +520,7 @@ Important conceptual distinction:
 
 File:
 
-- [`../src/workflows/cli.py`](../src/workflows/cli.py)
+- [`../src/workflows/cli.py`](../../src/workflows/cli.py)
 
 This module performs the following critical handoff:
 
@@ -514,10 +552,10 @@ Typed config objects provide:
 
 The main packages are:
 
-- [`../src/config/data.py`](../src/config/data.py)
-- [`../src/config/model.py`](../src/config/model.py)
-- [`../src/config/runtime.py`](../src/config/runtime.py)
-- [`../src/config/observability.py`](../src/config/observability.py)
+- [`../src/config/data.py`](../../src/config/data.py)
+- [`../src/config/model.py`](../../src/config/model.py)
+- [`../src/config/runtime.py`](../../src/config/runtime.py)
+- [`../src/config/observability.py`](../../src/config/observability.py)
 
 ### 9.2 DataConfig
 
@@ -657,7 +695,7 @@ The fused model cannot be built correctly from the declarative config alone, bec
 The key mechanism is:
 
 - `AZT1DDataModule.bind_model_config(...)` in
-[`../src/data/datamodule.py`](../src/data/datamodule.py)
+[`../src/data/datamodule.py`](../../src/data/datamodule.py)
 
 This is the reason the trainer wrapper prepares the DataModule before model construction.
 
@@ -681,7 +719,7 @@ Therefore the repository treats environment resolution as a real subsystem.
 
 File:
 
-- [`../src/environment/detection.py`](../src/environment/detection.py)
+- [`../src/environment/detection.py`](../../src/environment/detection.py)
 
 This module probes:
 
@@ -702,7 +740,7 @@ The output is a normalized `RuntimeEnvironment` object.
 
 File:
 
-- [`../src/environment/profiles.py`](../src/environment/profiles.py)
+- [`../src/environment/profiles.py`](../../src/environment/profiles.py)
 
 This module maps the detected environment to one of several repository-specific profiles, such as:
 
@@ -726,7 +764,7 @@ while respecting explicit user overrides.
 
 File:
 
-- [`../src/environment/diagnostics.py`](../src/environment/diagnostics.py)
+- [`../src/environment/diagnostics.py`](../../src/environment/diagnostics.py)
 
 This module converts the resolved runtime choice into actionable diagnostics, for example:
 
@@ -740,7 +778,7 @@ This module converts the resolved runtime choice into actionable diagnostics, fo
 
 File:
 
-- [`../src/environment/tuning.py`](../src/environment/tuning.py)
+- [`../src/environment/tuning.py`](../../src/environment/tuning.py)
 
 This module applies backend-level runtime knobs such as:
 
@@ -764,7 +802,7 @@ The data subsystem is the foundation of the entire repository. If the data contr
 
 File:
 
-- [`../src/data/downloader.py`](../src/data/downloader.py)
+- [`../src/data/downloader.py`](../../src/data/downloader.py)
 
 The downloader performs raw file acquisition only. It does not know:
 
@@ -785,7 +823,7 @@ This stage exists because raw byte acquisition is conceptually distinct from tab
 
 File:
 
-- [`../src/data/preprocessor.py`](../src/data/preprocessor.py)
+- [`../src/data/preprocessor.py`](../../src/data/preprocessor.py)
 
 The preprocessor converts vendor-shaped AZT1D CSV exports into one canonical processed CSV. It standardizes raw columns into stable internal names such as:
 
@@ -815,7 +853,7 @@ After the canonical processed CSV exists, the repository performs dataframe-wide
 
 File:
 
-- [`../src/data/transforms.py`](../src/data/transforms.py)
+- [`../src/data/transforms.py`](../../src/data/transforms.py)
 
 This stage:
 
@@ -855,8 +893,8 @@ These encode periodic temporal structure without imposing hard discontinuities f
 
 Files:
 
-- [`../src/data/schema.py`](../src/data/schema.py)
-- [`../src/utils/tft_utils.py`](../src/utils/tft_utils.py)
+- [`../src/data/schema.py`](../../src/data/schema.py)
+- [`../src/utils/tft_utils.py`](../../src/utils/tft_utils.py)
 
 This is one of the repository's most important conceptual layers.
 
@@ -894,7 +932,7 @@ Target:
 
 ### 14.3 FeatureGroups
 
-`FeatureGroups` in [`../src/data/schema.py`](../src/data/schema.py) is the bridge between dataframe columns and grouped model tensors. It defines:
+`FeatureGroups` in [`../src/data/schema.py`](../../src/data/schema.py) is the bridge between dataframe columns and grouped model tensors. It defines:
 
 - `static_categorical`
 - `static_continuous`
@@ -921,7 +959,7 @@ These are related but not identical problems.
 
 File:
 
-- [`../src/data/indexing.py`](../src/data/indexing.py)
+- [`../src/data/indexing.py`](../../src/data/indexing.py)
 
 The repository supports multiple split strategies:
 
@@ -967,7 +1005,7 @@ This object is one of the cleanest examples of the repository's architectural di
 
 File:
 
-- [`../src/data/dataset.py`](../src/data/dataset.py)
+- [`../src/data/dataset.py`](../../src/data/dataset.py)
 
 This module answers a narrower question than the indexing module:
 
@@ -1025,7 +1063,7 @@ This metadata is not part of the computation graph. It exists so evaluation and 
 
 File:
 
-- [`../src/data/datamodule.py`](../src/data/datamodule.py)
+- [`../src/data/datamodule.py`](../../src/data/datamodule.py)
 
 The DataModule is the operational coordinator of the data package.
 
@@ -1090,7 +1128,7 @@ This design is not incidental. It encodes the repository's belief that the data 
 
 The repository's main forecasting model is `FusedModel`:
 
-- [`../src/models/fused_model.py`](../src/models/fused_model.py)
+- [`../src/models/fused_model.py`](../../src/models/fused_model.py)
 
 At a high level, it combines two complementary modeling ideas.
 
@@ -1119,7 +1157,7 @@ This is why the architecture is not "TCN versus TFT." It is a late-fusion hybrid
 
 File:
 
-- [`../src/models/tcn.py`](../src/models/tcn.py)
+- [`../src/models/tcn.py`](../../src/models/tcn.py)
 
 ### 20.1 Architectural Role
 
@@ -1160,7 +1198,7 @@ The fused model uses `forward_features(...)` because it wants branch-aligned rep
 
 File:
 
-- [`../src/models/tft.py`](../src/models/tft.py)
+- [`../src/models/tft.py`](../../src/models/tft.py)
 
 The TFT file is longer and structurally denser than most other model files in the repository. That complexity is expected because TFT is doing more than a plain temporal convolution stack.
 
@@ -1229,7 +1267,7 @@ The TFT is the primary reason the repository invests heavily in semantic feature
 
 File:
 
-- [`../src/models/fused_model.py`](../src/models/fused_model.py)
+- [`../src/models/fused_model.py`](../../src/models/fused_model.py)
 
 The fused model is the center of the repository's modeling story.
 
@@ -1498,7 +1536,7 @@ The repository's architecture is designed around this delegation. It builds the 
 
 File:
 
-- [`../src/train.py`](../src/train.py)
+- [`../src/train.py`](../../src/train.py)
 
 The trainer wrapper is one of the most important integration layers in the repository.
 
@@ -1547,7 +1585,7 @@ The wrapper's in-memory test and prediction helpers assume that `fit()` has run 
 
 File:
 
-- [`../src/workflows/training.py`](../src/workflows/training.py)
+- [`../src/workflows/training.py`](../../src/workflows/training.py)
 
 The workflow layer sits one level above the trainer wrapper.
 
@@ -1650,7 +1688,7 @@ The repository depends on different kinds of dependencies:
 
 ### 29.1 Software Dependencies
 
-From [`../requirements.txt`](../requirements.txt):
+From [`../../requirements.txt`](../../requirements.txt):
 
 - `torch`
 - `pytorch-lightning`
@@ -1724,13 +1762,13 @@ point_prediction [batch, horizon]
 
 This shape normalization occurs in:
 
-- [`../src/evaluation/core.py`](../src/evaluation/core.py)
+- [`../src/evaluation/core.py`](../../src/evaluation/core.py)
 
 ### 30.3 Scalar Metrics
 
 Primitive metrics are implemented in:
 
-- [`../src/evaluation/metrics.py`](../src/evaluation/metrics.py)
+- [`../src/evaluation/metrics.py`](../../src/evaluation/metrics.py)
 
 These include:
 
@@ -1767,7 +1805,7 @@ The evaluation package returns typed dataclasses such as:
 
 These types are defined in:
 
-- [`../src/evaluation/types.py`](../src/evaluation/types.py)
+- [`../src/evaluation/types.py`](../../src/evaluation/types.py)
 
 This typed surface keeps evaluation results inspectable and serializable.
 
@@ -1780,12 +1818,12 @@ more structured than it was in earlier snapshots.
 
 Representative files:
 
-- [`../src/observability/runtime.py`](../src/observability/runtime.py)
-- [`../src/observability/callbacks.py`](../src/observability/callbacks.py)
-- [`../src/observability/debug_callbacks.py`](../src/observability/debug_callbacks.py)
-- [`../src/observability/system_callbacks.py`](../src/observability/system_callbacks.py)
-- [`../src/observability/parameter_callbacks.py`](../src/observability/parameter_callbacks.py)
-- [`../src/observability/prediction_callbacks.py`](../src/observability/prediction_callbacks.py)
+- [`../src/observability/runtime.py`](../../src/observability/runtime.py)
+- [`../src/observability/callbacks.py`](../../src/observability/callbacks.py)
+- [`../src/observability/debug_callbacks.py`](../../src/observability/debug_callbacks.py)
+- [`../src/observability/system_callbacks.py`](../../src/observability/system_callbacks.py)
+- [`../src/observability/parameter_callbacks.py`](../../src/observability/parameter_callbacks.py)
+- [`../src/observability/prediction_callbacks.py`](../../src/observability/prediction_callbacks.py)
 
 Runtime observability includes:
 
@@ -1813,12 +1851,12 @@ observability primarily answers:
 
 Representative files:
 
-- [`../src/reporting/prediction_rows.py`](../src/reporting/prediction_rows.py)
-- [`../src/reporting/report_tables.py`](../src/reporting/report_tables.py)
-- [`../src/reporting/report_text.py`](../src/reporting/report_text.py)
-- [`../src/reporting/builders.py`](../src/reporting/builders.py)
-- [`../src/reporting/tensorboard.py`](../src/reporting/tensorboard.py)
-- [`../src/reporting/plotly_reports.py`](../src/reporting/plotly_reports.py)
+- [`../src/reporting/prediction_rows.py`](../../src/reporting/prediction_rows.py)
+- [`../src/reporting/report_tables.py`](../../src/reporting/report_tables.py)
+- [`../src/reporting/report_text.py`](../../src/reporting/report_text.py)
+- [`../src/reporting/builders.py`](../../src/reporting/builders.py)
+- [`../src/reporting/tensorboard.py`](../../src/reporting/tensorboard.py)
+- [`../src/reporting/plotly_reports.py`](../../src/reporting/plotly_reports.py)
 
 The reporting layer includes:
 
@@ -1854,7 +1892,7 @@ The repository uses two major storage regions during ordinary operation:
 - dataset storage under `data/`
 - run outputs under `artifacts/`
 
-The default run-output root is defined in [`../defaults.py`](../defaults.py) as:
+The default run-output root is defined in [`../defaults.py`](../../defaults.py) as:
 
 ```text
 artifacts/main_run/
@@ -1938,31 +1976,31 @@ A reader attempting to understand the repository in one sitting should not move 
 
 ### 32.1 Recommended reading order
 
-1. [`../main.py`](../main.py)
-2. [`../defaults.py`](../defaults.py)
-3. [`../src/workflows/cli.py`](../src/workflows/cli.py)
-4. [`../src/workflows/training.py`](../src/workflows/training.py)
-5. [`../src/train.py`](../src/train.py)
-6. [`../src/data/datamodule.py`](../src/data/datamodule.py)
-7. [`../src/data/dataset.py`](../src/data/dataset.py)
-8. [`../src/data/indexing.py`](../src/data/indexing.py)
-9. [`../src/models/fused_model.py`](../src/models/fused_model.py)
-10. [`../src/models/tcn.py`](../src/models/tcn.py)
-11. [`../src/models/tft.py`](../src/models/tft.py)
-12. [`../src/evaluation/evaluator.py`](../src/evaluation/evaluator.py)
-13. [`../src/observability/callbacks.py`](../src/observability/callbacks.py)
-14. [`../src/reporting/builders.py`](../src/reporting/builders.py)
+1. [`../main.py`](../../main.py)
+2. [`../defaults.py`](../../defaults.py)
+3. [`../src/workflows/cli.py`](../../src/workflows/cli.py)
+4. [`../src/workflows/training.py`](../../src/workflows/training.py)
+5. [`../src/train.py`](../../src/train.py)
+6. [`../src/data/datamodule.py`](../../src/data/datamodule.py)
+7. [`../src/data/dataset.py`](../../src/data/dataset.py)
+8. [`../src/data/indexing.py`](../../src/data/indexing.py)
+9. [`../src/models/fused_model.py`](../../src/models/fused_model.py)
+10. [`../src/models/tcn.py`](../../src/models/tcn.py)
+11. [`../src/models/tft.py`](../../src/models/tft.py)
+12. [`../src/evaluation/evaluator.py`](../../src/evaluation/evaluator.py)
+13. [`../src/observability/callbacks.py`](../../src/observability/callbacks.py)
+14. [`../src/reporting/builders.py`](../../src/reporting/builders.py)
 
 ### 32.2 Minimal reading set for rapid orientation
 
 If time is limited, the five most informative files are:
 
-1. [`../src/workflows/training.py`](../src/workflows/training.py)
-2. [`../src/train.py`](../src/train.py)
-3. [`../src/data/datamodule.py`](../src/data/datamodule.py)
-4. [`../src/models/fused_model.py`](../src/models/fused_model.py)
-5. [`../src/evaluation/evaluator.py`](../src/evaluation/evaluator.py)
-6. [`../src/reporting/builders.py`](../src/reporting/builders.py)
+1. [`../src/workflows/training.py`](../../src/workflows/training.py)
+2. [`../src/train.py`](../../src/train.py)
+3. [`../src/data/datamodule.py`](../../src/data/datamodule.py)
+4. [`../src/models/fused_model.py`](../../src/models/fused_model.py)
+5. [`../src/evaluation/evaluator.py`](../../src/evaluation/evaluator.py)
+6. [`../src/reporting/builders.py`](../../src/reporting/builders.py)
 
 ### 32.3 Tests as Evidence
 
@@ -2038,17 +2076,19 @@ If the repository still feels large, the following checklist captures the ten mo
 
 This primer is best used together with the repository's other architecture documents:
 
-- [`./current_architecture.md`](./current_architecture.md)
-- [`./codebase_evolution.md`](./codebase_evolution.md)
-- [`./dependency_graphs/summary.md`](./dependency_graphs/summary.md)
-- [`./dependency_graphs/production_module_graph.svg`](./dependency_graphs/production_module_graph.svg)
-- [`./assets/FusedModel_architecture.png`](./assets/FusedModel_architecture.png)
-- [`./assets/TCN_architecture.png`](./assets/TCN_architecture.png)
-- [`./assets/TFT_architecture.PNG`](./assets/TFT_architecture.PNG)
+- [`./system_walkthrough.md`](../system_walkthrough.md)
+- [`./current_architecture.md`](../current_architecture.md)
+- [`./codebase_evolution.md`](../codebase_evolution.md)
+- [`./dependency_graphs/summary.md`](../dependency_graphs/summary.md)
+- [`./dependency_graphs/production_module_graph.svg`](../dependency_graphs/production_module_graph.svg)
+- [`./assets/FusedModel_architecture.png`](../assets/FusedModel_architecture.png)
+- [`./assets/TCN_architecture.png`](../assets/TCN_architecture.png)
+- [`./assets/TFT_architecture.PNG`](../assets/TFT_architecture.PNG)
 
 The role of those documents is complementary:
 
-- this primer explains the repository as a system for first-pass understanding
+- `system_walkthrough.md` is the guided second-pass read after the README
+- this primer preserves the longer continuous systems monograph
 - `current_architecture.md` gives a point-in-time architecture summary
 - `codebase_evolution.md` explains how the repository acquired its present shape
 - dependency graphs provide static structural evidence

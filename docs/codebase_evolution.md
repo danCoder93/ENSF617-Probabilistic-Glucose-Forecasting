@@ -1,5 +1,12 @@
 # Codebase Evolution
 
+Role: Historical narrative for why the repository took its current shape.
+Audience: Maintainers and researchers who need design rationale over time.
+Owns: Milestone timeline, design pressures, and links to archival notes.
+Related docs: [`current_architecture.md`](current_architecture.md),
+[`history/`](history/), [`system_walkthrough.md`](system_walkthrough.md),
+[`repository_primer.md`](repository_primer.md).
+
 This document is the historical companion to
 [`current_architecture.md`](current_architecture.md). Its purpose is to explain
 how the repository moved from its early prototype form to the current layered
@@ -920,5 +927,4 @@ For deeper detail on any one phase, use the archived summaries:
 - [`history/observability_package_refactor_summary.md`](history/observability_package_refactor_summary.md)
 - [`history/evaluation_package_summary.md`](history/evaluation_package_summary.md)
 - [`history/environment_runtime_profiles_summary.md`](history/environment_runtime_profiles_summary.md)
-- [`history/test_layout_and_runtime_modernization_summary.md`](history/test_layout_and_runtime_modernization_summary.md)
 - [`history/test_layout_and_runtime_modernization_summary.md`](history/test_layout_and_runtime_modernization_summary.md)

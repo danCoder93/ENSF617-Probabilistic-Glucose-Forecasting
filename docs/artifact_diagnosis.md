@@ -1,5 +1,13 @@
 # Forensic Artifact Diagnosis of the Probabilistic Glucose Forecasting Run
 
+Role: Case-study analysis lens for reading and interpreting run artifacts.
+Audience: Engineers and researchers diagnosing model behavior from generated
+outputs.
+Owns: Artifact interpretation workflow and run-specific forensic findings.
+Related docs: [`current_architecture.md`](current_architecture.md),
+[`execution_guide.md`](execution_guide.md),
+[`inspiration/observability_reporting_case_study.md`](inspiration/observability_reporting_case_study.md).
+
 ## Abstract
 
 This document is a forensic, artifact-tied diagnosis of the uploaded run artifacts in `artifacts/main_run/`. It is not a generic explanation of forecasting metrics. Every major statement in this document is tied to the actual exported files from the run: the shared-report tables, the run summary, the prediction table, the telemetry stream, and the profiler outputs.
@@ -1172,4 +1180,3 @@ It is now **model behavior itself**, particularly:
 - upward bias
 - weak downside sensitivity
 - insufficient uncertainty expansion
-

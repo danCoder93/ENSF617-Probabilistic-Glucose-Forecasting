@@ -1,5 +1,14 @@
 # Understanding the Repository's Probabilistic Glucose Forecasting Model
 
+Role: Conceptual lens focused on quantile forecasting and uncertainty
+interpretation.
+Audience: Readers who want probabilistic intuition without traversing the full
+codebase architecture first.
+Owns: Quantile semantics, pinball-loss intuition, and interval interpretation.
+Related docs: [`methods_exposition.md`](methods_exposition.md),
+[`../repository_primer.md`](../repository_primer.md),
+[`../current_architecture.md`](../current_architecture.md).
+
 ## Theoretical Foundations and Architectural Interpretation of Quantile-Based Probabilistic Forecasting
 
 **Purpose.** This document turns the repository's current model-facing design and the conceptual discussion around it into one coherent learning note. Its goal is not merely to list facts about the code, but to help a reader move smoothly from familiar regression thinking to the probabilistic forecasting view used by the repository's hybrid **TCN + TFT** model.

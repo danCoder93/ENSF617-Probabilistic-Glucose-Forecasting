@@ -1,5 +1,15 @@
 # Running the Probabilistic Glucose Forecasting Code
 
+Role: Operational runbook for setup and execution across supported
+environments.
+Audience: Engineers and contributors who want to run the pipeline quickly and
+reliably.
+Owns: Installation/run commands, environment setup, and practical output
+locations.
+Related docs: [`cli_reference.md`](cli_reference.md),
+[`current_architecture.md`](current_architecture.md),
+[`system_walkthrough.md`](system_walkthrough.md).
+
 This guide provides step-by-step instructions for running the ENSF617 Probabilistic Glucose Forecasting codebase on Google Colab with CUDA acceleration and locally on Apple Silicon Macs. The codebase includes automatic environment detection and device profiles for seamless setup across platforms.
 
 ## Prerequisites
@@ -436,9 +446,10 @@ python main.py --raw-dir /path/to/data/raw
 
 ## Additional Resources
 
-- [Repository README](README.md) - Quickstart and overview
-- [Repository Primer](docs/repository_primer.md) - Detailed system architecture
-- [Current Architecture](docs/current_architecture.md) - Code structure guide
+- [Repository README](../README.md) - Quickstart and overview
+- [System Walkthrough](system_walkthrough.md) - Guided second-pass architecture read
+- [Repository Primer](repository_primer.md) - Preserved long-form systems monograph
+- [Current Architecture](current_architecture.md) - Code structure guide
 
 ## Expected Runtime
 
