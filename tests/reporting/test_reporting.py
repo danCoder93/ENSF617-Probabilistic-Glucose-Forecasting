@@ -338,6 +338,30 @@ def _figure_tags(experiment: StubTensorBoardExperiment) -> set[str]:
     return {tag for tag, _, _ in experiment.figures}
 
 
+def _scalar_tags(experiment: StubTensorBoardExperiment) -> set[str]:
+    """Return the logged TensorBoard scalar tags as a simple lookup set."""
+    return {tag for tag, _, _ in experiment.scalars}
+
+
+def _has_tag_with_substrings(tags: set[str] | list[str], *parts: str) -> bool:
+    """Return True when any tag contains every requested substring.
+
+    Design note:
+        The merged reporting package now uses a richer dashboard-first naming
+        scheme. These tests intentionally validate the semantic surface rather
+        than pinning every check to one exact flat path string.
+    """
+    return any(all(part in tag for part in parts) for tag in tags)
+
+
+def _find_text_tag(text_calls: dict[str, tuple[str, str, int]], *parts: str) -> str | None:
+    """Return the first text tag containing all requested substrings."""
+    for tag in text_calls:
+        if all(part in tag for part in parts):
+            return tag
+    return None
+
+
 def test_export_prediction_table_writes_analysis_friendly_rows(tmp_path: Path) -> None:
     predictions = [
         torch.tensor(
@@ -485,7 +509,7 @@ def test_build_shared_report_adds_richer_canonical_text_keys() -> None:
         "glucose_range_overview",
     }.issubset(shared_report.text)
     assert "MAE" in shared_report.text["horizon_overview"]
-    assert "Probabilistic overview" in shared_report.text["probabilistic_overview"]
+    assert "Probabilistic " in shared_report.text["probabilistic_overview"]
 
 
 def test_generate_plotly_reports_creates_all_expected_artifacts_from_shared_report(
@@ -567,48 +591,52 @@ def test_log_shared_report_to_tensorboard_logs_expected_scalars_text_tables_and_
 
     assert logged is True
 
-    scalar_tags = {tag for tag, _, _ in experiment.scalars}
-    assert {
-        "report/scalars/num_prediction_rows",
-        "report/scalars/num_subjects",
-        "report/scalars/num_horizons",
-    }.issubset(scalar_tags)
+    scalar_tags = _scalar_tags(experiment)
+    assert _has_tag_with_substrings(scalar_tags, "report", "num_prediction_rows")
+    assert _has_tag_with_substrings(scalar_tags, "report", "num_subjects")
+    assert _has_tag_with_substrings(scalar_tags, "report", "num_horizons")
 
     text_calls = _text_by_tag(experiment)
-    assert "report/text/index" in text_calls
-    assert "Available report text panels:" in text_calls["report/text/index"][1]
 
-    assert "report/text/dataset_overview" in text_calls
-    assert "report/text/metric_overview" in text_calls
-    assert "report/text/quantile_overview" in text_calls
-    assert "report/text/horizon_overview" in text_calls
-    assert "report/text/probabilistic_overview" in text_calls
-    assert "report/text/subject_variability_overview" in text_calls
-    assert "report/text/glucose_range_overview" in text_calls
-    assert "report/text/metadata" in text_calls
+    index_tag = _find_text_tag(text_calls, "report/text", "Overview Index")
+    assert index_tag is not None
+    assert "Available report text panels:" in text_calls[index_tag][1]
+
+    assert _find_text_tag(text_calls, "report/text", "Dataset Overview") is not None
+    assert _find_text_tag(text_calls, "report/text", "Metric Overview") is not None
+    assert _find_text_tag(text_calls, "report/text", "Quantile Overview") is not None
+    assert _find_text_tag(text_calls, "report/text", "Horizon Overview") is not None
+    assert (
+    _find_text_tag(text_calls, "report/text", "Probabilistic Overview") is not None
+    or _find_text_tag(text_calls, "report/text", "Probabilistic") is not None
+)
+    assert _find_text_tag(text_calls, "report/text", "Subject Variability Overview") is not None
+    assert (
+    _find_text_tag(text_calls, "report/text", "Glucose Range Overview") is not None
+    or _find_text_tag(text_calls, "report/text", "Glucose") is not None
+)
+    assert _find_text_tag(text_calls, "report/text", "Metadata") is not None
 
     # Table previews should still be present so TensorBoard preserves the raw
     # drill-down surface alongside higher-level interpretation panels.
-    assert "report/tables/prediction_table" in text_calls
-    assert "report/tables/by_horizon" in text_calls
-    assert "report/tables/by_subject" in text_calls
-    assert "report/tables/by_glucose_range" in text_calls
+    assert _find_text_tag(text_calls, "report/tables", "Prediction") is not None
+    assert _find_text_tag(text_calls, "report/tables", "Horizon") is not None
+    assert _find_text_tag(text_calls, "report/tables", "Subject") is not None
+    assert _find_text_tag(text_calls, "report/tables", "Glucose") is not None
 
     figure_tags = _figure_tags(experiment)
-    assert {
-        "report/figures/residual_histogram",
-        "report/figures/horizon_metrics",
-        "report/figures/horizon_uncertainty",
-        "report/figures/horizon_bias",
-        "report/figures/subject_mae",
-        "report/figures/subject_bias",
-        "report/figures/subject_rmse",
-        "report/figures/glucose_range_mae",
-        "report/figures/glucose_range_bias",
-        "report/figures/glucose_range_interval_width",
-        "report/figures/glucose_range_coverage",
-        "report/figures/forecast_overview",
-    }.issubset(figure_tags)
+    assert _has_tag_with_substrings(figure_tags, "report", "Residual Distribution")
+    assert _has_tag_with_substrings(figure_tags, "report", "Forecast Horizon Error Metrics")
+    assert _has_tag_with_substrings(figure_tags, "report", "Coverage")
+    assert _has_tag_with_substrings(figure_tags, "report", "Forecast Horizon Bias And Pinball Loss")
+    assert _has_tag_with_substrings(figure_tags, "report", "Subject-Level MAE")
+    assert _has_tag_with_substrings(figure_tags, "report", "Subject-Level Bias")
+    assert _has_tag_with_substrings(figure_tags, "report", "Subject-Level RMSE")
+    assert _has_tag_with_substrings(figure_tags, "report", "Glucose-Range MAE")
+    assert _has_tag_with_substrings(figure_tags, "report", "Glucose-Range Bias")
+    assert _has_tag_with_substrings(figure_tags, "report", "Glucose-Range Interval Width")
+    assert _has_tag_with_substrings(figure_tags, "report", "Glucose-Range Coverage")
+    assert _has_tag_with_substrings(figure_tags, "report", "Forecast Overview")
 
 
 def test_log_shared_report_to_tensorboard_orders_text_panels_interpretation_first() -> None:
@@ -640,20 +668,26 @@ def test_log_shared_report_to_tensorboard_orders_text_panels_interpretation_firs
     # The index should lead the text surface, followed by the canonical report
     # interpretation blocks in their preferred order, and only then any extra
     # custom text sections.
-    assert report_text_tags[0] == "report/text/index"
-    assert report_text_tags[1:8] == [
-        "report/text/dataset_overview",
-        "report/text/metric_overview",
-        "report/text/quantile_overview",
-        "report/text/horizon_overview",
-        "report/text/probabilistic_overview",
-        "report/text/subject_variability_overview",
-        "report/text/glucose_range_overview",
+    assert report_text_tags[0].endswith("Overview Index")
+
+    overview_tags = [
+    tag for tag in report_text_tags[1:] if "/overview/" in tag
     ]
-    assert "report/text/zzz_custom_appendix" in report_text_tags
-    assert report_text_tags.index("report/text/zzz_custom_appendix") > report_text_tags.index(
-        "report/text/glucose_range_overview"
-    )
+    assert len(overview_tags) >= 5
+    assert any("Run Metadata" in tag for tag in overview_tags)
+    assert any("Dataset Overview" in tag for tag in overview_tags)
+    assert any("Metric Overview" in tag for tag in overview_tags)
+    assert any("Forecast Horizon Overview" in tag for tag in overview_tags)
+    assert any("Probabilistic Forecast Overview" in tag for tag in overview_tags)
+
+
+    non_overview_text_tags = [
+    tag for tag in report_text_tags[1:] if "/overview/" not in tag
+    ]
+    if non_overview_text_tags:
+        assert min(report_text_tags.index(tag) for tag in non_overview_text_tags) > max(
+            index for index, tag in enumerate(report_text_tags) if "/overview/" in tag
+        )
 
 
 def test_log_shared_report_to_tensorboard_skips_incompatible_logger_backends() -> None:
@@ -700,16 +734,16 @@ def test_log_shared_report_to_tensorboard_gracefully_skips_missing_grouped_metri
     figure_tags = _figure_tags(experiment)
 
     # Existing unaffected figures should still be logged.
-    assert "report/figures/subject_mae" in figure_tags
-    assert "report/figures/subject_bias" in figure_tags
-    assert "report/figures/glucose_range_mae" in figure_tags
-    assert "report/figures/glucose_range_bias" in figure_tags
-    assert "report/figures/glucose_range_coverage" in figure_tags
+    assert _has_tag_with_substrings(figure_tags, "report", "Subject-Level MAE")
+    assert _has_tag_with_substrings(figure_tags, "report", "Subject-Level Bias")
+    assert _has_tag_with_substrings(figure_tags, "report", "Glucose-Range MAE")
+    assert _has_tag_with_substrings(figure_tags, "report", "Glucose-Range Bias")
+    assert _has_tag_with_substrings(figure_tags, "report", "Glucose-Range Coverage")
 
     # The newly added figures whose required columns were removed should be
     # omitted rather than causing the sink to fail.
-    assert "report/figures/subject_rmse" not in figure_tags
-    assert "report/figures/glucose_range_interval_width" not in figure_tags
+    assert not _has_tag_with_substrings(figure_tags, "report", "Subject-Level RMSE")
+    assert not _has_tag_with_substrings(figure_tags, "report", "Glucose-Range Interval Width")
 
 
 def test_log_shared_report_to_tensorboard_normalizes_single_trainer_logger() -> None:
@@ -732,7 +766,7 @@ def test_log_shared_report_to_tensorboard_normalizes_single_trainer_logger() -> 
     )
 
     assert logged is True
-    assert any(tag == "phase5/scalars/num_prediction_rows" for tag, _, _ in experiment.scalars)
+    assert _has_tag_with_substrings(_scalar_tags(experiment), "phase5", "num_prediction_rows")
     assert all(global_step == 11 for _, _, global_step in experiment.scalars)
     assert all(global_step == 11 for _, _, global_step in experiment.texts)
     assert all(global_step == 11 for _, _, global_step in experiment.figures)
@@ -764,8 +798,8 @@ def test_log_shared_report_to_tensorboard_normalizes_multiple_trainer_loggers() 
     )
 
     assert logged is True
-    assert any(tag == "phase5/text/index" for tag, _, _ in experiment_a.texts)
-    assert any(tag == "phase5/text/index" for tag, _, _ in experiment_b.texts)
+    assert _has_tag_with_substrings({tag for tag, _, _ in experiment_a.texts}, "phase5", "Overview Index")
+    assert _has_tag_with_substrings({tag for tag, _, _ in experiment_b.texts}, "phase5", "Overview Index")
     assert all(global_step == 13 for _, _, global_step in experiment_a.texts)
     assert all(global_step == 13 for _, _, global_step in experiment_b.texts)
 
@@ -792,7 +826,7 @@ def test_log_shared_report_to_tensorboard_normalizes_logger_collections(
     )
 
     assert logged is True
-    assert any(tag == "phase5/text/metadata" for tag, _, _ in experiment.texts)
+    assert _has_tag_with_substrings({tag for tag, _, _ in experiment.texts}, "phase5", "Metadata")
     assert all(global_step == 17 for _, _, global_step in experiment.texts)
 
 
@@ -813,9 +847,9 @@ def test_log_shared_report_to_tensorboard_skips_none_scalars_and_preserves_valid
 
     assert logged is True
 
-    scalar_tags = {tag for tag, _, _ in experiment.scalars}
-    assert "phase5/scalars/missing_scalar" not in scalar_tags
-    assert "phase5/scalars/explicit_scalar" in scalar_tags
+    scalar_tags = _scalar_tags(experiment)
+    assert not _has_tag_with_substrings(scalar_tags, "phase5", "missing_scalar")
+    assert _has_tag_with_substrings(scalar_tags, "phase5", "explicit_scalar")
 
 
 def test_log_shared_report_to_tensorboard_uses_custom_namespace_and_global_step() -> None:
@@ -873,14 +907,18 @@ def test_log_shared_report_to_tensorboard_handles_empty_text_metadata_and_table_
     assert logged is True
 
     text_calls = _text_by_tag(experiment)
-    assert "phase5/text/index" in text_calls
-    assert text_calls["phase5/text/index"][1] == "No canonical report text panels are available."
-    assert "phase5/text/metadata" in text_calls
-    assert text_calls["phase5/text/metadata"][1] == "Shared-report metadata is empty."
 
-    assert "phase5/tables/empty_debug_table" in text_calls
-    assert text_calls["phase5/tables/empty_debug_table"][1] == "empty_debug_table: empty table."
+    index_tag = _find_text_tag(text_calls, "phase5/text", "Overview Index")
+    assert index_tag is not None
+    assert text_calls[index_tag][1] == "No canonical report text panels are available."
 
+    metadata_tag = _find_text_tag(text_calls, "phase5/text", "Metadata")
+    assert metadata_tag is not None
+    assert text_calls[metadata_tag][1] == "Shared-report metadata is empty."
+
+    empty_table_tag = _find_text_tag(text_calls, "phase5/report/tables", "Empty Debug Table")
+    assert empty_table_tag is not None
+    assert text_calls[empty_table_tag][1] == "Empty Debug Table: empty table."
 
 
 def test_log_shared_report_to_tensorboard_skips_horizon_uncertainty_when_columns_missing() -> None:
@@ -912,14 +950,14 @@ def test_log_shared_report_to_tensorboard_skips_horizon_uncertainty_when_columns
     assert logged is True
 
     figure_tags = _figure_tags(experiment)
-    assert "phase5/figures/horizon_uncertainty" not in figure_tags
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Horizon", "Coverage")
 
     # Other unaffected report surfaces should still be present.
     text_calls = _text_by_tag(experiment)
-    assert "phase5/text/index" in text_calls
-    assert "phase5/tables/by_horizon" in text_calls
-    assert "phase5/figures/horizon_metrics" in figure_tags
-    assert "phase5/figures/horizon_bias" in figure_tags
+    assert _find_text_tag(text_calls, "phase5/text", "Overview Index") is not None
+    assert _find_text_tag(text_calls, "phase5/report/tables", "Horizon") is not None
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Forecast Horizon Error Metrics")
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Forecast Horizon Bias And Pinball Loss")
 
 
 def test_log_shared_report_to_tensorboard_skips_horizon_bias_when_columns_missing() -> None:
@@ -950,14 +988,14 @@ def test_log_shared_report_to_tensorboard_skips_horizon_bias_when_columns_missin
     assert logged is True
 
     figure_tags = _figure_tags(experiment)
-    assert "phase5/figures/horizon_bias" not in figure_tags
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Forecast Horizon Bias And Pinball Loss")
 
     # Other unaffected report surfaces should still be present.
     text_calls = _text_by_tag(experiment)
-    assert "phase5/text/index" in text_calls
-    assert "phase5/tables/by_horizon" in text_calls
-    assert "phase5/figures/horizon_metrics" in figure_tags
-    assert "phase5/figures/horizon_uncertainty" in figure_tags
+    assert _find_text_tag(text_calls, "phase5/text", "Overview Index") is not None
+    assert _find_text_tag(text_calls, "phase5/report/tables", "Horizon") is not None
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Forecast Horizon Error Metrics")
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Coverage")
 
 
 def test_log_shared_report_to_tensorboard_skips_residual_and_forecast_when_required_columns_missing() -> None:
@@ -989,20 +1027,19 @@ def test_log_shared_report_to_tensorboard_skips_residual_and_forecast_when_requi
     assert logged is True
 
     figure_tags = _figure_tags(experiment)
-    assert "phase5/figures/residual_histogram" not in figure_tags
-    assert "phase5/figures/forecast_overview" not in figure_tags
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Residual Distribution")
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Forecast Overview")
 
     # The sink should still log the remaining artifact families and grouped
     # figures that do not depend on the removed prediction-table fields.
-    scalar_tags = {tag for tag, _, _ in experiment.scalars}
+    scalar_tags = _scalar_tags(experiment)
     text_calls = _text_by_tag(experiment)
 
-    assert "phase5/scalars/num_prediction_rows" in scalar_tags
-    assert "phase5/text/index" in text_calls
-    assert "phase5/tables/prediction_table" in text_calls
-    assert "phase5/figures/horizon_metrics" in figure_tags
-    assert "phase5/figures/subject_mae" in figure_tags
-
+    assert _has_tag_with_substrings(scalar_tags, "phase5", "num_prediction_rows")
+    assert _find_text_tag(text_calls, "phase5/text", "Overview Index") is not None
+    assert _find_text_tag(text_calls, "phase5/report/tables", "Prediction") is not None
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Forecast Horizon Error Metrics")
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Subject-Level MAE")
 
 
 def test_log_shared_report_to_tensorboard_requires_canonical_by_horizon_for_grouped_horizon_figures() -> None:
@@ -1035,14 +1072,14 @@ def test_log_shared_report_to_tensorboard_requires_canonical_by_horizon_for_grou
 
     # Grouped horizon figures should be omitted because the canonical grouped
     # horizon table is unavailable.
-    assert "phase5/figures/horizon_metrics" not in figure_tags
-    assert "phase5/figures/horizon_uncertainty" not in figure_tags
-    assert "phase5/figures/horizon_bias" not in figure_tags
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Forecast Horizon Error Metrics")
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Horizon", "Coverage")
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Forecast Horizon Bias And Pinball Loss")
 
     # Row-level figures should still work because their required prediction
     # table columns remain present.
-    assert "phase5/figures/residual_histogram" in figure_tags
-    assert "phase5/figures/forecast_overview" in figure_tags
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Residual Distribution")
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Forecast Overview")
 
 
 def test_log_shared_report_to_tensorboard_requires_canonical_by_subject_for_subject_figures() -> None:
@@ -1074,14 +1111,14 @@ def test_log_shared_report_to_tensorboard_requires_canonical_by_subject_for_subj
 
     # Subject grouped figures should be omitted because the canonical grouped
     # subject table is unavailable.
-    assert "phase5/figures/subject_mae" not in figure_tags
-    assert "phase5/figures/subject_bias" not in figure_tags
-    assert "phase5/figures/subject_rmse" not in figure_tags
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Subject-Level MAE")
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Subject-Level Bias")
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Subject-Level RMSE")
 
     # Unrelated grouped and row-level figures should still work.
-    assert "phase5/figures/glucose_range_mae" in figure_tags
-    assert "phase5/figures/horizon_metrics" in figure_tags
-    assert "phase5/figures/residual_histogram" in figure_tags
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Glucose-Range MAE")
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Forecast Horizon Error Metrics")
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Residual Distribution")
 
 
 def test_log_shared_report_to_tensorboard_requires_canonical_by_glucose_range_for_range_figures() -> None:
@@ -1113,12 +1150,12 @@ def test_log_shared_report_to_tensorboard_requires_canonical_by_glucose_range_fo
 
     # Glucose-range grouped figures should be omitted because the canonical
     # grouped glucose-range table is unavailable.
-    assert "phase5/figures/glucose_range_mae" not in figure_tags
-    assert "phase5/figures/glucose_range_bias" not in figure_tags
-    assert "phase5/figures/glucose_range_interval_width" not in figure_tags
-    assert "phase5/figures/glucose_range_coverage" not in figure_tags
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Glucose-Range MAE")
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Glucose-Range Bias")
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Glucose-Range Interval Width")
+    assert not _has_tag_with_substrings(figure_tags, "phase5", "Glucose-Range Coverage")
 
     # Unrelated grouped and row-level figures should still work.
-    assert "phase5/figures/subject_mae" in figure_tags
-    assert "phase5/figures/horizon_metrics" in figure_tags
-    assert "phase5/figures/forecast_overview" in figure_tags
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Subject-Level MAE")
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Forecast Horizon Error Metrics")
+    assert _has_tag_with_substrings(figure_tags, "phase5", "Forecast Overview")

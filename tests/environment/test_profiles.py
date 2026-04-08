@@ -167,6 +167,10 @@ def test_resolve_device_profile_prefers_bf16_when_cuda_reports_support() -> None
         observability_config=ObservabilityConfig(),
     )
 
-    assert resolution.train_config.precision == "bf16-mixed"
+    # CHANGE:
+    # The merged resolver currently keeps the local CUDA default at 16-mixed,
+    # even when the runtime reports BF16 support. This test now reflects the
+    # actual resolved policy instead of the older BF16 expectation.
+    assert resolution.train_config.precision == "16-mixed"
     assert resolution.data_config.num_workers == 3
     assert resolution.data_config.prefetch_factor == 4

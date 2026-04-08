@@ -642,32 +642,140 @@ Instruction for later:
 - state clearly whether lower or higher is better
 - avoid mixing validation-selection metrics with final test-report metrics
 
-## Outputs And Artifacts Placeholder
+## Run Artifacts and Reporting
 
-Use this section later to show what a successful run produces on disk and how
-those files should be interpreted.
+Each training run now writes a set of artifacts meant to make the workflow easier to inspect, debug, and reuse in reporting. The point is not just to train a model and hope for the best. It is to leave behind a clean record of what data was used, what happened during the run, and what results came out of it.
 
-Suggested fill-in checklist:
+By default, run outputs are written under:
 
-- example artifact directory tree
-- what `run_summary.json` contains
-- when `test_predictions.pt` is produced
-- when `test_predictions.csv` is produced
-- when Plotly HTML reports are produced
-- where checkpoints are stored
-- when `benchmark_summary.json` appears
-
-Suggested future snippet:
-
-```text
 artifacts/main_run/
-  TODO: add real example tree from a representative run
-```
 
-Instruction for later:
-- use one real successful run as the example
-- keep filenames and paths aligned with the actual current workflow rather than
-  a hypothetical layout
+Depending on the observability settings, that folder may contain logs, summaries, prediction exports, grouped metric tables, and generated visual reports.
+
+Core run artifacts
+run_summary.json
+
+This is the main high-level summary for a run. It captures the overall run setup and points to the major artifacts that were produced.
+
+It includes things like:
+
+resolved runtime configuration
+optimizer settings
+device profile information
+fit and evaluation details
+paths to prediction exports and report files
+
+If someone wants the quickest overview of a run, this is the best file to open first.
+
+data_summary.json
+
+This file captures dataset-level observability information. It is written early in the workflow so that even if training fails later, the run still leaves behind a clear record of what data it was built on.
+
+This summary is meant to help answer questions like:
+
+what data did the run actually use
+how large was the dataset
+what did the split or descriptive footprint look like
+
+This is especially useful when writing the report because it gives a cleaner way to describe the dataset and preprocessing context.
+
+metrics_summary.json
+
+This is the compact evaluation summary artifact. Its job is simple. It should tell you how the run performed without forcing you to dig through the full run summary or raw logs.
+
+It includes:
+
+the checkpoint used for evaluation
+scalar test metrics
+structured evaluation output
+links to related prediction and report artifacts
+
+This is the file you want for headline results.
+
+Grouped evaluation tables
+
+When grouped evaluation results are available, the workflow exports them as flat CSV tables. These are much easier to inspect, plot, and reuse in the report than nested JSON alone.
+
+These can include:
+
+metrics_by_horizon.csv
+metrics_by_subject.csv
+metrics_by_glucose_range.csv
+
+These tables matter because they move the analysis beyond one average number. They let us look at how performance changes across:
+
+different forecast horizons
+different subjects
+different glucose regimes
+
+That is much more useful for reporting than only quoting one overall metric.
+
+report_index.json
+
+This is the artifact map for the run. It points to the main files produced during execution so that someone opening the folder does not have to guess where things live.
+
+It links out to:
+
+run_summary.json
+data_summary.json
+metrics_summary.json
+grouped evaluation tables
+prediction artifacts
+generated report files
+logging outputs
+
+If you are opening a run folder for the first time, this is the cleanest place to start.
+
+Prediction and visualization artifacts
+Prediction tensor export
+
+If enabled, the workflow saves raw prediction tensors so downstream analysis can still access direct model outputs instead of only reduced summaries.
+
+Typical file:
+
+test_predictions.pt
+
+This is more useful for debugging and custom analysis than for reporting directly.
+
+Prediction table export
+
+If enabled, predictions are also flattened into a tabular export. This makes it much easier to build plots, inspect examples, and reuse results in reporting.
+
+This artifact is useful for:
+
+forecast plots
+residual analysis
+subject-level examples
+report figures
+Plotly reports
+
+If enabled, the workflow generates Plotly-based reports from the prediction table. These are meant to support quick visual inspection and later reuse in the final writeup.
+
+To keep the reporting path robust, Plotly reports are only generated when the prediction table exists.
+
+Logs
+run.log
+
+This is the plain-text run log. It helps track what happened during execution and where the run may have slowed down or failed.
+
+logs/
+
+This directory may contain additional logger outputs depending on the observability configuration.
+
+In general, the log files are most useful for debugging, while the JSON and CSV artifacts are better for reporting.
+
+How to Read the Results
+
+A good way to inspect a completed run is:
+
+Open report_index.json to see the full artifact map.
+Open run_summary.json for the high-level run overview.
+Open data_summary.json to understand the dataset used in the run.
+Open metrics_summary.json for the main evaluation results.
+Use the grouped evaluation CSVs to look at performance by horizon, subject, or glucose range.
+Use the prediction table and visual reports for examples and final figures.
+
+This makes the workflow easier to debug during development and much easier to reuse when writing the final report.
 
 ## Results Placeholder
 

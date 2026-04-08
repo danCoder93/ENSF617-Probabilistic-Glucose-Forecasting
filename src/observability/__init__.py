@@ -40,9 +40,9 @@ from __future__ import annotations
 # - observability handles live runtime visibility while the run is happening
 #
 # Important boundary for this phase:
-# this file intentionally does *not* re-export the reporting layer anymore.
+# this file intentionally does *not* eagerly import the reporting layer.
 # Post-run reporting now belongs to the dedicated `reporting` package and
-# should be imported from there directly.
+# is exposed here only through a lazy compatibility bridge.
 #
 # What does *not* live here:
 # - concrete callback implementation details
@@ -53,6 +53,8 @@ from __future__ import annotations
 # This file exists to define the stable runtime-observability import surface,
 # not to mix runtime observability with every post-run artifact concern.
 
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
 
 # ============================================================================
 # Public Runtime-Observability Surface
@@ -85,16 +87,50 @@ from observability.runtime import (
     setup_text_logger,
 )
 
+if TYPE_CHECKING:
+    # CHANGE: These imports are for static analysis only.
+    # They let Pylance see the compatibility-exported reporting names without
+    # eagerly importing `reporting` at runtime and recreating the circular import.
+    from reporting import (
+        SharedReport,
+        build_shared_report,
+        export_grouped_tables_from_report,
+        export_prediction_table,
+        export_prediction_table_from_report,
+        generate_plotly_reports,
+        log_shared_report_to_tensorboard,
+    )
+
+# Compatibility surface:
+# the canonical post-run reporting implementation now lives in `reporting`.
+# We intentionally resolve these names lazily so importing lightweight
+# observability modules such as `observability.tensors` does not force the
+# `reporting` package to import while it is still partially initialized.
+_REPORTING_EXPORT_NAMES = {
+    "SharedReport",
+    "build_shared_report",
+    "export_grouped_tables_from_report",
+    "export_prediction_table",
+    "export_prediction_table_from_report",
+    "generate_plotly_reports",
+    "log_shared_report_to_tensorboard",
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily expose reporting-package symbols through `observability`."""
+    if name in _REPORTING_EXPORT_NAMES:
+        reporting_module = import_module("reporting")
+        return getattr(reporting_module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 # `__all__` is the stable package-level import contract for callers like
 # `train.py`, `main.py`, tests, and notebook workflows.
 #
 # Migration note:
-# post-run reporting helpers are intentionally absent from this list. The
-# canonical import surface for reporting is now:
-# - `from reporting import SharedReport`
-# - `from reporting import build_shared_report`
-# - `from reporting import export_prediction_table`
-# - `from reporting import generate_plotly_reports`
+# post-run reporting helpers are still available here for compatibility, but
+# their canonical implementation lives in the dedicated `reporting` package.
 __all__ = [
     "ActivationStatsCallback",
     "BatchAuditCallback",
@@ -113,4 +149,11 @@ __all__ = [
     "log_metrics_to_loggers",
     "setup_observability",
     "setup_text_logger",
+    "SharedReport",
+    "build_shared_report",
+    "export_grouped_tables_from_report",
+    "export_prediction_table",
+    "export_prediction_table_from_report",
+    "generate_plotly_reports",
+    "log_shared_report_to_tensorboard",
 ]

@@ -15,54 +15,9 @@ from __future__ import annotations
 # - argument parsing
 # - low-level Trainer assembly details
 # - model forward/loss/optimizer behavior
-#
-# Architectural note:
-# this workflow layer intentionally sits above the model/trainer stack and above
-# the runtime-observability stack. It is the first place in the repository that
-# can see the full post-fit picture:
-# - fit artifacts
-# - optional test metrics
-# - optional raw prediction batches
-# - structured held-out evaluation
-# - post-run reporting sinks
-#
-# That makes it the correct place to integrate the reporting package without
-# pushing post-run report generation down into callbacks or model code.
-#
-# Reporting-package migration note:
-# earlier versions of this workflow imported post-run reporting helpers from
-# `observability`. The repository is now moving toward a cleaner split:
-# - `observability` handles live runtime visibility during training/evaluation
-# - `reporting` handles post-run packaging and rendering once predictions exist
-#
-# The logic below intentionally preserves the existing workflow behavior and
-# artifact flow while switching the import boundary to the reporting package.
-#
-# Dashboard-first enhancement note:
-# the reporting package now exposes a more curated TensorBoard sink that keeps
-# the richer post-run shared report intact while presenting it through clearer
-# dashboard/text/report layers. This workflow remains the correct place to call
-# that sink because it is the first layer that simultaneously has:
-# - the fitted model artifacts
-# - the held-out prediction batches
-# - the structured evaluation result
-# - the canonical `SharedReport`
-#
-# Structured-export enhancement note:
-# the reporting package now also exposes a machine-readable structured export
-# sink that serializes the same canonical `SharedReport` into a mixed
-# CSV/JSON artifact bundle under the report directory. The workflow is again
-# the correct place to call that sink because it already owns:
-# - the resolved report directory
-# - the canonical shared report
-# - the final artifact map that is later surfaced in the run summary
-#
-# In other words, the enhancement remains architectural rather than ad hoc:
-# - callbacks still own live runtime visibility
-# - the workflow still owns post-run packaging orchestration
-# - the reporting package still owns post-run rendering/export
 
 import json
+import csv
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -77,6 +32,7 @@ from config import (
     TrainConfig,
     config_to_dict,
     validate_runtime_configuration,
+    ConfigurationValidationError,
 )
 from config.types import PathInput
 from defaults import (
@@ -156,6 +112,11 @@ def _build_run_summary(
     text_log_path: Path | None,
     telemetry_path: Path | None,
     runtime_tuning: Mapping[str, Any] | None = None,
+    data_summary: Mapping[str, Any] | None = None,
+    data_summary_path: Path | None = None,
+    metrics_summary_path: Path | None = None,
+    grouped_metrics_paths: Mapping[str, Path] | None = None,
+    report_index_path: Path | None = None,
 ) -> dict[str, Any]:
     """
     Build the compact JSON-ready summary for one workflow execution.
@@ -205,6 +166,26 @@ def _build_run_summary(
             "preflight_diagnostics": _json_ready(tuple(preflight_diagnostics)),
             "runtime_tuning": _json_ready(dict(runtime_tuning or {})),
         },
+        # CHANGE: Put the dataset summary directly in the run summary.
+        # Clear idea here: if someone opens one JSON file, they should immediately
+        # understand what data the run actually used.
+        "data": {
+            "summary_path": str(data_summary_path) if data_summary_path is not None else None,
+            "descriptive_stats": _json_ready(data_summary),
+        },
+        # CHANGE: Add a dedicated metrics section that points to the clean
+        # metrics artifact and the grouped metric table exports.
+        "metrics": {
+            "summary_path": (
+                str(metrics_summary_path) if metrics_summary_path is not None else None
+            ),
+            "grouped_paths": {
+                name: str(path)
+                for name, path in (grouped_metrics_paths or {}).items()
+            },
+            "test_metrics": _json_ready(test_metrics),
+            "test_evaluation": _json_ready(test_evaluation),
+        },
         "fit": {
             "has_validation_data": fit_artifacts.has_validation_data,
             "has_test_data": fit_artifacts.has_test_data,
@@ -237,6 +218,9 @@ def _build_run_summary(
                 str(observability_config.profiler_path)
                 if observability_config.profiler_path is not None
                 else None
+            ),
+            "report_index_path": (
+                str(report_index_path) if report_index_path is not None else None
             ),
             "report_paths": {name: str(path) for name, path in report_paths.items()},
         },
@@ -355,6 +339,130 @@ def _collect_environment_benchmark_memory(
         pass
 
     return metrics
+
+
+def _coerce_table_rows(value: Any) -> list[dict[str, Any]]:
+    """
+    Convert a grouped evaluation payload into a flat list of row dictionaries.
+
+    Purpose:
+    make downstream CSV export simple even when the incoming evaluation structure
+    is nested, partially typed, or a mix of dataclasses and plain dictionaries.
+    """
+    value = _json_ready(value)
+
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        rows: list[dict[str, Any]] = []
+        for item in value:
+            if isinstance(item, dict):
+                rows.append(item)
+            else:
+                rows.append({"value": item})
+        return rows
+
+    if isinstance(value, dict):
+        rows: list[dict[str, Any]] = []
+        scalar_keys = {
+            key: val
+            for key, val in value.items()
+            if not isinstance(val, (dict, list))
+        }
+
+        nested_found = False
+        for key, val in value.items():
+            if isinstance(val, list):
+                nested_found = True
+                for item in val:
+                    if isinstance(item, dict):
+                        rows.append({"group": key, **scalar_keys, **item})
+                    else:
+                        rows.append({"group": key, **scalar_keys, "value": item})
+            elif isinstance(val, dict):
+                nested_found = True
+                rows.append({"group": key, **scalar_keys, **val})
+
+        if nested_found:
+            return rows
+
+        return [value]
+
+    return [{"value": value}]
+
+
+def _write_csv_rows(output_path: Path, rows: Sequence[Mapping[str, Any]]) -> Path | None:
+    """
+    Write a sequence of dictionaries to CSV.
+
+    Purpose:
+    keep artifact export lightweight and dependency-free so the workflow can
+    persist report-friendly tables without introducing a pandas requirement here.
+    """
+    if not rows:
+        return None
+
+    fieldnames: list[str] = []
+    for row in rows:
+        for key in row.keys():
+            if key not in fieldnames:
+                fieldnames.append(str(key))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(
+                {
+                    key: json.dumps(value)
+                    if isinstance(value, (dict, list))
+                    else value
+                    for key, value in row.items()
+                }
+            )
+
+    return output_path
+
+
+def _extract_grouped_evaluation_tables(
+    evaluation_result: EvaluationResult | None,
+) -> dict[str, list[dict[str, Any]]]:
+    """
+    Pull grouped evaluation sections into flat row tables.
+
+    Purpose:
+    turn structured evaluation outputs into report-friendly tables that can be
+    exported directly as CSV artifacts.
+    """
+    if evaluation_result is None:
+        return {}
+
+    payload = _json_ready(evaluation_result)
+    if not isinstance(payload, dict):
+        return {}
+
+    candidate_keys = {
+        "metrics_by_horizon": "metrics_by_horizon",
+        "by_horizon": "metrics_by_horizon",
+        "horizon_metrics": "metrics_by_horizon",
+        "metrics_by_subject": "metrics_by_subject",
+        "by_subject": "metrics_by_subject",
+        "subject_metrics": "metrics_by_subject",
+        "metrics_by_glucose_range": "metrics_by_glucose_range",
+        "by_glucose_range": "metrics_by_glucose_range",
+        "glucose_range_metrics": "metrics_by_glucose_range",
+    }
+
+    extracted: dict[str, list[dict[str, Any]]] = {}
+    for incoming_key, artifact_name in candidate_keys.items():
+        if incoming_key in payload:
+            rows = _coerce_table_rows(payload[incoming_key])
+            if rows:
+                extracted[artifact_name] = rows
+
+    return extracted
 
 
 def _log_post_run_shared_report_to_tensorboard(
@@ -930,6 +1038,26 @@ def run_training_workflow(
 
     datamodule = AZT1DDataModule(effective_config.data)
 
+    data_summary: dict[str, Any] | None = None
+    data_summary_path: Path | None = None
+
+    # CHANGE: Try to capture dataset observability early, but never let that
+    # block the run. Training is the primary path. Artifact collection is best-effort.
+    try:
+        datamodule.prepare_data()
+        datamodule.setup(stage="fit")
+        data_summary = datamodule.describe_data()
+    except Exception:
+        data_summary = None
+
+    # CHANGE: Save the dataset summary as its own artifact when available.
+    if output_dir is not None and data_summary is not None:
+        data_summary_path = output_dir / "data_summary.json"
+        data_summary_path.write_text(
+            json.dumps(_json_ready(data_summary), indent=2),
+            encoding="utf-8",
+        )
+
     # The training wrapper deliberately sits between the top-level workflow and
     # Lightning. That keeps this module focused on orchestration while
     # `src/train.py` owns fit/test/predict policy.
@@ -981,6 +1109,9 @@ def run_training_workflow(
     data_summary: dict[str, Any] | None = None
     predictions_path: Path | None = None
     prediction_table_path: Path | None = None
+    metrics_summary_path: Path | None = None
+    report_index_path: Path | None = None
+    grouped_metrics_paths: dict[str, Path] = {}
     report_paths: dict[str, Path] = {}
 
     # `shared_report` is the canonical in-memory packaging layer for post-run
@@ -1168,13 +1299,6 @@ def run_training_workflow(
         report_paths.update(structured_export_paths)
 
         if effective_observability_config.enable_plot_reports:
-            # Plotly reporting lives in the reporting package because it is a
-            # post-run presentation sink, not a live training-time visibility
-            # surface.
-            #
-            # The sink prefers the in-memory shared report when available, but
-            # still accepts the exported prediction table path for compatibility
-            # with lighter or transitional workflows.
             plotly_report_paths = generate_plotly_reports(
                 prediction_table_path,
                 report_dir=effective_observability_config.report_dir,
@@ -1182,6 +1306,97 @@ def run_training_workflow(
                 shared_report=shared_report,
             )
             report_paths.update(plotly_report_paths)
+
+    # CHANGE: Write a clean metrics artifact so results are easy to inspect
+    # without digging through the full run summary.
+    metrics_summary: dict[str, Any] | None = None
+    if test_metrics is not None or test_evaluation is not None:
+        metrics_summary = {
+            "timestamp": datetime.now().astimezone().isoformat(),
+            "resolved_eval_ckpt_path": (
+                str(resolved_eval_ckpt_path)
+                if resolved_eval_ckpt_path not in (None, "best", "last")
+                else resolved_eval_ckpt_path
+            ),
+            "test_metrics": _json_ready(test_metrics),
+            "test_evaluation": _json_ready(test_evaluation),
+            "prediction_table_path": (
+                str(prediction_table_path)
+                if prediction_table_path is not None
+                else None
+            ),
+            "report_paths": {name: str(path) for name, path in report_paths.items()},
+        }
+
+    if output_dir is not None and metrics_summary is not None:
+        metrics_summary_path = output_dir / "metrics_summary.json"
+        metrics_summary_path.write_text(
+            json.dumps(metrics_summary, indent=2),
+            encoding="utf-8",
+        )
+
+    # CHANGE: Export grouped evaluation tables as flat CSV files so the results
+    # are easier to inspect, plot, and reuse in the report.
+    grouped_metric_tables = _extract_grouped_evaluation_tables(test_evaluation)
+    if output_dir is not None and grouped_metric_tables:
+        for artifact_name, rows in grouped_metric_tables.items():
+            output_path = output_dir / f"{artifact_name}.csv"
+            written_path = _write_csv_rows(output_path, rows)
+            if written_path is not None:
+                grouped_metrics_paths[artifact_name] = written_path
+
+    # CHANGE: Write one artifact index so every important output from the run
+    # can be found from a single file. This keeps reporting and debugging cleaner.
+    report_index: dict[str, Any] | None = None
+    if output_dir is not None:
+        report_index = {
+            "timestamp": datetime.now().astimezone().isoformat(),
+            "output_dir": str(output_dir),
+            "run_summary_path": str(output_dir / "run_summary.json"),
+            "data_summary_path": (
+                str(data_summary_path) if data_summary_path is not None else None
+            ),
+            "metrics_summary_path": (
+                str(metrics_summary_path) if metrics_summary_path is not None else None
+            ),
+            "grouped_metrics_paths": {
+                name: str(path) for name, path in grouped_metrics_paths.items()
+            },
+            "prediction_artifacts": {
+                "predictions_path": (
+                    str(predictions_path) if predictions_path is not None else None
+                ),
+                "prediction_table_path": (
+                    str(prediction_table_path)
+                    if prediction_table_path is not None
+                    else None
+                ),
+            },
+            "report_paths": {name: str(path) for name, path in report_paths.items()},
+            "observability": {
+                "logger_dir": (
+                    str(getattr(trainer_observability, "logger_dir", None))
+                    if getattr(trainer_observability, "logger_dir", None) is not None
+                    else None
+                ),
+                "text_log_path": (
+                    str(getattr(trainer_observability, "text_log_path", None))
+                    if getattr(trainer_observability, "text_log_path", None) is not None
+                    else None
+                ),
+                "telemetry_path": (
+                    str(getattr(trainer_observability, "telemetry_path", None))
+                    if getattr(trainer_observability, "telemetry_path", None) is not None
+                    else None
+                ),
+            },
+        }
+
+        report_index_path = output_dir / "report_index.json"
+        report_index_path.write_text(
+            json.dumps(report_index, indent=2),
+            encoding="utf-8",
+        )
 
     runtime_tuning_report = getattr(trainer, "runtime_tuning_report", None)
     runtime_tuning_applied = (
@@ -1231,6 +1446,11 @@ def run_training_workflow(
         text_log_path=getattr(trainer_observability, "text_log_path", None),
         telemetry_path=getattr(trainer_observability, "telemetry_path", None),
         runtime_tuning=runtime_tuning_summary,
+        data_summary=data_summary,
+        data_summary_path=data_summary_path,
+        metrics_summary_path=metrics_summary_path,
+        grouped_metrics_paths=grouped_metrics_paths,
+        report_index_path=report_index_path,
     )
 
     summary_path: Path | None = None
