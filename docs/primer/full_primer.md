@@ -10,8 +10,8 @@ Related docs: [`../../README.md`](../../README.md),
 [`../current_architecture.md`](../current_architecture.md),
 [`../codebase_evolution.md`](../codebase_evolution.md),
 [`../repository_primer.md`](../repository_primer.md),
-[`../research/methods_exposition.md`](../research/methods_exposition.md),
-[`../research/probabilistic_forecasting.md`](../research/probabilistic_forecasting.md).
+[`../research/dataset.md`](../research/dataset.md),
+[`../research/methods.md`](../research/methods.md).
 
 If the root `README.md` is the interface to the repository, the recommended
 next reads are now [`../system_walkthrough.md`](../system_walkthrough.md) and

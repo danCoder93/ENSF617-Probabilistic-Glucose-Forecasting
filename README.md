@@ -70,8 +70,8 @@ A simple first pass is:
 6. logs, telemetry, and TensorBoard when you need deeper runtime diagnosis
 
 For the full artifact reference, see
-[docs/current_architecture.md](docs/current_architecture.md). For one concrete
-example of how to interpret a real run, see
+[docs/reference/artifact_contract.md](docs/reference/artifact_contract.md). For
+one concrete example of how to interpret a real run, see
 [docs/artifact_diagnosis.md](docs/artifact_diagnosis.md).
 
 ## Repository Layout
@@ -93,12 +93,29 @@ with [docs/system_walkthrough.md](docs/system_walkthrough.md).
 
 ## Where To Go Next
 
-For the runnable system and day-to-day implementation details, start with:
+For running the system and understanding the day-to-day workflow, start with:
 
-- [docs/repository_primer.md](docs/repository_primer.md)
 - [docs/execution_guide.md](docs/execution_guide.md)
 - [docs/cli_reference.md](docs/cli_reference.md)
+- [docs/reference/artifact_contract.md](docs/reference/artifact_contract.md)
+
+Use [docs/artifact_diagnosis.md](docs/artifact_diagnosis.md) after that when
+you want one concrete forensic read of a finished run rather than the general
+artifact map.
+
+If you want the codebase story rather than just the execution path, continue
+with:
+
+- [docs/system_walkthrough.md](docs/system_walkthrough.md)
+- [docs/repository_primer.md](docs/repository_primer.md)
 - [docs/current_architecture.md](docs/current_architecture.md)
+
+If you want to modify or extend the repository safely, the most useful starting
+path is:
+
+- [docs/reference/package_boundaries.md](docs/reference/package_boundaries.md)
+- [docs/reference/runtime_and_config_flow.md](docs/reference/runtime_and_config_flow.md)
+- [docs/reference/extension_and_constraints.md](docs/reference/extension_and_constraints.md)
 
 For the research-facing view, the repository also keeps a paper-style
 companion under:
@@ -110,15 +127,18 @@ It follows a familiar paper structure:
 - `Abstract`
 - `Introduction`
 - `Related Work`
-- `Materials and Methods`
+- `Methods`
 - `Results and Discussion`
 - `Conclusions`
 - `References`
 
-For the longer explanation-heavy reads behind that companion, continue with:
+For the deeper research-side reads behind that companion, continue with the
+dataset, methods, and discussion sections, then use the evolution and history
+docs when you want broader context:
 
-- [docs/research/methods_exposition.md](docs/research/methods_exposition.md)
-- [docs/research/probabilistic_forecasting.md](docs/research/probabilistic_forecasting.md)
+- [docs/research/dataset.md](docs/research/dataset.md)
+- [docs/research/methods.md](docs/research/methods.md)
+- [docs/research/results_and_discussion.md](docs/research/results_and_discussion.md)
 - [docs/codebase_evolution.md](docs/codebase_evolution.md)
 - [docs/history/index.md](docs/history/index.md)
 

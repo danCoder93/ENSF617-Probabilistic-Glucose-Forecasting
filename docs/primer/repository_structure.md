@@ -68,8 +68,8 @@ Read:
 Read:
 
 - [`model_and_training_walkthrough.md`](model_and_training_walkthrough.md)
-- [`../research/methods_exposition.md`](../research/methods_exposition.md)
-- [`../research/probabilistic_forecasting.md`](../research/probabilistic_forecasting.md)
+- [`../research/methods.md`](../research/methods.md)
+- [`../research/results_and_discussion.md`](../research/results_and_discussion.md)
 
 ### If you care about outputs and interpretation
 

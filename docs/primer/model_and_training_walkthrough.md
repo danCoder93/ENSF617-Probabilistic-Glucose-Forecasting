@@ -2,13 +2,12 @@
 
 Role: Focused walkthrough of the fused model and training path.
 Audience: Readers who want the modeling story without jumping immediately into
-the full methods monograph.
+the research-facing methods docs.
 Owns: High-level explanation of model branches, fusion, training loop, and
 runtime-bound construction.
 Related docs: [`../system_walkthrough.md`](../system_walkthrough.md),
-[`../research/probabilistic_forecasting.md`](../research/probabilistic_forecasting.md),
-[`../research/materials_and_methods.md`](../research/materials_and_methods.md),
-[`../research/methods_exposition.md`](../research/methods_exposition.md).
+[`../research/methods.md`](../research/methods.md),
+[`../research/results_and_discussion.md`](../research/results_and_discussion.md).
 
 ## 1. The Core Modeling Choice
 
@@ -57,7 +56,7 @@ In practice that means:
 - point-style metrics are still useful, but they are only one view of behavior
 
 For the uncertainty interpretation itself, continue to
-[`../research/probabilistic_forecasting.md`](../research/probabilistic_forecasting.md).
+[`../research/results_and_discussion.md`](../research/results_and_discussion.md).
 
 ## 5. Where Lightning Fits
 
@@ -74,8 +73,6 @@ So Lightning owns the loop mechanics, but not the whole system design.
 ## 6. Best Next Reads
 
 - For the research-facing methodology narrative:
-  [`../research/materials_and_methods.md`](../research/materials_and_methods.md)
-- For the full methods monograph:
-  [`../research/methods_exposition.md`](../research/methods_exposition.md)
+  [`../research/methods.md`](../research/methods.md)
 - For the probabilistic interpretation layer:
-  [`../research/probabilistic_forecasting.md`](../research/probabilistic_forecasting.md)
+  [`../research/results_and_discussion.md`](../research/results_and_discussion.md)

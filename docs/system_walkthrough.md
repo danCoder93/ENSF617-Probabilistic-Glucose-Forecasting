@@ -83,9 +83,9 @@ retain uncertainty information through quantiles.
 
 For the deeper model and tensor semantics, continue to:
 
-- [`research/materials_and_methods.md`](research/materials_and_methods.md)
-- [`research/methods_exposition.md`](research/methods_exposition.md)
-- [`research/probabilistic_forecasting.md`](research/probabilistic_forecasting.md)
+- [`research/methods.md`](research/methods.md)
+- [`research/dataset.md`](research/dataset.md)
+- [`research/results_and_discussion.md`](research/results_and_discussion.md)
 
 ## 5. What A Run Leaves Behind
 
@@ -104,8 +104,8 @@ include:
   visualizations when enabled
 
 For the exact artifact contract, use
-[`current_architecture.md`](current_architecture.md). For a concrete example of
-how to interpret one run, use
+[`reference/artifact_contract.md`](reference/artifact_contract.md). For a
+concrete example of how to interpret one run, use
 [`artifact_diagnosis.md`](artifact_diagnosis.md).
 
 ## 6. Reading Paths After This Walkthrough
@@ -115,21 +115,29 @@ how to interpret one run, use
 - [`execution_guide.md`](execution_guide.md)
 - [`cli_reference.md`](cli_reference.md)
 - [`current_architecture.md`](current_architecture.md)
-- [`artifact_diagnosis.md`](artifact_diagnosis.md)
+- [`reference/artifact_contract.md`](reference/artifact_contract.md)
+- [`artifact_diagnosis.md`](artifact_diagnosis.md) for one concrete case study
+
+### If you are here to modify the repository safely
+
+- [`reference/package_boundaries.md`](reference/package_boundaries.md)
+- [`reference/runtime_and_config_flow.md`](reference/runtime_and_config_flow.md)
+- [`reference/extension_and_constraints.md`](reference/extension_and_constraints.md)
 
 ### If you are here for research understanding
 
 - [`research/index.md`](research/index.md)
-- [`research/materials_and_methods.md`](research/materials_and_methods.md)
-- [`research/probabilistic_forecasting.md`](research/probabilistic_forecasting.md)
+- [`research/methods.md`](research/methods.md)
+- [`research/dataset.md`](research/dataset.md)
+- [`research/results_and_discussion.md`](research/results_and_discussion.md)
 - [`codebase_evolution.md`](codebase_evolution.md)
 
-### If you want the longer monograph versions
+### If you want the preserved long continuous reads
 
 - [`primer/full_primer.md`](primer/full_primer.md): preserved long-form,
   continuous systems primer
-- [`research/methods_exposition.md`](research/methods_exposition.md):
-  preserved long-form methods monograph
+- [`reference/current_architecture_reference.md`](reference/current_architecture_reference.md):
+  preserved exhaustive current-state technical reference
 
 ## 7. Chapter Map
 
@@ -162,4 +170,6 @@ experience:
 - this file is the guided system walkthrough
 - `repository_primer.md` is the chaptered primer hub
 - chapter docs provide manageable next reads
-- preserved monographs stay available for deep study
+- the chaptered research companion carries the paper-style treatment
+- the preserved continuous reads remain available when one long document is
+  genuinely the better fit

@@ -3,13 +3,14 @@
 Role: Focused current-state reference for the data pipeline, grouped batch
 contract, and fused model surface.
 Audience: Engineers, contributors, and researchers who need the exact
-data-to-model story without reading the full methods monograph first.
+data-to-model story without starting in the research-facing methods docs.
 Owns: Data lifecycle, grouped batch interface, runtime metadata binding, model
 organization, and probabilistic output contract.
 Related docs: [`../current_architecture.md`](../current_architecture.md),
 [`runtime_and_config_flow.md`](runtime_and_config_flow.md),
-[`../research/materials_and_methods.md`](../research/materials_and_methods.md),
-[`../research/methods_exposition.md`](../research/methods_exposition.md).
+[`../research/dataset.md`](../research/dataset.md),
+[`../research/methods.md`](../research/methods.md),
+[`../research/results_and_discussion.md`](../research/results_and_discussion.md).
 
 ## Data Flow
 
@@ -120,11 +121,11 @@ That boundary keeps output semantics and supervision behavior close together.
 
 ## Where To Go Deeper
 
-- [`../research/materials_and_methods.md`](../research/materials_and_methods.md)
-  for the concise paper-style methods path
-- [`../research/methods_exposition.md`](../research/methods_exposition.md) for
-  the full methods monograph
-- [`../research/probabilistic_forecasting.md`](../research/probabilistic_forecasting.md)
-  for the uncertainty and quantile interpretation lens
+- [`../research/dataset.md`](../research/dataset.md)
+  for the research-side dataset and preprocessing treatment
+- [`../research/methods.md`](../research/methods.md)
+  for the paper-style methods path and probabilistic supervision story
+- [`../research/results_and_discussion.md`](../research/results_and_discussion.md)
+  for the uncertainty and metric interpretation lens
 - [`current_architecture_reference.md`](current_architecture_reference.md) for
   the preserved full current-state reference
