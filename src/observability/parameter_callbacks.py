@@ -24,6 +24,7 @@ from __future__ import annotations
 # comments, not about changing model behavior or removing deep parameter
 # inspection.
 
+import logging
 from typing import Any
 
 import torch
@@ -31,6 +32,8 @@ from pytorch_lightning.callbacks import Callback
 
 from config import ObservabilityConfig
 from observability.logging_utils import _tensorboard_experiments, log_metrics_to_loggers
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _parameter_scalar_tag(parameter_name: str, stat_name: str) -> str:
@@ -59,6 +62,23 @@ def _parameter_histogram_tag(parameter_name: str) -> str:
 def _gradient_histogram_tag(parameter_name: str) -> str:
     """Return the canonical histogram namespace for one parameter-gradient tensor."""
     return f"debug/histograms/gradients/{parameter_name}"
+
+
+def _safe_histogram_tensor(tensor: torch.Tensor) -> torch.Tensor | None:
+    """Return a flattened CPU float tensor that is safe to hand to TensorBoard histograms."""
+    values = tensor.detach().float().reshape(-1).cpu()
+
+    if values.numel() == 0:
+        return None
+
+    finite_mask = torch.isfinite(values)
+    if not finite_mask.all():
+        values = values[finite_mask]
+
+    if values.numel() < 2:
+        return None
+
+    return values
 
 
 class ParameterScalarTelemetryCallback(Callback):
@@ -190,19 +210,47 @@ class ParameterHistogramCallback(Callback):
                 # Histogram logging is the expensive "deep dive" counterpart to
                 # parameter scalar telemetry. Scalars tell you that a tensor may
                 # be drifting; histograms show the full distribution shape.
-                add_histogram(
-                    _parameter_histogram_tag(name),
-                    parameter.detach().cpu(),
-                    global_step=trainer.global_step,
-                )
+                parameter_values = _safe_histogram_tensor(parameter)
+                if parameter_values is None:
+                    LOGGER.warning(
+                        "Skipping parameter histogram for %s: empty, non-finite, or too-small tensor",
+                        name,
+                    )
+                else:
+                    try:
+                        add_histogram(
+                            _parameter_histogram_tag(name),
+                            parameter_values,
+                            global_step=trainer.global_step,
+                        )
+                    except ValueError as exc:
+                        LOGGER.warning(
+                            "Skipping parameter histogram for %s after TensorBoard rejected it: %s",
+                            name,
+                            exc,
+                        )
 
                 # Gradient histograms are logged separately from parameter
                 # histograms so later TensorBoard inspection can distinguish
                 # "what values does this tensor currently hold?" from
                 # "what update distribution is currently reaching it?"
                 if parameter.grad is not None:
-                    add_histogram(
-                        _gradient_histogram_tag(name),
-                        parameter.grad.detach().cpu(),
-                        global_step=trainer.global_step,
-                    )
+                    gradient_values = _safe_histogram_tensor(parameter.grad)
+                    if gradient_values is None:
+                        LOGGER.warning(
+                            "Skipping gradient histogram for %s: empty, non-finite, or too-small tensor",
+                            name,
+                        )
+                    else:
+                        try:
+                            add_histogram(
+                                _gradient_histogram_tag(name),
+                                gradient_values,
+                                global_step=trainer.global_step,
+                            )
+                        except ValueError as exc:
+                            LOGGER.warning(
+                                "Skipping gradient histogram for %s after TensorBoard rejected it: %s",
+                                name,
+                                exc,
+                            )
