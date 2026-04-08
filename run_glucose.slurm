@@ -26,5 +26,5 @@ mkdir -p "${SLURM_SUBMIT_DIR}/artifacts"
 python main.py \
   --device-profile slurm-cuda \
   --batch-size 64 \
-  --max-epochs 20 \
+  --max-epochs 10 \
   --output-dir "${SLURM_SUBMIT_DIR}/artifacts/glucose_${SLURM_JOB_ID}"
