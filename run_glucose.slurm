@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=16gb
-#SBATCH --time=12:00:00
+#SBATCH --time=18:00:00
 #SBATCH --output=%x-%j.out
 
 set -euo pipefail
@@ -26,5 +26,5 @@ mkdir -p "${SLURM_SUBMIT_DIR}/artifacts"
 python main.py \
   --device-profile slurm-cuda \
   --batch-size 64 \
-  --max-epochs 1 \
+  --max-epochs 20 \
   --output-dir "${SLURM_SUBMIT_DIR}/artifacts/glucose_${SLURM_JOB_ID}"
