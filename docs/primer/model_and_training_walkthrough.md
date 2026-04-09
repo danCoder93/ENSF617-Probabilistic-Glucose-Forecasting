@@ -7,7 +7,8 @@ Owns: High-level explanation of model branches, fusion, training loop, and
 runtime-bound construction.
 Related docs: [`../system_walkthrough.md`](../system_walkthrough.md),
 [`../research/methodology.md`](../research/methodology.md),
-[`../research/results_and_discussion.md`](../research/results_and_discussion.md).
+[`../research/results.md`](../research/results.md),
+[`../research/discussion.md`](../research/discussion.md).
 
 ## 1. The Core Modeling Choice
 
@@ -56,7 +57,8 @@ In practice that means:
 - point-style metrics are still useful, but they are only one view of behavior
 
 For the uncertainty interpretation itself, continue to
-[`../research/results_and_discussion.md`](../research/results_and_discussion.md).
+[`../research/results.md`](../research/results.md) and
+[`../research/discussion.md`](../research/discussion.md).
 
 ## 5. Where Lightning Fits
 
@@ -75,4 +77,5 @@ So Lightning owns the loop mechanics, but not the whole system design.
 - For the research-facing methodology narrative:
   [`../research/methodology.md`](../research/methodology.md)
 - For the probabilistic interpretation layer:
-  [`../research/results_and_discussion.md`](../research/results_and_discussion.md)
+  [`../research/results.md`](../research/results.md) and
+  [`../research/discussion.md`](../research/discussion.md)

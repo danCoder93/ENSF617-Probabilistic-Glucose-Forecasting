@@ -1,30 +1,5 @@
 # Abstract
 
-Role: Canonical abstract section for the research companion.
-Audience: Researchers and collaborators who want the paper-style one-paragraph
-summary first.
-Owns: Abstract-level framing and the handoff to deeper research sections.
-Related docs: [`index.md`](index.md), [`introduction.md`](introduction.md),
-[`../inspiration/paper_material_notes.md`](../inspiration/paper_material_notes.md).
+## 1.1 Abstract
 
-## Status
-
-This section is intentionally placeholder-friendly. The final abstract should be
-human-authored.
-
-## Current Abstract Framing
-
-This repository implements a research-oriented probabilistic glucose
-forecasting system built around a fused Temporal Convolutional Network (TCN)
-and Temporal Fusion Transformer (TFT) architecture. The implementation is
-designed not only to train a multi-horizon forecasting model, but also to leave
-behind structured evaluation, reporting, and observability artifacts that make
-the resulting behavior diagnosable after a run. Rather than producing only
-point predictions, the model emits quantile forecasts so uncertainty can be
-represented across the prediction horizon.
-
-## Writing Notes
-
-For legacy seed prose, TODO prompts, and alternate abstract language, use:
-
-- [`../inspiration/paper_material_notes.md`](../inspiration/paper_material_notes.md)
+Forecasting blood glucose trajectories can support treatment decisions, connected diabetes devices, and routine glucose management. In this study, glucose prediction is treated as a probabilistic multi horizon forecasting task on AZT1D, a public real world dataset containing approximately 6 to 8 weeks of records for 25 individuals with type 1 diabetes [7]. Using 14 hours of encoder history sampled every 5 minutes, the model predicts the next 12 glucose values, which corresponds to a 1 hour horizon. The proposed architecture combines three causal Temporal Convolutional Network (TCN) branches, a Temporal Fusion Transformer (TFT) branch, a gated residual fusion block, and a quantile head that estimates \(q_{0.1}\), \(q_{0.5}\), and \(q_{0.9}\) at each future step. Evaluation uses a 70 / 15 / 15 within subject chronological split and reports performance by horizon, glucose range, and subject. On the held out test set, the model achieved an MAE of 20.17 mg/dL, an RMSE of 27.21 mg/dL, an overall pinball loss of 6.67, and 76.1% empirical coverage for the nominal central 80% interval. Performance was strongest at the earliest horizons, where MAE was close to 12 mg/dL, and deteriorated to 28.35 mg/dL at 60 minutes. The largest weakness appeared below 70 mg/dL, where MAE rose to 39.05 mg/dL and coverage fell to 20.2%, indicating strong positive bias and weak calibration in low glucose conditions. These findings suggest that the fused TCN and TFT design is a credible short range forecasting baseline, but substantial work remains on calibration and hypoglycemia sensitivity.

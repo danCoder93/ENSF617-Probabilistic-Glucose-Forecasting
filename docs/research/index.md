@@ -1,55 +1,17 @@
 # Research Companion
 
-Role: Landing page for the repository's academic and paper-oriented material.
-Audience: Researchers, collaborators, and human authors preparing future
-research-facing outputs.
-Owns: Canonical paper-style research section map, reading order, and links to
-placeholder-friendly paper notes.
-Related docs: [`../../README.md`](../../README.md),
-[`../system_walkthrough.md`](../system_walkthrough.md),
-[`dataset.md`](dataset.md),
-[`methodology.md`](methodology.md),
-[`../inspiration/paper_material_notes.md`](../inspiration/paper_material_notes.md).
+This directory presents the project in report order. The documents are written to read like a compact academic paper while remaining grounded in the saved artifacts under `artifacts/main_run/`.
 
-This directory mirrors the section flow of a conventional paper while staying
-connected to the repository's technical documentation. It is the right place to
-read the project in research form, or to stage placeholder material that will
-later be rewritten into a human-authored manuscript.
-
-## Canonical Research Section Order
+## Reading Order
 
 1. [`abstract.md`](abstract.md)
 2. [`introduction.md`](introduction.md)
-3. [`related_work.md`](related_work.md)
+3. [`dataset.md`](dataset.md)
 4. [`methodology.md`](methodology.md)
-5. [`results_and_discussion.md`](results_and_discussion.md)
-6. [`conclusions.md`](conclusions.md)
-7. [`references.md`](references.md)
+5. [`results.md`](results.md)
+6. [`discussion.md`](discussion.md)
+7. [`limitations_and_future_work.md`](limitations_and_future_work.md)
+8. [`conclusions.md`](conclusions.md)
+9. [`references.md`](references.md)
 
-The placeholder and inspiration material for later human writing lives in:
-
-- [`../inspiration/paper_material_notes.md`](../inspiration/paper_material_notes.md)
-
-Supporting research-side deep reads live alongside the paper-order sections:
-
-- [`dataset.md`](dataset.md) for the
-  dataset context and full data-handling path
-
-## Related Technical Reads
-
-- [`../current_architecture.md`](../current_architecture.md) for canonical
-  present-state implementation facts
-- [`../system_walkthrough.md`](../system_walkthrough.md) for the guided
-  system-level walkthrough
-- [`dataset.md`](dataset.md) for the
-  research-side dataset and preprocessing treatment
-- [`methodology.md`](methodology.md) for the model, probabilistic supervision, and
-  training story
-- [`results_and_discussion.md`](results_and_discussion.md) for metric and
-  uncertainty interpretation
-
-## Current Status
-
-Some files in this directory are intentionally provisional. That is expected:
-the structure is being preserved now so later human writing has a clear home,
-without pretending the manuscript is already finished.
+For implementation details that sit outside the paper narrative, the most useful companion documents are [`../system_walkthrough.md`](../system_walkthrough.md) and [`../current_architecture.md`](../current_architecture.md).

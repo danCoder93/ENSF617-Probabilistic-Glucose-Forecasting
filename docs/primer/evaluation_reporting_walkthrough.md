@@ -8,7 +8,8 @@ surfaces.
 Related docs: [`../system_walkthrough.md`](../system_walkthrough.md),
 [`../artifact_diagnosis.md`](../artifact_diagnosis.md),
 [`../current_architecture.md`](../current_architecture.md),
-[`../research/results_and_discussion.md`](../research/results_and_discussion.md).
+[`../research/results.md`](../research/results.md),
+[`../research/discussion.md`](../research/discussion.md).
 
 ## 1. Why This Layer Exists
 
@@ -77,4 +78,6 @@ A practical inspection order is:
 - For a concrete case study:
   [`../artifact_diagnosis.md`](../artifact_diagnosis.md)
 - For the research-facing summary of experimental evidence:
-  [`../research/results_and_discussion.md`](../research/results_and_discussion.md)
+  [`../research/results.md`](../research/results.md)
+- For the research-facing interpretation of those results:
+  [`../research/discussion.md`](../research/discussion.md)

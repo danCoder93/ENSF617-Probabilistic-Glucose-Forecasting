@@ -85,7 +85,8 @@ For the deeper model and tensor semantics, continue to:
 
 - [`research/methodology.md`](research/methodology.md)
 - [`research/dataset.md`](research/dataset.md)
-- [`research/results_and_discussion.md`](research/results_and_discussion.md)
+- [`research/results.md`](research/results.md)
+- [`research/discussion.md`](research/discussion.md)
 
 ## 5. What A Run Leaves Behind
 
@@ -129,7 +130,8 @@ concrete example of how to interpret one run, use
 - [`research/index.md`](research/index.md)
 - [`research/methodology.md`](research/methodology.md)
 - [`research/dataset.md`](research/dataset.md)
-- [`research/results_and_discussion.md`](research/results_and_discussion.md)
+- [`research/results.md`](research/results.md)
+- [`research/discussion.md`](research/discussion.md)
 - [`codebase_evolution.md`](codebase_evolution.md)
 
 ### If you want the preserved long continuous reads

@@ -138,9 +138,28 @@ docs when you want broader context:
 
 - [docs/research/dataset.md](docs/research/dataset.md)
 - [docs/research/methodology.md](docs/research/methodology.md)
-- [docs/research/results_and_discussion.md](docs/research/results_and_discussion.md)
+- [docs/research/results.md](docs/research/results.md)
+- [docs/research/discussion.md](docs/research/discussion.md)
 - [docs/codebase_evolution.md](docs/codebase_evolution.md)
 - [docs/history/index.md](docs/history/index.md)
 
 Code is licensed under [LICENSE](LICENSE). Dataset terms may differ from code
 license terms and should be validated against the dataset source.
+
+## Generative AI Use Disclosure
+
+This project used generative AI tools, including ChatGPT, as user-directed development assistants. The boundary of that use is summarized below.
+
+Human-directed work and non-AI influences:
+
+- problem framing, literature review, and interpretation of the papers in [`docs/publications/`](docs/publications/)
+- the decision to pursue the fused TCN + TFT + quantile forecasting design, together with final review and acceptance or rejection of suggested changes
+- PyTorch Lightning tutorials, PyTorch documentation, CUDA and Apple MPS guidance, and early architectural inspiration for parts of `src/models/`, `src/train.py`, and the dataset/DataModule structure from [`ENSF617-GarbageClassifier`](https://github.com/danCoder93/ENSF617-GarbageClassifier)
+
+AI-assisted work:
+
+- AI was used as an implementation assistant while drafting, revising, and refactoring parts of the codebase and documentation, including the discussion-led integration of the GRN-based fusion block.
+- After the forecasting direction was chosen, AI also helped build and refine the surrounding engineering structure, including `src/config/`, runtime and environment handling, tests, reporting, and hardware-aware execution paths.
+- AI, used alongside PyTorch, Lightning, CUDA, and Apple MPS documentation, helped speed up backend setup, optimization, and debugging across CPU, NVIDIA CUDA, and Apple MPS environments.
+
+Generative AI was therefore used to accelerate implementation and iteration, while the project-specific modeling direction and research rationale remained human-directed.

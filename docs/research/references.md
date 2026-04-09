@@ -1,10 +1,10 @@
 # References
 
-This section lists the literature and source materials cited throughout the research companion. It includes the numbered IEEE-style references used in the research docs together with the primary implementation sources examined during the study.
+The numbered citations used throughout this report are listed below. Local copies of the cited papers are preserved under `docs/publications/`.
 
 ## Core Literature
 
-The following bibliography anchors the current research companion and uses numbered IEEE-style citations. Local copies of the cited papers are preserved under `docs/publications/`.
+The following bibliography provides the numbered IEEE style citations used in the report.
 
 [1] B. Lim, S. O. Arik, N. Loeff, and T. Pfister, "Temporal Fusion Transformers for Interpretable Multi-horizon Time Series Forecasting," *International Journal of Forecasting*, vol. 37, no. 4, pp. 1748-1764, 2021, doi: 10.1016/j.ijforecast.2021.03.012. Local copy: [`../publications/TFT.pdf`](../publications/TFT.pdf).
 
@@ -22,7 +22,7 @@ The following bibliography anchors the current research companion and uses numbe
 
 ## Repository Sources
 
-The study is also grounded in the present implementation. The most important source files examined are:
+Implementation claims in the report were checked against the following source files:
 
 - `README.md`
 - `defaults.py`
@@ -44,22 +44,4 @@ The study is also grounded in the present implementation. The most important sou
 - `src/train.py`
 - `src/workflows/training.py`
 
-Those files provide the implementation facts behind the research-facing claims about grouped inputs, late fusion, quantile supervision, runtime binding, and artifact-rich execution.
-
-## Dataset Source
-
-The dataset discussion is aligned to the AZT1D source materials preserved in this project:
-
-- [`../publications/azt1d-dataset.pdf`](../publications/azt1d-dataset.pdf)
-
-The project configuration also points to the public AZT1D release URL through the data settings.
-
-## Scope Note
-
-This references page serves as the single numbered citation source used by the research-facing docs.
-
-## Reading Guide
-
-- Use [`dataset.md`](dataset.md) when you want the data provenance and preprocessing story.
-- Use [`methodology.md`](methodology.md) when you want the model, loss, and training story.
-- Use [`related_work.md`](related_work.md) when you want the paper-style literature-positioning surface.
+These files provide the implementation basis for the claims made in the dataset, methodology, and results sections.

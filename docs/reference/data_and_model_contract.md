@@ -10,7 +10,8 @@ Related docs: [`../current_architecture.md`](../current_architecture.md),
 [`runtime_and_config_flow.md`](runtime_and_config_flow.md),
 [`../research/dataset.md`](../research/dataset.md),
 [`../research/methodology.md`](../research/methodology.md),
-[`../research/results_and_discussion.md`](../research/results_and_discussion.md).
+[`../research/results.md`](../research/results.md),
+[`../research/discussion.md`](../research/discussion.md).
 
 ## Data Flow
 
@@ -125,7 +126,9 @@ That boundary keeps output semantics and supervision behavior close together.
   for the research-side dataset and preprocessing treatment
 - [`../research/methodology.md`](../research/methodology.md)
   for the paper-style methods path and probabilistic supervision story
-- [`../research/results_and_discussion.md`](../research/results_and_discussion.md)
+- [`../research/results.md`](../research/results.md)
+  for the reported quantitative outcomes
+- [`../research/discussion.md`](../research/discussion.md)
   for the uncertainty and metric interpretation lens
 - [`current_architecture_reference.md`](current_architecture_reference.md) for
   the preserved full current-state reference

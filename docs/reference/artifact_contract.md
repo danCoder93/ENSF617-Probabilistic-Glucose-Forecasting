@@ -8,7 +8,8 @@ Owns: Artifact flow, output locations, and the distinction between runtime
 observability, evaluation, and post-run reporting.
 Related docs: [`../current_architecture.md`](../current_architecture.md),
 [`../artifact_diagnosis.md`](../artifact_diagnosis.md),
-[`../research/results_and_discussion.md`](../research/results_and_discussion.md),
+[`../research/results.md`](../research/results.md),
+[`../research/discussion.md`](../research/discussion.md),
 [`current_architecture_reference.md`](current_architecture_reference.md).
 
 ## Runtime Artifact Flow
@@ -104,7 +105,9 @@ A practical inspection order is:
 
 - [`../artifact_diagnosis.md`](../artifact_diagnosis.md) for a concrete run
   interpretation case study
-- [`../research/results_and_discussion.md`](../research/results_and_discussion.md)
-  for the paper-style evidence path
+- [`../research/results.md`](../research/results.md) for the paper-style
+  evidence path
+- [`../research/discussion.md`](../research/discussion.md) for the paper-style
+  interpretation path
 - [`current_architecture_reference.md`](current_architecture_reference.md) for
   the preserved long-form reference
