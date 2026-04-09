@@ -137,7 +137,7 @@ dataset, methods, and discussion sections, then use the evolution and history
 docs when you want broader context:
 
 - [docs/research/dataset.md](docs/research/dataset.md)
-- [docs/research/methods.md](docs/research/methods.md)
+- [docs/research/methodology.md](docs/research/methodology.md)
 - [docs/research/results_and_discussion.md](docs/research/results_and_discussion.md)
 - [docs/codebase_evolution.md](docs/codebase_evolution.md)
 - [docs/history/index.md](docs/history/index.md)

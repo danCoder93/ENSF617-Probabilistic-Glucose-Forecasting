@@ -6,7 +6,7 @@ narrative.
 Owns: Preserved README paper scaffolding, legacy seed prose, literature
 tracker prompts, and writing checklists.
 Related docs: [`../repository_primer.md`](../repository_primer.md),
-[`../research/methods.md`](../research/methods.md),
+[`../research/methodology.md`](../research/methodology.md),
 [`../artifact_diagnosis.md`](../artifact_diagnosis.md),
 [`../research/index.md`](../research/index.md),
 [`observability_reporting_case_study.md`](observability_reporting_case_study.md),

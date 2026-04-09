@@ -83,7 +83,7 @@ retain uncertainty information through quantiles.
 
 For the deeper model and tensor semantics, continue to:
 
-- [`research/methods.md`](research/methods.md)
+- [`research/methodology.md`](research/methodology.md)
 - [`research/dataset.md`](research/dataset.md)
 - [`research/results_and_discussion.md`](research/results_and_discussion.md)
 
@@ -127,7 +127,7 @@ concrete example of how to interpret one run, use
 ### If you are here for research understanding
 
 - [`research/index.md`](research/index.md)
-- [`research/methods.md`](research/methods.md)
+- [`research/methodology.md`](research/methodology.md)
 - [`research/dataset.md`](research/dataset.md)
 - [`research/results_and_discussion.md`](research/results_and_discussion.md)
 - [`codebase_evolution.md`](codebase_evolution.md)

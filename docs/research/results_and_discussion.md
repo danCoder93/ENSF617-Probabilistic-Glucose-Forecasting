@@ -5,7 +5,7 @@ Audience: Researchers and collaborators translating current artifact evidence
 into manuscript-ready findings later.
 Owns: Metric interpretation, uncertainty interpretation, strengths, risks, and
 discussion framing for the present implementation.
-Related docs: [`methods.md`](methods.md), [`conclusions.md`](conclusions.md),
+Related docs: [`methodology.md`](methodology.md), [`conclusions.md`](conclusions.md),
 [`../artifact_diagnosis.md`](../artifact_diagnosis.md),
 [`../inspiration/paper_material_notes.md`](../inspiration/paper_material_notes.md).
 
@@ -182,7 +182,7 @@ architectural contribution.
 
 Until the final manuscript narrative is written, the best supporting path is:
 
-1. [`methods.md`](methods.md)
+1. [`methodology.md`](methodology.md)
 2. [`../artifact_diagnosis.md`](../artifact_diagnosis.md)
 3. [`conclusions.md`](conclusions.md)
 4. [`../inspiration/paper_material_notes.md`](../inspiration/paper_material_notes.md)

@@ -11,7 +11,7 @@ Related docs: [`../../README.md`](../../README.md),
 [`../codebase_evolution.md`](../codebase_evolution.md),
 [`../repository_primer.md`](../repository_primer.md),
 [`../research/dataset.md`](../research/dataset.md),
-[`../research/methods.md`](../research/methods.md).
+[`../research/methodology.md`](../research/methodology.md).
 
 If the root `README.md` is the interface to the repository, the recommended
 next reads are now [`../system_walkthrough.md`](../system_walkthrough.md) and

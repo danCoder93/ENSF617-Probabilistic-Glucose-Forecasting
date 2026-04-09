@@ -6,7 +6,7 @@ next-step framing in a paper-style structure.
 Owns: Closing synthesis, scientific framing, and future-facing conclusion
 guidance.
 Related docs: [`results_and_discussion.md`](results_and_discussion.md),
-[`methods.md`](methods.md),
+[`methodology.md`](methodology.md),
 [`../inspiration/paper_material_notes.md`](../inspiration/paper_material_notes.md).
 
 ## Current Closing Framing
@@ -102,7 +102,7 @@ open.
 
 ## Follow-On Material
 
-- methods and technical framing: [`methods.md`](methods.md)
+- methods and technical framing: [`methodology.md`](methodology.md)
 - evidence and discussion surfaces: [`results_and_discussion.md`](results_and_discussion.md)
 - preserved prompts and legacy section seeds:
   [`../inspiration/paper_material_notes.md`](../inspiration/paper_material_notes.md)
