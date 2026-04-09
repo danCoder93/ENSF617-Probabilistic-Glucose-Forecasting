@@ -1,6 +1,6 @@
 # References
 
-This file is the canonical bibliography and provenance page for the research companion. It owns the numbered IEEE-style citations used across the research docs and the repository source trail behind them. Related docs: [`index.md`](index.md), [`dataset.md`](dataset.md), [`methodology.md`](methodology.md), and [`related_work.md`](related_work.md).
+This section lists the literature and source materials cited throughout the research companion. It includes the numbered IEEE-style references used in the research docs together with the primary implementation sources examined during the study.
 
 ## Core Literature
 
@@ -22,7 +22,7 @@ The following bibliography anchors the current research companion and uses numbe
 
 ## Repository Sources
 
-The research companion is also grounded in the present repository state. The most important implementation sources examined are:
+The study is also grounded in the present implementation. The most important source files examined are:
 
 - `README.md`
 - `defaults.py`
@@ -48,15 +48,15 @@ Those files provide the implementation facts behind the research-facing claims a
 
 ## Dataset Source
 
-The current research notes are aligned to the AZT1D dataset materials preserved in this repository:
+The dataset discussion is aligned to the AZT1D source materials preserved in this project:
 
 - [`../publications/azt1d-dataset.pdf`](../publications/azt1d-dataset.pdf)
 
-The repository defaults also point to the public AZT1D release URL through the data configuration.
+The project configuration also points to the public AZT1D release URL through the data settings.
 
 ## Scope Note
 
-This file is the canonical bibliography and provenance page for the research companion. It should remain the single numbered citation source used by the research-facing docs.
+This references page serves as the single numbered citation source used by the research-facing docs.
 
 ## Reading Guide
 
