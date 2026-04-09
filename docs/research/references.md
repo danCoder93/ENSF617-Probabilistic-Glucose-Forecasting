@@ -5,7 +5,7 @@ Audience: Readers who want the source trail behind the research-facing notes.
 Owns: Repository source mapping, external literature anchors, and dataset
 source pointers.
 Related docs: [`index.md`](index.md), [`dataset.md`](dataset.md),
-[`methods.md`](methods.md), [`related_work.md`](related_work.md).
+[`methodology.md`](methodology.md), [`related_work.md`](related_work.md).
 
 ## Current Repository-Aligned Sources
 
@@ -71,7 +71,7 @@ required by the target venue.
 
 - Use [`dataset.md`](dataset.md) when you want the data provenance and
   preprocessing story.
-- Use [`methods.md`](methods.md) when you want the model, loss, and training
+- Use [`methodology.md`](methodology.md) when you want the model, loss, and training
   story.
 - Use [`related_work.md`](related_work.md) when you want the paper-style
   literature-positioning surface.

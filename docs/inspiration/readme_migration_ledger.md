@@ -21,7 +21,7 @@ Related docs: [`../../README.md`](../../README.md), [`paper_material_notes.md`](
 | Related Work Placeholder | `docs/inspiration/paper_material_notes.md` | Preserved as prompt material |
 | Bibliography Placeholder | `docs/inspiration/paper_material_notes.md` | Preserved as bibliography tracker |
 | Visual Architecture Guide | `README.md` sections 1 and 6 + `docs/assets/` | Preserved with one lead visual and deep links |
-| Dataset And Data Contract | `README.md` section 5 + `docs/research/dataset.md` + `docs/research/methods.md` + `docs/repository_primer.md` + `docs/current_architecture.md` | Preserved with condensed README summary and research/doc detail |
+| Dataset And Data Contract | `README.md` section 5 + `docs/research/dataset.md` + `docs/research/methodology.md` + `docs/repository_primer.md` + `docs/current_architecture.md` | Preserved with condensed README summary and research/doc detail |
 | Dataset Access/Governance/Licensing Placeholder | `docs/inspiration/paper_material_notes.md` | Preserved as verified-facts prompt set |
 | Observability And Reporting Architecture | `README.md` section 4 + `docs/current_architecture.md` | Preserved with practical emphasis and canonical detail |
 | Model Overview | `README.md` section 5 + model deep docs | Preserved with high-level README summary and deep explanation |

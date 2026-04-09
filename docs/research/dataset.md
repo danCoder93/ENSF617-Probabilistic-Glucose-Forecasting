@@ -7,7 +7,7 @@ handling story without leaving the research folder.
 Owns: Dataset provenance, canonical table semantics, preprocessing logic,
 feature roles, sequence construction, and the batch interface emitted to the
 model.
-Related docs: [`introduction.md`](introduction.md), [`methods.md`](methods.md),
+Related docs: [`introduction.md`](introduction.md), [`methodology.md`](methodology.md),
 [`results_and_discussion.md`](results_and_discussion.md),
 [`../primer/data_pipeline_walkthrough.md`](../primer/data_pipeline_walkthrough.md),
 [`references.md`](references.md).
@@ -433,7 +433,7 @@ dataset, and that difference is exactly why the separation is useful.
 
 ## Best Next Reads
 
-- Model, loss, training, and runtime story: [`methods.md`](methods.md)
+- Model, loss, training, and runtime story: [`methodology.md`](methodology.md)
 - Metric interpretation and design risks:
   [`results_and_discussion.md`](results_and_discussion.md)
 - Dataset source trail and provenance notes: [`references.md`](references.md)

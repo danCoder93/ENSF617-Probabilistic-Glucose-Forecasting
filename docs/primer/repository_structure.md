@@ -68,7 +68,7 @@ Read:
 Read:
 
 - [`model_and_training_walkthrough.md`](model_and_training_walkthrough.md)
-- [`../research/methods.md`](../research/methods.md)
+- [`../research/methodology.md`](../research/methodology.md)
 - [`../research/results_and_discussion.md`](../research/results_and_discussion.md)
 
 ### If you care about outputs and interpretation

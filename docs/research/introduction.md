@@ -6,7 +6,7 @@ motivation, and contribution shape.
 Owns: Problem framing, scientific objective, and the high-level forecasting lens
 for the repository.
 Related docs: [`abstract.md`](abstract.md), [`dataset.md`](dataset.md),
-[`methods.md`](methods.md),
+[`methodology.md`](methodology.md),
 [`../inspiration/paper_material_notes.md`](../inspiration/paper_material_notes.md).
 
 ## Problem Framing
@@ -138,7 +138,7 @@ levels of abstraction.
 
 This introduction is the research-facing overview. For the dataset and
 preprocessing story, continue to [`dataset.md`](dataset.md). For the model,
-loss, training, and runtime story, continue to [`methods.md`](methods.md). For
+loss, training, and runtime story, continue to [`methodology.md`](methodology.md). For
 richer seed prose, legacy framing, and paper-writing prompts, continue to:
 
 - [`../inspiration/paper_material_notes.md`](../inspiration/paper_material_notes.md)

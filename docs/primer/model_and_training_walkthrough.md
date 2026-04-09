@@ -6,7 +6,7 @@ the research-facing methods docs.
 Owns: High-level explanation of model branches, fusion, training loop, and
 runtime-bound construction.
 Related docs: [`../system_walkthrough.md`](../system_walkthrough.md),
-[`../research/methods.md`](../research/methods.md),
+[`../research/methodology.md`](../research/methodology.md),
 [`../research/results_and_discussion.md`](../research/results_and_discussion.md).
 
 ## 1. The Core Modeling Choice
@@ -73,6 +73,6 @@ So Lightning owns the loop mechanics, but not the whole system design.
 ## 6. Best Next Reads
 
 - For the research-facing methodology narrative:
-  [`../research/methods.md`](../research/methods.md)
+  [`../research/methodology.md`](../research/methodology.md)
 - For the probabilistic interpretation layer:
   [`../research/results_and_discussion.md`](../research/results_and_discussion.md)

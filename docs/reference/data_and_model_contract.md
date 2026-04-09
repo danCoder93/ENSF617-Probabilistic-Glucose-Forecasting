@@ -9,7 +9,7 @@ organization, and probabilistic output contract.
 Related docs: [`../current_architecture.md`](../current_architecture.md),
 [`runtime_and_config_flow.md`](runtime_and_config_flow.md),
 [`../research/dataset.md`](../research/dataset.md),
-[`../research/methods.md`](../research/methods.md),
+[`../research/methodology.md`](../research/methodology.md),
 [`../research/results_and_discussion.md`](../research/results_and_discussion.md).
 
 ## Data Flow
@@ -123,7 +123,7 @@ That boundary keeps output semantics and supervision behavior close together.
 
 - [`../research/dataset.md`](../research/dataset.md)
   for the research-side dataset and preprocessing treatment
-- [`../research/methods.md`](../research/methods.md)
+- [`../research/methodology.md`](../research/methodology.md)
   for the paper-style methods path and probabilistic supervision story
 - [`../research/results_and_discussion.md`](../research/results_and_discussion.md)
   for the uncertainty and metric interpretation lens

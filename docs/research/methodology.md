@@ -5,7 +5,7 @@ The method incorporates the strengths of temporal convolution neural network and
 
 Torch-TCN library codebase is used as starting point for TCN and the decoder is stripped off to output learned latent fetures. NVIDIA deep learning excercise libary is used as starting point for TFT and quantile output prediction is stripped off to output latent decoded features. Grn is extracted from TFT and is generalized to be used within TFT and Fused Model.
 
-[TCN, TFT, GRN, Fused model diagrams go here]
+[TCN, TFT, GRN, Fused model diagrams in docs/assets go here]
 
 The data for glucose represents a non-gaussian distributions, which is the reason an uncertainity-aware future prediction solution is required to provide confidence interval and boundary decisions
 

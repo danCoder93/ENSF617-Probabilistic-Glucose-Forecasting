@@ -8,7 +8,7 @@ guided level.
 Related docs: [`../system_walkthrough.md`](../system_walkthrough.md),
 [`../current_architecture.md`](../current_architecture.md),
 [`../research/dataset.md`](../research/dataset.md),
-[`../research/methods.md`](../research/methods.md).
+[`../research/methodology.md`](../research/methodology.md).
 
 ## 1. Why The Data Layer Matters Here
 
@@ -77,6 +77,6 @@ layer runs.
 - For the concise research-facing version:
   [`../research/dataset.md`](../research/dataset.md)
 - For the companion methods story:
-  [`../research/methods.md`](../research/methods.md)
+  [`../research/methodology.md`](../research/methodology.md)
 - For exact present-state package boundaries:
   [`../current_architecture.md`](../current_architecture.md)
